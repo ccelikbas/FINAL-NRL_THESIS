@@ -102,7 +102,7 @@ class StrikeEA2DEnv(EnvBase):
         self._set_seed(seed)
 
         # dimensions
-        self.act_dim   = 3
+        self.act_dim   = 6  # 3 velocity accelerations + 3 heading accelerations, each discrete: -1, 0, +1
         self.obs_dim   = self._compute_obs_dim()
         self.state_dim = self._compute_state_dim()
 
@@ -115,6 +115,8 @@ class StrikeEA2DEnv(EnvBase):
         B, A, T, R = num_envs, self.n_agents, n_targets, n_radars
         self.agent_pos     = torch.zeros(B, A, 2, device=self.device)
         self.agent_heading = torch.zeros(B, A,    device=self.device)
+        self.agent_speed   = torch.zeros(B, A,    device=self.device)  # Current velocity magnitude
+        self.agent_heading_rate = torch.zeros(B, A, device=self.device)  # Current angular velocity
         self.agent_alive   = torch.ones(B, A,     dtype=torch.bool, device=self.device)
         self.target_pos    = torch.zeros(B, T, 2, device=self.device)
         self.target_alive  = torch.ones(B, T,     dtype=torch.bool, device=self.device)
@@ -133,8 +135,9 @@ class StrikeEA2DEnv(EnvBase):
         return seed
 
     def _compute_obs_dim(self) -> int:
-        # own(7) + nearest_target(3) + nearest_radar(2) + nearest_mate(3) = 15
-        return 15
+        # own(3) + other_agents_visible(n_agents-1, each with x,y,angle,alive=4) + radars(2 each) + targets(2 each)
+        # = 3 + (n_agents-1)*4 + n_radars*2 + n_targets*2
+        return 3 + (self.n_agents - 1) * 4 + self.n_radars * 2 + self.n_targets * 2
 
     def _compute_state_dim(self) -> int:
         A, T, R = self.n_agents, self.n_targets, self.n_radars
@@ -148,7 +151,7 @@ class StrikeEA2DEnv(EnvBase):
         B = self.batch_size
 
         obs_spec   = Unbounded(shape=B + torch.Size([self.n_agents, self.obs_dim]),   dtype=torch.float32, device=self.device)
-        act_spec   = Bounded(low=-1.0, high=1.0, shape=B + torch.Size([self.n_agents, self.act_dim]), dtype=torch.float32, device=self.device)
+        act_spec   = Categorical(n=3, shape=B + torch.Size([self.n_agents, self.act_dim]), dtype=torch.int64, device=self.device)
         rew_spec   = Unbounded(shape=B + torch.Size([self.n_agents, 1]),              dtype=torch.float32, device=self.device)
         state_spec = Unbounded(shape=B + torch.Size([self.state_dim]),                dtype=torch.float32, device=self.device)
         done_leaf  = Categorical(n=2, shape=B + torch.Size([1]),                      dtype=torch.bool,    device=self.device)
@@ -179,6 +182,8 @@ class StrikeEA2DEnv(EnvBase):
 
         self.agent_pos     = self.low + (self.high - self.low) * torch.rand(B, A, 2, device=self.device)
         self.agent_heading = (2.0 * math.pi) * torch.rand(B, A, device=self.device)
+        self.agent_speed   = torch.zeros(B, A, device=self.device)  # Start with zero velocity
+        self.agent_heading_rate = torch.zeros(B, A, device=self.device)  # Start with zero angular velocity
         self.agent_alive   = torch.ones(B, A, dtype=torch.bool, device=self.device)
         self.target_pos    = self.low + (self.high - self.low) * torch.rand(B, T, 2, device=self.device)
         self.target_alive  = torch.ones(B, T, dtype=torch.bool, device=self.device)
@@ -194,40 +199,59 @@ class StrikeEA2DEnv(EnvBase):
         return td
 
     def _step(self, tensordict: TensorDict) -> TensorDict:
-        action = tensordict.get(self._action_key)  # [B, A, 3]
+        action = tensordict.get(self._action_key)  # [B, A, 6] discrete actions in {0, 1, 2} -> {-1, 0, +1}
         B, A, _ = action.shape
         rp = self.reward_params
-
-        # ---- kinematics ----
-        throttle  = (action[..., 0].clamp(-1, 1) + 1.0) * 0.5   # [B, A]  0→1
-        v_min_vec = torch.zeros(self.n_agents, device=self.device)
-        v_min_vec[: self.n_strikers] = float(self.striker.v_min)
-        v_min_vec[self.n_strikers:]  = float(self.jammer.v_min)
-        v_min  = v_min_vec.unsqueeze(0).expand(B, -1)
-        speed  = throttle * (self.v_max - v_min) + v_min
-        dpsi   = action[..., 1].clamp(-1, 1) * self.dpsi_max
-        mode   = action[..., 2]
-
-        alive  = self.agent_alive
-        speed  = speed * alive
-        dpsi   = dpsi   * alive
-
-        self.agent_heading = (self.agent_heading + dpsi) % (2.0 * math.pi)
-        dx = speed * torch.cos(self.agent_heading) * self.dt
-        dy = speed * torch.sin(self.agent_heading) * self.dt
+        
+        # Convert discrete actions {0, 1, 2} to accelerations {-1, 0, +1}
+        # action[..., 0:3]: velocity accelerations (or used as needed)
+        # action[..., 3:6]: heading/angular accelerations (or used as needed)
+        acc = action.float() - 1.0  # Convert {0,1,2} to {-1,0,+1}  [B, A, 6]
+        
+        alive = self.agent_alive.float()
+        
+        # ---- Velocity dynamics (discrete acceleration model) ----
+        # Update velocity based on acceleration (first 3 actions combined or first action as primary)
+        # For simplicity, use first action as main velocity acceleration
+        v_accel = acc[..., 0]  # [B, A] acceleration in {-1, 0, +1}
+        
+        # Set acceleration magnitude (you can tune this)
+        accel_magnitude = 0.01  # per step acceleration when action is ±1
+        
+        # Apply acceleration to speed
+        self.agent_speed = (self.agent_speed + v_accel * accel_magnitude).clamp(0.0, self.v_max)
+        self.agent_speed = self.agent_speed * alive  # Dead agents don't move
+        
+        # ---- Heading dynamics (discrete angular acceleration) ----
+        # Use last action as heading angular acceleration
+        h_accel = acc[..., -1]  # [B, A] angular acceleration in {-1, 0, +1}
+        
+        # Angular acceleration magnitude
+        h_accel_magnitude = self.dpsi_max * 0.1  # Fraction of max heading rate per step
+        
+        # Apply angular acceleration
+        self.agent_heading_rate = (self.agent_heading_rate + h_accel * h_accel_magnitude).clamp(-self.dpsi_max, self.dpsi_max)
+        self.agent_heading_rate = self.agent_heading_rate * alive  # Dead agents don't rotate
+        
+        # Update heading based on heading rate
+        self.agent_heading = (self.agent_heading + self.agent_heading_rate) % (2.0 * math.pi)
+        
+        # Update position based on speed and heading
+        dx = self.agent_speed * torch.cos(self.agent_heading) * self.dt
+        dy = self.agent_speed * torch.sin(self.agent_heading) * self.dt
         self.agent_pos = (self.agent_pos + torch.stack([dx, dy], dim=-1)).clamp(self.low, self.high)
 
-        # ---- EA / jamming ----
+        # ---- EA / jamming: Jammers automatically jam radars within range ----
         radar_eff_range = torch.full((B, self.n_radars), self.radar_range, device=self.device)
         jammer_idx = torch.arange(self.n_strikers, self.n_agents, device=self.device)
 
         if jammer_idx.numel() > 0:
-            jammer_on  = (mode[:, jammer_idx] > 0.0) & alive[:, jammer_idx]
+            # Jammers are always "on" if within jam radius - no action needed
             rel_jr     = self.radar_pos[:, None, :, :] - self.agent_pos[:, jammer_idx, None, :]  # [B,nj,R,2]
-            jam_mask   = self.jammer.jams_radar(rel_jr) & jammer_on[:, :, None]                  # [B,nj,R]
-            any_jam    = jam_mask.any(dim=1)                                                      # [B,R]
-            jam_active = jam_mask.any(dim=2)                                                      # [B,nj]
-            jam_active_count = jam_active.sum(dim=1).float()                                      # [B]
+            jam_mask   = self.jammer.jams_radar(rel_jr) & alive[:, jammer_idx, None]  # [B,nj,R]
+            any_jam    = jam_mask.any(dim=1)                                           # [B,R]
+            jam_active = jam_mask.any(dim=2)                                           # [B,nj]
+            jam_active_count = jam_active.sum(dim=1).float()                           # [B]
             team_jam_reward  = jam_active_count * float(rp.jamming)
             radar_eff_range  = torch.where(
                 any_jam,
@@ -243,21 +267,22 @@ class StrikeEA2DEnv(EnvBase):
         rel_ar = self.radar_pos[:, None, :, :] - self.agent_pos[:, :, None, :]   # [B,A,R,2]
         dist_ar = torch.linalg.norm(rel_ar, dim=-1)                               # [B,A,R]
         in_radar = dist_ar <= radar_eff_range[:, None, :]
-        killed   = in_radar.any(dim=-1) & alive
+        killed   = in_radar.any(dim=-1) & alive.bool()
         self.agent_alive = self.agent_alive & (~killed)
 
-        # ---- striker kinetic kills ----
+        # ---- striker kinetic kills: Strikers automatically strike if target in engagement zone ----
         kill_t     = torch.zeros(B, self.n_targets, dtype=torch.bool, device=self.device)
         striker_idx = torch.arange(0, self.n_strikers, device=self.device)
-        can         = None
 
         if striker_idx.numel() > 0:
-            striker_on = (mode[:, striker_idx] > 0.0) & self.agent_alive[:, striker_idx]
+            # Strikers automatically strike (no action needed) - always attempt to engage
             rel_st     = self.target_pos[:, None, :, :] - self.agent_pos[:, striker_idx, None, :]  # [B,ns,T,2]
             can        = self.striker.can_engage(rel_st, self.agent_heading[:, striker_idx][:, :, None])
-            can        = can & striker_on[:, :, None] & self.target_alive[:, None, :]
+            can        = can & self.agent_alive[:, striker_idx, None] & self.target_alive[:, None, :]
             kill_t     = can.any(dim=1)
             self.target_alive = self.target_alive & (~kill_t)
+        else:
+            can = None
 
         # ---- shaping rewards ----
         pos        = self.agent_pos
@@ -340,55 +365,65 @@ class StrikeEA2DEnv(EnvBase):
         return torch.cat([pos_a, head_sc, alive_a, pos_t, alive_t, pos_r], dim=-1)
 
     def _build_local_obs(self) -> torch.Tensor:
-        B, A = self.num_envs, self.n_agents
-
-        # --- own state (7) ---
-        pos   = self.agent_pos
-        h     = self.agent_heading
-        alive = self.agent_alive.float().unsqueeze(-1)
-        hs    = torch.sin(h).unsqueeze(-1)
-        hc    = torch.cos(h).unsqueeze(-1)
-        type_oh = torch.zeros(B, A, 2, device=self.device)
-        type_oh[:, : self.n_strikers, 0] = 1.0
-        type_oh[:, self.n_strikers:,  1] = 1.0
-        own = torch.cat([pos, hs, hc, alive, type_oh], dim=-1)   # [B,A,7]
-
-        # --- nearest visible target (3) ---
-        rel_at  = self.target_pos[:, None, :, :] - self.agent_pos[:, :, None, :]
-        dist_at = torch.linalg.norm(rel_at, dim=-1)
-        mask_t  = (dist_at <= self.R_obs) & self.target_alive[:, None, :]
-        dist_mt = torch.where(mask_t, dist_at, torch.full_like(dist_at, 1e9))
-        idx_t   = dist_mt.argmin(dim=-1)
-        rel_t   = rel_at.gather(2, idx_t[..., None, None].expand(B, A, 1, 2)).squeeze(2)
-        none_t  = dist_mt.min(dim=-1).values >= 1e8
-        rel_t   = torch.where(none_t[..., None], torch.zeros_like(rel_t), rel_t)
-        t_alv   = self.target_alive.gather(1, idx_t).float()
-        t_alv   = torch.where(none_t, torch.zeros_like(t_alv), t_alv).unsqueeze(-1)
-        near_t  = torch.cat([rel_t, t_alv], dim=-1)              # [B,A,3]
-
-        # --- nearest visible radar (2) ---
-        rel_ar  = self.radar_pos[:, None, :, :] - self.agent_pos[:, :, None, :]
-        dist_ar = torch.linalg.norm(rel_ar, dim=-1)
-        mask_r  = dist_ar <= self.R_obs
-        dist_mr = torch.where(mask_r, dist_ar, torch.full_like(dist_ar, 1e9))
-        idx_r   = dist_mr.argmin(dim=-1)
-        rel_r   = rel_ar.gather(2, idx_r[..., None, None].expand(B, A, 1, 2)).squeeze(2)
-        none_r  = dist_mr.min(dim=-1).values >= 1e8
-        rel_r   = torch.where(none_r[..., None], torch.zeros_like(rel_r), rel_r)  # [B,A,2]
-
-        # --- nearest visible teammate (3) ---
-        rel_aa  = self.agent_pos[:, None, :, :] - self.agent_pos[:, :, None, :]
-        dist_aa = torch.linalg.norm(rel_aa, dim=-1)
-        eye     = torch.eye(A, device=self.device, dtype=torch.bool).unsqueeze(0).expand(B, -1, -1)
-        dist_aa = torch.where(eye, torch.full_like(dist_aa, 1e9), dist_aa)
-        mask_m  = (dist_aa <= self.R_obs) & self.agent_alive[:, None, :]
-        dist_mm = torch.where(mask_m, dist_aa, torch.full_like(dist_aa, 1e9))
-        idx_m   = dist_mm.argmin(dim=-1)
-        rel_m   = rel_aa.gather(2, idx_m[..., None, None].expand(B, A, 1, 2)).squeeze(2)
-        none_m  = dist_mm.min(dim=-1).values >= 1e8
-        rel_m   = torch.where(none_m[..., None], torch.zeros_like(rel_m), rel_m)
-        m_alv   = self.agent_alive.gather(1, idx_m).float()
-        m_alv   = torch.where(none_m, torch.zeros_like(m_alv), m_alv).unsqueeze(-1)
-        near_m  = torch.cat([rel_m, m_alv], dim=-1)              # [B,A,3]
-
-        return torch.cat([own, near_t, rel_r, near_m], dim=-1)   # [B,A,15]
+        """
+        Observation for each agent:
+        - Own state: [x, y, heading] (3 dims)
+        - Other agents within obs range: [x, y, heading, alive] for each (n_agents-1, padded with zeros when not visible) (4 dims each)
+        - Radar positions: [x, y] for each radar (fixed, known) (2 dims each)
+        - Target positions: [x, y] for each target (fixed, known) (2 dims each)
+        """
+        B, A, T, R = self.num_envs, self.n_agents, self.n_targets, self.n_radars
+        
+        # --- Own state [x, y, heading] ---
+        pos = self.agent_pos  # [B, A, 2]
+        h = self.agent_heading  # [B, A]
+        hs = torch.sin(h).unsqueeze(-1)  # [B, A, 1]
+        hc = torch.cos(h).unsqueeze(-1)  # [B, A, 1]
+        own = torch.cat([pos, hs, hc], dim=-1)  # [B, A, 4] -> actually [B,A,3] (x,y,heading encoded)
+        # Actually, let's use [x, y, angle] more directly:
+        own = torch.cat([pos, h.unsqueeze(-1)], dim=-1)  # [B, A, 3]
+        
+        # --- Other agents within observation range ---
+        # For each agent, include all OTHER agents within R_obs, padded to (A-1)
+        other_agents_obs = torch.zeros(B, A, (A-1), 4, dtype=torch.float32, device=self.device)
+        
+        # Compute distances between all pairs of agents
+        rel_aa = self.agent_pos[:, None, :, :] - self.agent_pos[:, :, None, :]  # [B, A, A, 2]
+        dist_aa = torch.linalg.norm(rel_aa, dim=-1)  # [B, A, A]
+        
+        # Mark own position to exclude self
+        eye = torch.eye(A, device=self.device, dtype=torch.bool).unsqueeze(0).expand(B, -1, -1)
+        dist_aa_masked = torch.where(eye, float('inf'), dist_aa)  # [B, A, A]
+        
+        # For each agent, find which other agents are visible
+        visible_mask = (dist_aa_masked <= self.R_obs)  # [B, A, A]
+        
+        # Build padded observation for other agents
+        for a in range(A):
+            # Get other agents (excluding self)
+            other_indices = torch.arange(A, device=self.device)
+            other_indices = other_indices[other_indices != a]
+            
+            # For this agent, get obs of other agents
+            for oth_idx, other_a in enumerate(other_indices):
+                other_agents_obs[:, a, oth_idx, 0] = self.agent_pos[:, other_a, 0]  # x
+                other_agents_obs[:, a, oth_idx, 1] = self.agent_pos[:, other_a, 1]  # y
+                other_agents_obs[:, a, oth_idx, 2] = torch.sin(self.agent_heading[:, other_a])  # sin(heading)
+                other_agents_obs[:, a, oth_idx, 3] = torch.cos(self.agent_heading[:, other_a])  # cos(heading)
+                
+                # Zero out if not visible or not alive
+                not_visible = ~visible_mask[:, a, other_a] | ~self.agent_alive[:, other_a]
+                other_agents_obs[:, a, oth_idx, :] *= (~not_visible).float().unsqueeze(-1)
+        
+        other_agents_obs = other_agents_obs.reshape(B, A, -1)  # [B, A, (A-1)*4]
+        
+        # --- Radar positions [x, y] (known, static) ---
+        radar_obs = self.radar_pos.unsqueeze(1).expand(B, A, R, 2).reshape(B, A, -1)  # [B, A, R*2]
+        
+        # --- Target positions [x, y] (known, static) ---
+        target_obs = self.target_pos.unsqueeze(1).expand(B, A, T, 2).reshape(B, A, -1)  # [B, A, T*2]
+        
+        # Concatenate all observations
+        obs = torch.cat([own, other_agents_obs, radar_obs, target_obs], dim=-1)  # [B, A, obs_dim]
+        
+        return obs
