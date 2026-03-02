@@ -32,17 +32,32 @@ class TestRunner:
             max_steps     = max_steps,
             device        = device,
             seed          = seed,
+            # World / episodes
             n_strikers    = env_cfg.n_strikers,
             n_jammers     = env_cfg.n_jammers,
             n_targets     = env_cfg.n_targets,
             n_radars      = env_cfg.n_radars,
             dt            = env_cfg.dt,
             world_bounds  = env_cfg.world_bounds,
+            # Kinematics
             v_max         = env_cfg.v_max,
+            accel_magnitude = env_cfg.accel_magnitude,
             dpsi_max      = env_cfg.dpsi_max,
+            h_accel_magnitude_fraction = env_cfg.h_accel_magnitude_fraction,
+            # Sensors
             R_obs         = env_cfg.R_obs,
+            # Striker
+            striker_engage_range = env_cfg.striker_engage_range,
+            striker_engage_fov = env_cfg.striker_engage_fov,
+            striker_v_min = env_cfg.striker_v_min,
+            # Jammer
+            jammer_jam_radius = env_cfg.jammer_jam_radius,
+            jammer_jam_effect = env_cfg.jammer_jam_effect,
+            jammer_v_min = env_cfg.jammer_v_min,
+            # Radar
             radar_range   = env_cfg.radar_range,
             radar_kill_probability = env_cfg.radar_kill_probability,
+            # Rewards
             border_thresh = env_cfg.border_thresh,
             reward_config = env_cfg.reward_config,
         )

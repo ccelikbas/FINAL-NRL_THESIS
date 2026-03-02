@@ -51,9 +51,20 @@ class StrikeEA2DEnv(EnvBase):
         world_bounds: Tuple[float, float] = (0.0, 1.0),
         # --- kinematics ---
         v_max:        float = 0.02,
+        accel_magnitude: float = 0.01,
         dpsi_max:     float = math.radians(20.0),
+        h_accel_magnitude_fraction: float = 0.1,
         # --- sensors ---
         R_obs:        float = 0.50,
+        # --- striker capabilities ---
+        striker_engage_range: float = 0.12,
+        striker_engage_fov: float = 60.0,
+        striker_v_min: float = 0.0,
+        # --- jammer capabilities ---
+        jammer_jam_radius: float = 0.25,
+        jammer_jam_effect: float = 0.10,
+        jammer_v_min: float = 0.01,
+        # --- radar threat ---
         radar_range:  float = 0.20,
         radar_kill_probability: float = 1.0,
         # --- reward shaping ---
@@ -79,7 +90,9 @@ class StrikeEA2DEnv(EnvBase):
         self.dt        = dt
         self.low, self.high = world_bounds
         self.v_max     = float(v_max)
+        self.accel_magnitude = float(accel_magnitude)
         self.dpsi_max  = float(dpsi_max)
+        self.h_accel_magnitude = float(dpsi_max) * float(h_accel_magnitude_fraction)
 
         # sensors
         self.R_obs       = float(R_obs)
@@ -91,10 +104,18 @@ class StrikeEA2DEnv(EnvBase):
         # reward params
         self.reward_params = reward_config if reward_config is not None else RewardConfig()
 
-        # agent capability objects
-        self.striker = StrikerAgent()
-        self.jammer  = JammerAgent()
-        self.radar   = RadarAgent(kill_probability=radar_kill_probability)
+        # agent capability objects (with config parameters)
+        self.striker = StrikerAgent(
+            engage_range=float(striker_engage_range),
+            engage_fov_deg=float(striker_engage_fov),
+            v_min=float(striker_v_min),
+        )
+        self.jammer  = JammerAgent(
+            jam_radius=float(jammer_jam_radius),
+            delta_range=float(jammer_jam_effect),
+            v_min=float(jammer_v_min),
+        )
+        self.radar   = RadarAgent(kill_probability=float(radar_kill_probability))
 
         # RNG
         try:
@@ -145,6 +166,76 @@ class StrikeEA2DEnv(EnvBase):
         A, T, R = self.n_agents, self.n_targets, self.n_radars
         return (2 * A) + (2 * A) + A + (2 * T) + T + (2 * R)
 
+    def _spawn_targets_in_valid_zones(self, B: int, T: int, R: int, radar_pos: torch.Tensor) -> torch.Tensor:
+        """
+        Spawn targets in "strategic zones" with even distribution across radars:
+        - Targets are distributed roughly evenly across available radars
+        - Each target placed at fixed distance from its assigned radar
+        - Spawned in random direction around that radar
+        - Works with any combination of T targets and R radars
+        
+        Examples:
+          - 2 targets, 2 radars: ~1 target per radar
+          - 3 targets, 2 radars: ~1-2 targets distributed randomly
+          - 3 targets, 1 radar: all 3 at that radar
+        
+        Parameters:
+        -----------
+        B : int
+            Batch size
+        T : int
+            Number of targets
+        R : int
+            Number of radars
+        radar_pos : torch.Tensor
+            Radar positions [B, R, 2]
+            
+        Returns:
+        --------
+        torch.Tensor
+            Target positions [B, T, 2]
+        """
+        # Constrained range = base range - jamming effect (minimum detectable range when jammed)
+        unconstrained_range = self.radar_range
+        
+        # Target spawn distance: 90% of detection range (safe annulus)
+        spawn_distance = 0.9 * unconstrained_range
+        
+        target_pos = torch.zeros(B, T, 2, device=self.device)
+        
+        # For each batch, create an evenly distributed radar assignment for targets
+        for b in range(B):
+            # Create cyclic radar assignment: [0, 1, ..., R-1, 0, 1, ..., R-1, ...]
+            # This ensures targets are distributed across radars, not clustered at random ones
+            radar_assignments = torch.arange(T, device=self.device) % R  # [0, 1, 0, 1, ...] for R=2
+            
+            # Shuffle the assignment to randomize which radar gets which target each episode
+            perm = torch.randperm(T, device=self.device)
+            radar_assignments = radar_assignments[perm]
+            
+            # Spawn each target near its assigned radar
+            for t in range(T):
+                assigned_radar_idx = radar_assignments[t].item()
+                radar = radar_pos[b, assigned_radar_idx, :]  # [2]
+                
+                # Random angle around the radar
+                angle = 2.0 * math.pi * torch.rand(1, device=self.device).item()
+                
+                # Offset at fixed distance in random direction
+                offset = spawn_distance * torch.tensor([
+                    math.cos(angle),
+                    math.sin(angle)
+                ], device=self.device)
+                
+                candidate = radar + offset  # [2]
+                
+                # Clamp to world bounds
+                candidate = candidate.clamp(self.low, self.high)
+                
+                target_pos[b, t, :] = candidate
+        
+        return target_pos
+
     # ------------------------------------------------------------------
     # Specs
     # ------------------------------------------------------------------
@@ -187,9 +278,10 @@ class StrikeEA2DEnv(EnvBase):
         self.agent_speed   = torch.zeros(B, A, device=self.device)  # Start with zero velocity
         self.agent_heading_rate = torch.zeros(B, A, device=self.device)  # Start with zero angular velocity
         self.agent_alive   = torch.ones(B, A, dtype=torch.bool, device=self.device)
-        self.target_pos    = self.low + (self.high - self.low) * torch.rand(B, T, 2, device=self.device)
-        self.target_alive  = torch.ones(B, T, dtype=torch.bool, device=self.device)
         self.radar_pos     = self.low + (self.high - self.low) * torch.rand(B, R, 2, device=self.device)
+        # Spawn targets in "safe zones" (within unconstrained radar range, outside constrained range of both radars)
+        self.target_pos    = self._spawn_targets_in_valid_zones(B, T, R, self.radar_pos)
+        self.target_alive  = torch.ones(B, T, dtype=torch.bool, device=self.device)
         self.radar_eff_range = torch.full((B, R), self.radar_range, device=self.device)
         self.step_count.zero_()
 
@@ -218,22 +310,16 @@ class StrikeEA2DEnv(EnvBase):
         # For simplicity, use first action as main velocity acceleration
         v_accel = acc[..., 0]  # [B, A] acceleration in {-1, 0, +1}
         
-        # Set acceleration magnitude (you can tune this)
-        accel_magnitude = 0.01  # per step acceleration when action is ±1
-        
         # Apply acceleration to speed
-        self.agent_speed = (self.agent_speed + v_accel * accel_magnitude).clamp(0.0, self.v_max)
+        self.agent_speed = (self.agent_speed + v_accel * self.accel_magnitude).clamp(0.0, self.v_max)
         self.agent_speed = self.agent_speed * alive_float  # Dead agents don't move
         
         # ---- Heading dynamics (discrete angular acceleration) ----
         # Use last action as heading angular acceleration
         h_accel = acc[..., -1]  # [B, A] angular acceleration in {-1, 0, +1}
         
-        # Angular acceleration magnitude
-        h_accel_magnitude = self.dpsi_max * 0.1  # Fraction of max heading rate per step
-        
         # Apply angular acceleration
-        self.agent_heading_rate = (self.agent_heading_rate + h_accel * h_accel_magnitude).clamp(-self.dpsi_max, self.dpsi_max)
+        self.agent_heading_rate = (self.agent_heading_rate + h_accel * self.h_accel_magnitude).clamp(-self.dpsi_max, self.dpsi_max)
         self.agent_heading_rate = self.agent_heading_rate * alive_float  # Dead agents don't rotate
         
         # Update heading based on heading rate

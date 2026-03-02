@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import math
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -209,34 +210,71 @@ def parse_args():
     p.add_argument("--save_policy", default=None,    help="Path to save trained policy checkpoint")
 
     # Per-run overrides (applied on top of the selected preset)
-    p.add_argument("--n_iters",        type=int,   default=None)
-    p.add_argument("--num_envs",       type=int,   default=None)
-    p.add_argument("--max_steps",      type=int,   default=None)
-    p.add_argument("--lr",             type=float, default=None)
-    p.add_argument("--entropy_coef",   type=float, default=None)
-    p.add_argument("--hidden",         type=int,   default=None)
-    p.add_argument("--kill_reward",    type=float, default=None, help="Override target_destroyed reward weight")
-    p.add_argument("--jam_reward",     type=float, default=None, help="Override jamming reward weight")
-    p.add_argument("--radar_range",    type=float, default=None)
+    # Training
+    p.add_argument("--n_iters",        type=int,   default=None, help="Number of training iterations")
+    p.add_argument("--num_envs",       type=int,   default=None, help="Number of parallel environments")
+    p.add_argument("--max_steps",      type=int,   default=None, help="Max steps per episode")
+    p.add_argument("--lr",             type=float, default=None, help="Learning rate")
+    p.add_argument("--entropy_coef",   type=float, default=None, help="Entropy regularization weight")
+    p.add_argument("--hidden",         type=int,   default=None, help="Hidden layer width for networks")
+    
+    # Environment - kinematics
+    p.add_argument("--v_max",          type=float, default=None, help="Maximum velocity")
+    p.add_argument("--accel_magnitude", type=float, default=None, help="Velocity acceleration per action")
+    p.add_argument("--dpsi_max_deg",   type=float, default=None, help="Max heading rate (degrees/step)")
+    p.add_argument("--h_accel_fraction", type=float, default=None, help="Heading accel fraction of dpsi_max")
+    
+    # Environment - agent capabilities
+    p.add_argument("--striker_engage_range", type=float, default=None, help="Striker engagement range")
+    p.add_argument("--striker_engage_fov", type=float, default=None, help="Striker FOV (degrees)")
+    p.add_argument("--jammer_jam_radius", type=float, default=None, help="Jammer range")
+    p.add_argument("--jammer_jam_effect", type=float, default=None, help="Radar range reduction per jammer")
+    
+    # Environment - radar
+    p.add_argument("--radar_range",    type=float, default=None, help="Radar detection range")
     p.add_argument("--radar_kill_probability", type=float, default=None, help="Radar kill probability [0, 1]")
+    
+    # Rewards
+    p.add_argument("--kill_reward",    type=float, default=None, help="Target destroyed reward weight")
+    p.add_argument("--jam_reward",     type=float, default=None, help="Jamming reward weight")
     return p.parse_args()
 
 
 def apply_overrides(args, env_cfg: EnvConfig, train_cfg: TrainConfig, net_cfg: NetworkConfig):
     """Patch config objects with any CLI overrides."""
+    # Training config
     if args.n_iters      is not None: train_cfg = replace(train_cfg, n_iters=args.n_iters)
     if args.num_envs     is not None: train_cfg = replace(train_cfg, num_envs=args.num_envs)
     if args.max_steps    is not None: train_cfg = replace(train_cfg, max_steps=args.max_steps)
     if args.lr           is not None: train_cfg = replace(train_cfg, lr=args.lr)
     if args.entropy_coef is not None: train_cfg = replace(train_cfg, entropy_coef=args.entropy_coef)
+    
+    # Network config
     if args.hidden       is not None: net_cfg   = replace(net_cfg,   hidden=args.hidden)
-    if args.radar_range  is not None: env_cfg   = replace(env_cfg,   radar_range=args.radar_range)
-    if args.radar_kill_probability is not None: env_cfg   = replace(env_cfg,   radar_kill_probability=args.radar_kill_probability)
+    
+    # Environment config - kinematics
+    if args.v_max           is not None: env_cfg = replace(env_cfg, v_max=args.v_max)
+    if args.accel_magnitude is not None: env_cfg = replace(env_cfg, accel_magnitude=args.accel_magnitude)
+    if args.dpsi_max_deg    is not None: env_cfg = replace(env_cfg, dpsi_max=math.radians(args.dpsi_max_deg))
+    if args.h_accel_fraction is not None: env_cfg = replace(env_cfg, h_accel_magnitude_fraction=args.h_accel_fraction)
+    
+    # Environment config - agent capabilities
+    if args.striker_engage_range is not None: env_cfg = replace(env_cfg, striker_engage_range=args.striker_engage_range)
+    if args.striker_engage_fov is not None: env_cfg = replace(env_cfg, striker_engage_fov=args.striker_engage_fov)
+    if args.jammer_jam_radius is not None: env_cfg = replace(env_cfg, jammer_jam_radius=args.jammer_jam_radius)
+    if args.jammer_jam_effect is not None: env_cfg = replace(env_cfg, jammer_jam_effect=args.jammer_jam_effect)
+    
+    # Environment config - radar
+    if args.radar_range  is not None: env_cfg = replace(env_cfg, radar_range=args.radar_range)
+    if args.radar_kill_probability is not None: env_cfg = replace(env_cfg, radar_kill_probability=args.radar_kill_probability)
 
+    # Reward config
     rw = env_cfg.reward_config
     if args.kill_reward is not None: rw = replace(rw, target_destroyed=args.kill_reward)
     if args.jam_reward  is not None: rw = replace(rw, jamming=args.jam_reward)
     env_cfg = replace(env_cfg, reward_config=rw)
+
+    return env_cfg, train_cfg, net_cfg
 
     return env_cfg, train_cfg, net_cfg
 
@@ -273,3 +311,4 @@ if __name__ == "__main__":
 
 # PLAY MODE:
 # & "c:/Users/celikbas/Documents/REPO GIT NLR/.venv/Scripts/python.exe" strike_ea/run.py --play --preset default
+
