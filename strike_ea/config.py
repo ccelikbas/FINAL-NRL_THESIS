@@ -46,6 +46,7 @@ class EnvConfig:
     # --- sensors ---
     R_obs:       float = 0.50   # observation radius
     radar_range: float = 0.20   # baseline radar kill range
+    radar_kill_probability: float = 1.0  # probability [0, 1] that an agent in radar range is killed per step
 
     # --- reward shaping ---
     border_thresh: float = 0.05  # agents within this distance of border get penalised

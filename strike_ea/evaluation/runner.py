@@ -42,6 +42,7 @@ class TestRunner:
             dpsi_max      = env_cfg.dpsi_max,
             R_obs         = env_cfg.R_obs,
             radar_range   = env_cfg.radar_range,
+            radar_kill_probability = env_cfg.radar_kill_probability,
             border_thresh = env_cfg.border_thresh,
             reward_config = env_cfg.reward_config,
         )

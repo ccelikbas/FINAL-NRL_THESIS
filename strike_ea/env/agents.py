@@ -47,3 +47,15 @@ class JammerAgent:
         """Return True where jammer is within jam_radius of a radar."""
         dist = torch.linalg.norm(rel_vec, dim=-1)
         return dist <= self.jam_radius
+
+
+@dataclass
+class RadarAgent:
+    """Radar agent: detects and kills agents within effective range."""
+    
+    kill_probability: float = 1.0  # Probability [0, 1] that an agent in radar range is killed per step
+    
+    def can_kill(self, rng: torch.Generator) -> torch.Tensor:
+        """Return a probabilistic kill mask based on kill_probability."""
+        # This will be called with the in_radar mask to determine actual kills
+        return torch.rand(1, generator=rng) < self.kill_probability

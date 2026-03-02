@@ -24,6 +24,9 @@ python run.py --play --policy_path path/to/policy.pt
 # Play mode with a preset (uses random initial policy or loads if available)
 python run.py --play --preset default
 
+# Override radar kill probability (0=never kill, 1=instant kill)
+python run.py --radar_kill_probability 0.5
+
 Available presets:  fast | default | high_kill | strong_jam | big_team | hard_radar | no_step_pen
 Available sweeps:   kill_reward | jam_weight | radar_range | entropy
 """
@@ -215,6 +218,7 @@ def parse_args():
     p.add_argument("--kill_reward",    type=float, default=None, help="Override target_destroyed reward weight")
     p.add_argument("--jam_reward",     type=float, default=None, help="Override jamming reward weight")
     p.add_argument("--radar_range",    type=float, default=None)
+    p.add_argument("--radar_kill_probability", type=float, default=None, help="Radar kill probability [0, 1]")
     return p.parse_args()
 
 
@@ -227,6 +231,7 @@ def apply_overrides(args, env_cfg: EnvConfig, train_cfg: TrainConfig, net_cfg: N
     if args.entropy_coef is not None: train_cfg = replace(train_cfg, entropy_coef=args.entropy_coef)
     if args.hidden       is not None: net_cfg   = replace(net_cfg,   hidden=args.hidden)
     if args.radar_range  is not None: env_cfg   = replace(env_cfg,   radar_range=args.radar_range)
+    if args.radar_kill_probability is not None: env_cfg   = replace(env_cfg,   radar_kill_probability=args.radar_kill_probability)
 
     rw = env_cfg.reward_config
     if args.kill_reward is not None: rw = replace(rw, target_destroyed=args.kill_reward)

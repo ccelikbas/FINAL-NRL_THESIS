@@ -28,7 +28,7 @@ from tensordict import TensorDict
 from torchrl.data import Bounded, Categorical, Composite, Unbounded
 from torchrl.envs import EnvBase
 
-from .agents import JammerAgent, StrikerAgent
+from .agents import JammerAgent, RadarAgent, StrikerAgent
 from .rewards import RewardConfig
 
 
@@ -55,6 +55,7 @@ class StrikeEA2DEnv(EnvBase):
         # --- sensors ---
         R_obs:        float = 0.50,
         radar_range:  float = 0.20,
+        radar_kill_probability: float = 1.0,
         # --- reward shaping ---
         border_thresh: float = 0.05,
         reward_config: Optional[RewardConfig] = None,
@@ -93,6 +94,7 @@ class StrikeEA2DEnv(EnvBase):
         # agent capability objects
         self.striker = StrikerAgent()
         self.jammer  = JammerAgent()
+        self.radar   = RadarAgent(kill_probability=radar_kill_probability)
 
         # RNG
         try:
@@ -264,11 +266,17 @@ class StrikeEA2DEnv(EnvBase):
 
         self.radar_eff_range = radar_eff_range.clone()
 
-        # ---- radar kills own agents ----
+        # ---- radar kills own agents (probabilistic) ----
         rel_ar = self.radar_pos[:, None, :, :] - self.agent_pos[:, :, None, :]   # [B,A,R,2]
         dist_ar = torch.linalg.norm(rel_ar, dim=-1)                               # [B,A,R]
-        in_radar = dist_ar <= radar_eff_range[:, None, :]
-        killed   = in_radar.any(dim=-1) & alive
+        in_radar = dist_ar <= radar_eff_range[:, None, :]                         # [B,A,R]
+        
+        # Probabilistic kill: agent is killed if in radar range AND passes probability check
+        # Generate random samples for each agent-radar pair
+        kill_samples = torch.rand(B, A, self.n_radars, device=self.device, generator=self._rng)
+        kill_prob = self.radar.kill_probability
+        kills_from_radar = in_radar & (kill_samples < kill_prob)                  # [B,A,R]
+        killed = kills_from_radar.any(dim=-1) & alive                             # [B,A] - killed if any radar kills them
         self.agent_alive = self.agent_alive & (~killed)
 
         # ---- striker kinetic kills: Strikers automatically strike if target in engagement zone ----
