@@ -1,0 +1,530 @@
+\chapter{Collaborative Electronic Warfare}
+
+Collaborative Electronic Warfare (EW) refers to the coordinated use of multiple platforms, sensors, and effectors to generate electromagnetic effects over extended areas and time periods. Rather than protecting a single aircraft or acting on a single target, collaborative EW focuses on the efficient allocation of distributed assets to shape the electromagnetic environment at the operational level.
+
+This approach is enabled through several key mechanisms: information sharing between platforms, coordination of sensing and jamming actions, interoperability across units, and the integration of manned and unmanned systems. Each platform operates as part of a distributed network, contributing either sensing, electronic attack, or both. Effective collaboration requires reliable communications, time synchronization, and mission planning that accounts for coverage, endurance, and resource constraints \cite{emsopedia_spj_airborne}. An overview of this concept is shown in Fig.~\ref{fig:jamming_overview}.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.5\linewidth]{figures/colab_EW.png}
+    \caption{Collaborative Electronic Warfare (EW) \cite{emsopedia_spj_airborne}}
+    \label{fig:jamming_overview}
+\end{figure}
+
+
+\section{Jamming Strategies in EW}
+
+Collaborative EW missions differ primarily in the relative geometry between the jammer, the protected force, and the threat radar. This geometry determines effectiveness, required power, and operational risk. The main concepts are illustrated in Fig.~\ref{fig:jamming_overview}.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.6\linewidth]{figures/jamming_techniques.png}
+    \caption{Jamming strategies outlined in \cite{emsopedia_spj_airborne}}
+    \label{fig:jamming_overview}
+\end{figure}
+
+\subsection{Self-Protection Jamming}
+Self-Protection Jamming (SPJ), as illustrated in Figure \ref{fig:SPJ}, is performed close to or within the defended area. SPJ is an onboard electronic countermeasure intended to degrade the ability of hostile radar systems to detect, track, or guide weapons against the aircraft. The jammer is near the threat and often illuminated by the radar main lobe, resulting in high effectiveness with lower power requirements. However, this concept exposes the platform to the highest operational risk \cite{emsopedia_spj_airborne}.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.5\linewidth]{figures/Self-Protection-Task-EWpedia_html_7480b9a3ae1b4988.png}
+    \caption{Self-Protection Jamming (SPJ) \cite{emsopedia_spj_airborne}}
+    \label{fig:SPJ}
+\end{figure}
+
+
+\subsection{Escort Jamming}
+Escort Jamming (EJ) accompanies a strike package, for example a fleet of ACPs, along the penetration route. Escort platforms are positioned between the protected aircraft and the threat, often closer to the radar. This geometry allows earlier interaction with the radar and improved effectiveness while maintaining moderate risk. As illustrated in Fig.~\ref{fig:EJ}, multiple escort-capable platforms are positioned around the protected formation to cooperatively create an electronically denied area along the penetration corridor \cite{emsopedia_spj_airborne}.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.6\linewidth]{figures/escort_jamming.png}
+    \caption{Escort jamming \cite{emsopedia_spj_airborne}}
+    \label{fig:EJ}
+\end{figure}
+
+\subsection{Stand-Off Jamming}
+Stand-Off Jamming (SOJ) is performed from outside the threat zone. The jammer remains at large distance from the radar, and the interference typically enters through antenna side lobes. This reduces effectiveness of the jamming and requires high transmit power but minimizes risk and enables wide-area support. This is further explained in Section \ref{Impact of EA on Radar}. As illustrated in Fig.~\ref{fig:SOJ}, the stand-off platform remains outside the highest-threat region and supports the mission by providing wide-area electronic coverage \cite{emsopedia_spj_airborne}.
+
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.6\linewidth]{figures/stand_of_jamming.png}
+    \caption{Stand-Off Jamming (SOJ) \cite{emsopedia_spj_airborne}}
+    \label{fig:SOJ}
+\end{figure}
+
+\section{Command and Control (C2)}
+
+As outlined in the introduction, collaborative EW relies on the coordinated use of multiple platforms, which must be effectively controlled and synchronized. In military doctrine, this function is described as Command and Control (C2). A network centric approach for C2 is illustrated in Fig.~\ref{fig:C2}. Future EW systems are expected to rely heavily on software-defined architectures, where information must be exchanged rapidly and reliably to support decision-making in contested environments.
+
+In a network-centric C2 structure, each platform operates as a node within a system-of-systems, enabling centralized mission coordination while maintaining distributed situational awareness across the platforms. This enables coordinated missions of multiple platforms \cite{emsopedia_spj_airborne, anduril-website}.
+
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.9\linewidth]{figures/c2.png}
+    \caption{Command and Control (C2) \cite{emsopedia_spj_airborne}}
+    \label{fig:C2}
+\end{figure}
+
+Key functions of the C2 system include \cite{emsopedia_spj_airborne}:
+\begin{itemize}
+    \item real-time sharing and fusion of sensor information,
+    \item cooperative emitter localization and threat assessment,
+    \item coordinated and synchronized jamming actions,
+    \item dynamic task allocation and reconfiguration during the mission.
+\end{itemize}
+
+Unmanned systems are integrated as distributed sensing and jamming nodes under the supervision of a stand-off C2 platform. Manned–unmanned teaming combines human decision-making with the endurance and flexibility of autonomous systems. Increasing onboard autonomy enables platforms to detect and respond to threats while adapting their actions within the coordinated mission framework \cite{emsopedia_spj_airborne}.
+
+
+
+\section{Escort Jamming Mission}
+The operational concepts described previously must be translated into executable behaviors for autonomous systems. This thesis considers a scenario in which at least four ACPs enter contested airspace to destroy a designated target while conducting Suppression of Enemy Air Defenses (SEAD) using electronic attack (EA).
+
+Stand-off jamming is less suitable for smaller unmanned platforms due to the high power required for effective long-range interference, particularly when operating through radar side lobes \cite{RadarTutorial_Jamming}. Therefore, the operational concept adopted here is based on escort jamming.
+
+In this scenario, a strike ACP penetrates contested airspace while supported by an escort jammer (EJ) that degrades enemy radar performance and reduces detection range (Fig.~\ref{fig Jammer mission}). The strike platform engages the target and may also possess limited EA capability \cite{emsopedia_spj_airborne}.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.6\linewidth]{figures/escort_jamming_mission_profile.png}
+    \caption{Escort jamming mission profile illustrating a strike platform penetrating contested airspace while an escort jammer suppresses threat radar coverage to reduce detection and enable target engagement \cite{emsopedia_spj_airborne}}
+    \label{fig:Escort Jammer mission}
+\end{figure}
+
+For autonomous execution, the mission is represented as a sequence of functional tasks. While these stages describe the operational flow, mission success critically depends on the spatial and temporal coordination between platforms. Jamming must be active when strike platforms are exposed, formations must maintain protective geometry relative to threats, and task execution must be synchronized across the team.
+
+\begin{enumerate}
+    \item \textbf{Mission definition:} Initial parameters are specified, including target location, known threat positions, available assets, and mission success criteria.
+    
+    \item \textbf{Force composition:} A set of ACPs is assigned to the mission and their capabilities (strike or jamming) are defined.
+    
+    \item \textbf{Deployment:} The ACPs enter the operational area from outside the Forward Edge of the Battle Area (FEBA).
+    
+    \item \textbf{Task allocation:} Sub-roles are assigned, such as pairing jammers with specific threats or assigning strike platforms to targets. In an escort concept, jammer and strike ACPs may operate as coordinated teams.
+    
+    \item \textbf{Path planning:} Routes toward the objective are generated, considering platform endurance, threat coverage, and the protective effects of jamming.
+    
+    \item \textbf{Dynamic re-planning:} During execution, updated observations or environmental changes may trigger task reassignment or trajectory adaptation.
+    
+    \item \textbf{Action execution:} Jamming is activated when required to suppress radar performance, and strike ACPs engage the target at the appropriate time.
+    
+    \item \textbf{Return:} After mission completion, the ACPs exit the contested area and return outside the FEBA.
+    
+\end{enumerate}
+
+This staged representation highlights that collaborative EW is fundamentally a coordination problem in space and time, and forms the basis for the autonomous planning and decision-making framework developed in this thesis.
+
+
+
+
+
+
+\chapter{Domain Knowledge and Simulation Methods}
+
+As outlined in the previous chapter, the mission assigned to the ACPs is defined in terms of overall objectives and platform roles, and subsequently decomposed into a set of tasks that must be executed autonomously by the individual platforms. This chapter focuses on explaining the functional operation of ACPs and electronic attack at a system level. It also reviews simulation methods used in existing literature. 
+
+\section{Decision-Making and Autonomy in Defense}
+
+ACPs operating in defense environments must make decisions under uncertainty, time pressure, and adversarial interference. Military autonomy requires continuous interaction with a dynamic environment and other agents, making decision-making an integral part of the control problem.
+
+\subsection{Decision-Making}
+A widely used abstraction of decision-making in such dynamic military contexts is the OODA loop, introduced by John Boyd. The OODA loop, as shown in Figure \ref{fig:ooda_loop}, structures decision-making as a continuous cycle of observation, orientation, decision, and action, emphasizing adaptation and feedback rather than optimality in a static sense. It remains influential in military doctrine and has also been adopted in civilian domains \cite{Osinga2007ScienceStrategyWar, ooda_loop_untools}. For autonomous platforms, the OODA loop provides a high-level conceptual model of how sensing, reasoning, and control actions are iteratively coupled.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.7\linewidth]{figures/OODA loop.png}
+    \caption{OODA loop \cite{ooda_loop_untools}.}
+    \label{fig:ooda_loop}
+\end{figure}
+
+Central to the effective operation of the OODA loop is the concept of Situation Awareness (SA), formalized by Endsley \cite{Endsley1995SituationAwareness}. Situation Awareness is defined as the perception of elements in the environment within a volume of time and space, the comprehension of their meaning, and the projection of their status in the near future. These three levels—perception, comprehension, and projection—describe the informational state required to support informed decision-making.
+
+From a control and autonomy perspective, Situation Awareness provides a useful framework for structuring the internal processes of autonomous systems. Perception corresponds to state estimation and sensor fusion, comprehension to the construction of internal representations of the environment and objective, and projection to the prediction of future states. Deficiencies at any level of SA can degrade decision quality and, consequently, mission objectives \cite{Endsley1995SituationAwareness}.
+
+In the context of ACPs, Situation Awareness must be both local and shared. Individual agents require sufficient SA to execute their own tasks, while collaboration depends on maintaining consistent or complementary SA across multiple agents. Although the OODA loop and Situation Awareness were originally developed to describe human decision-making in military operations, their underlying principles are applicable to autonomous systems.
+
+\subsection{Levels of Autonomy}
+
+The level of autonomy of a platform determines how decision-making authority is distributed between human operators and the system itself. In the context of UAVs, autonomy is commonly categorized into three levels (Figure \ref{fig:autonomy}): manual, semi-autonomous, and fully autonomous operation  \cite{ekecki2025uavcontrolsurvey}.
+
+Manually controlled systems rely on continuous human input for both decision-making and low-level control. While this mode offers maximum human oversight, it is poorly suited to complex or large-scale operations due to operator workload, communication latency, and limited scalability.
+
+Semi-autonomous systems implement shared control, where the platform can autonomously execute predefined functions such as stabilization, navigation, or collision avoidance, while higher-level decisions remain under human supervision. This level of autonomy reduces operator burden but still constrains responsiveness and coordination in highly dynamic or contested environments.
+
+Fully autonomous systems operate with minimal or no human intervention during mission execution. Such systems are responsible for maintaining their own situation awareness and decision making in response to environmental changes and interactions with other agents.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.5\linewidth]{figures/autonomy.jpg}
+    \caption{Levels of autonomy in UAV control \cite{ekecki2025uavcontrolsurvey}.}
+    \label{fig:autonomy}
+\end{figure}
+
+For ACPs, effective cooperation at scale necessitates operation toward the fully autonomous end of this spectrum. Collaboration among multiple platforms requires each agent to independently perceive, interpret, and project the state of the environment while coordinating decisions with other agents. 
+
+\subsection{Autonomous Decision-Making}
+Fully autonomous operation requires that functions traditionally performed by human operators are executed within the agent or agent team. In complex multi-agent missions such as coordinated strike and electronic attack, this requires decision-making at both the individual and team level under uncertainty and limited communication.
+
+A common way to structure autonomous control is through a functional decomposition of the mission decision process. At the team level, the system must determine how objectives are distributed across agents through task allocation or role assignment. Given these responsibilities, agents must generate feasible behaviors through path planning, taking into account environmental constraints, threats, and safety requirements \cite{Weiss2013MultiagentSystems, ekecki2025uavcontrolsurvey}.
+
+This decomposition provides a useful structure and is often adopted in classical multi-agent control and robotics, where task assignment and path planning are treated as interacting modules. However, alternative approaches exist in which these functions are not explicitly separated. In particular, integrated decision frameworks, such as multi-agent reinforcement learning (MARL), learn or compute policies that simultaneously capture task selection, motion control, and coordination, allowing cooperative strategies to emerge implicitly \cite{Weiss2013MultiagentSystems, ekecki2025uavcontrolsurvey}.
+
+The functional requirements described above define what decisions must be made to achieve coordinated autonomy. The following chapter address two complementary questions: Chapter 4 examines control architectures, which determine how responsibility for these decisions is distributed across agents or centralized elements, while Chapter 5 reviews control methods, which describe how the decisions themselves are computed.
+
+
+\section{Environment Models}
+% In what type of enviernment would ACPs be operating? Terrain, altitude, fuel needs 
+
+
+% How is the enviernment modeled in relavant literature? 
+The behavior of ACPs in simulation depends on how the operational environment is abstracted, including the representation of targets and adversaries. Across the reviewed studies, environments are typically represented as low-dimensional spaces to keep learning and evaluation tractable. Several works use 2D planar abstractions (including grid-based models) \cite{yue2022uav_sead_hmarl,Fang2021CollaborativeCombat,Lee2023MUMTSEAD,xu2025mdrl_uav_combat,Wang2025CooperativeUAV,yuksek2021cooperative}. Figure~\ref{fig:env} shows an abstraction of the environment model proposed by Yuksek et al.~\cite{yuksek2021cooperative}. Other research explicitly uses a 3D environment \cite{Jiang2025DDPGSwarmTaskPlanning, Fang2021CollaborativeCombat}. Physical terrain and infrastructure are generally not modeled; instead, constraints are introduced through abstract regions such as no-fly zones (NFZ) or threat areas.
+
+\begin{figure}[htbp]
+    \centering
+    \begin{subfigure}[t]{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/env.jpeg}
+        \caption{Schematic of the combat environment proposed by Yüksek et al.}
+        \label{fig:env_yuksek}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[t]{0.44\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/env2.jpeg}
+        \caption{Simulation environment and example UCAV trajectories avoiding no-fly zones (NFZs) while approaching the target area.}
+        \label{fig:env_sim}
+    \end{subfigure}
+    
+    \caption{Environment model used by Yuksek et al. \cite{yuksek2021cooperative} for cooperative UCAV mission planning.}
+    \label{fig:env}
+\end{figure}
+
+
+% \begin{figure}[htbp]
+%     \centering
+%     \includegraphics[width=0.5\linewidth]{figures/env.jpeg}
+%     \caption{Schematic of the environment used by Yuksek et al \cite{yuksek2021cooperative}.}
+%     \label{fig:env}
+% \end{figure}
+
+
+
+\subsection{Targets}
+% Targets in reality 
+
+% Modeling in literature 
+Targets are modeled at varying levels of complexity depending on the mission scenario. Several studies consider fixed or goal-point targets, where mission success is defined by reaching or striking a designated location \cite{yuksek2021cooperative,xu2025mdrl_uav_combat}. Other works include multiple fixed targets distributed across the environment to capture task allocation and sequencing effects \cite{Fang2021CollaborativeCombat}. More dynamic scenarios model targets as mobile entities, either through stochastic kinematic motion models or by employing expert-rule-based movement strategies within a defined operating area \cite{Jiang2025DDPGSwarmTaskPlanning,Wang2025CooperativeUAV}.
+
+
+\subsection{Adversaries}
+% Adversaries in reality
+
+% Modeling in literature 
+Adversarial elements are commonly represented using abstract threat models rather than explicit interceptor dynamics. In \cite{yuksek2021cooperative}, adversaries are modeled as no-fly zones or threat regions that proxy air-defense systems such as surface-to-air missiles or artillery. Other works introduce probabilistic interception or threat fields, where the likelihood of loss of the UAV increases with proximity to a threat source \cite{Wang2025CooperativeUAV,Fang2021CollaborativeCombat}. Explicit missile dynamics or kinematics are generally omitted.
+
+\subsection{Simulation Environment}
+% What kind of software packages are used to simulate the inviernment? 
+The reviewed literature consistently adopts custom-built agent-based simulation environments to study ACP/UAV coordination and control, rather than relying on high-fidelity flight simulators. In all examined ABM studies, the environments are tailored to specific mission scenarios and decision-making problems \cite{yue2022uav_sead_hmarl,Fang2021CollaborativeCombat,Lee2023MUMTSEAD,xu2025mdrl_uav_combat,Wang2025CooperativeUAV,yuksek2021cooperative}. Python is the primary programming language used across the literature. Several works implement their environments using OpenAI Gym or Gym-compatible interfaces \cite{Lee2023MUMTSEAD,xu2025mdrl_uav_combat}.
+
+
+
+\section{Electronic Attack}
+% What are the primary forms of electronic warfare relevant to air operations?
+Modern air operations are heavily dependent on the use of electromagnetic (EM) radiation. EM radiation provides the physical medium through which platforms sense the environment, communicate, navigate, and employ weapons. As a result, control, coordination, and survivability of air platforms are tightly coupled to access and control of the electromagnetic spectrum. 
+Electronic warfare, and in particular electronic attack (EA), directly targets the electromagnetic dependencies of adversary sensing and engagement systems. EA primarily refers to jamming actions. There are two main types of jamming; communications and radar jamming. In the scope of this thesis, the focus is on electronic attack (EA) against radar systems. First, the main operating principles of radar systems are outlined. Next, the effects of EA on radar systems are discussed. Finally, the simulation methods adopted in the literature for EA and strike missions are outlined \cite{von_spreckelsen2018_ew_forgotten, AFDP3_85_2023}.
+
+\subsection{Radar Systems}
+Radar systems are used by adversaries as well as onboard platforms to detect, track, and classify airborne and surface targets. To achieve this, radar systems actively emit radio-frequency (RF) radiation. The operating principle of radar is based on transmitting RF radiation into space. Objects within the illuminated region reflect part of this energy back toward the radar receiver. By measuring the time delay and direction of the returned signal, the radar can determine the range and angular position of a target.
+
+Several key concepts are important when modeling radar systems. First, radar energy is not emitted uniformly in all directions. Instead, directional antennas concentrate energy preferentially in a specific direction. The primary direction of radiation is referred to as the main lobe. A schematic radiation pattern with main and side lobes is shown in Figure~\ref{fig:lobe}. Antenna gain $G$ is defined as the ratio of the power radiated by the antenna in a given direction (typically the main lobe) to the power that would be radiated in that direction by an ideal isotropic radiator with the same total transmitted power. In many radar systems, the orientation of the main lobe varies over time as the antenna mechanically or electronically scans the surrounding space to detect and track targets \cite{AFDP3_85_2023, von_spreckelsen2018_ew_forgotten, skolnik_radar_2001, mitll_radar_course}.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.4\linewidth]{figures/lobe_formation.png}
+    \caption{Lobe pattern \cite{tutorialspoint_radiation_pattern}.}
+    \label{fig:lobe}
+\end{figure}
+
+As the transmitted electromagnetic wave by the radar propagates through space, its power density decreases with distance $R$ due to spherical spreading. The radar transmits a power $P_t$ with an antenna gain $G_t$. When the wave illuminates a target, a portion of the incident energy is scattered back toward the radar. The amount of energy returned depends on the target's radar cross section $\sigma$, which is a measure of its reflective properties. Stealth technologies are designed to reduce a platform’s radar cross section in order to decrease its detectability.
+
+The back scattered signal then propagates back to the radar and experiences an additional spreading loss. The receiving antenna, characterized by its gain $G_r$, collects part of the returned energy. Taking these effects into account, the received power is given by the radar equation
+
+\begin{equation}
+P_r = \frac{P_t \, G_t \, G_r \, \lambda^2 \, \sigma}
+{(4\pi)^3 \, R^4},
+\end{equation}
+\label{radar_eq}
+
+where $\lambda$ is the wavelength of the transmitted signal.
+
+Competing with the reflected signal is background noise originating from sources such as thermal noise in the receiver, atmospheric effects, and ground clutter. The noise power is given by $N = k \, T_s \, B_n$, where $k$ is Boltzmann's constant, $T_s$ is the system noise temperature, and $B_n$ is the receiver noise bandwidth. This noise power $N$ limits the radar's ability to detect targets.
+
+The detectability of a target is commonly quantified using the signal-to-noise ratio (SNR), which is a standard measure of radar detection performance. The SNR is defined as
+
+\begin{equation}
+\text{SNR} = \frac{P_{\text{reflected}}}{N} 
+= \frac{P_t \, G_t \, G_r \, \lambda^2 \, \sigma}
+{(4 \pi)^3 \, R^4 \, k \, T_s \, B_n \, L},
+\end{equation}
+
+where $L$ represents the total system losses (not ideal) and $T_s$ is the system noise temperature, which depends on multiple internal and external noise contributions. The SNR enables the assessment of radar performance. For a given set of radar parameters and target radar cross section, it can be used to estimate the maximum range at which the radar can reliably detect the target.
+
+Radars transmit a finite band of frequencies rather than a single frequency. A larger bandwidth enables the radar to resolve smaller differences in echo arrival time, thereby improving resolution. Power spectral density (PSD) describes how the transmitted signal power and noise are distributed across this bandwidth \cite{AFDP3_85_2023, von_spreckelsen2018_ew_forgotten, skolnik_radar_2001, mitll_radar_course}.
+
+\subsection{Impact of EA on Radar}
+\label{Impact of EA on Radar}
+% How does electronic attack affect adversary sensing, tracking, and engagement capabilities?
+Radar jamming aims to reduce the effectiveness of adversary radar systems by interfering with their ability to detect, track, and engage targets. By intentionally transmitting radio-frequency (RF) energy, electronic attack (EA) disrupts, degrades, deceives, or denies normal radar operation. Unlike passive countermeasures, jamming directly affects the radar receiver by introducing interfering signals. Modern radar systems often incorporate countermeasures to mitigate or resist the effects of jamming, however, these techniques are considered outside the scope of this review \cite{RadarTutorial_Jamming, mitll_radar_course}.
+
+A jammer can be considered an active RF transmitter that radiates energy toward the adversary radar. In contrast to conventional radar operation, the jammer does not rely on target reflections. As a result, the power received at the radar from the jammer follows a one-way propagation model rather than the two-way radar equation. Similar to radar antennas, jammers have directional radiation patterns with main lobes and side lobes that influence their effectiveness \cite{Adamy2001EW101, EW_Radar_Handbook, RadarTutorial_Jamming, mitll_radar_course}. The received jamming power at the radar is given by
+
+\begin{equation}
+P_{j,r} = \frac{P_j \, G_j \, G_r \, \lambda^2}
+{(4\pi)^2 \, R_{jr}^2}
+\end{equation}
+\label{jamming_power}
+
+Several methods of radar jamming exist, of which the most prominent are:
+\begin{itemize}
+    \item \textbf{Noise jamming:} Noise jamming (masking) raises the noise floor of the radar receiver, thereby reducing the signal-to-noise ratio (SNR) and preventing reliable detection or tracking of targets. In the frequency domain, three main types of noise jamming can be distinguished: spot jamming, which concentrates power within a narrow frequency band; barrage jamming, which spreads power over a wide frequency range; and swept jamming, where the transmitted frequency is varied over time \cite{RadarTutorial_Jamming}.
+    \item \textbf{Deception jamming:} Deception jamming (concealment) retransmits modified versions of the radar signal to introduce false information, such as spurious targets or erroneous range, velocity, or angle measurements.
+\end{itemize}
+
+Similar to noise, the jammer can be treated as an additional interference source at the radar receiver. A key performance metric is the jamming-to-signal ratio (JSR), defined as
+
+\begin{equation}
+JSR = \frac{P_{j,r}}{P_r} =  \frac{P_J \, G_J \, 4\pi R^2}{P_t \, G_t \, \sigma}
+\end{equation}
+
+Since the jammer signal follows a one-way propagation model while the target echo follows a two-way model, their relative strengths depend strongly on range. At short ranges the target echo dominates, allowing detection despite jamming. This region is known as the burn-through range. Beyond this distance, the jamming signal becomes dominant and radar performance is degraded. The burn-through range is obtained by setting the jamming-to-signal ratio to one ($\text{JSR} = 1$):
+
+\begin{equation}
+R_{BT} = \sqrt{\frac{P_t \, G_t \, \sigma}{4\pi \, P_J \, G_J}}.
+\end{equation}
+
+
+
+
+\paragraph{Jamming Geometry}
+
+The relative geometry between the radar, target, and jammer plays a critical role in determining jamming effectiveness. An adversary radar transmits energy primarily within its antenna main beam and receives echoes from the same angular region. When a jammer is located within this main beam and radiates toward the radar, the interference signal is received with maximum antenna gain. This configuration is referred to as \emph{main-lobe jamming} (or self protection jamming), as illustrated in Figure~\ref{fig:Jamming Geometry}. The corresponding jamming-to-signal ratio (JSR) is given by
+
+
+\begin{equation}
+JSR_{main lobe} = \frac{P_{j, r}}{P_r} =  \frac{P_J \, G_J \, 4\pi R^2}{P_t \, G_t \, \sigma}
+\end{equation}
+
+Alternatively, a jammer may illuminate the radar through its antenna side lobes, referred to as \emph{side-lobe jamming} (or support jamming). Since side lobes exhibit significantly lower gain than the main beam, this configuration is inherently less effective. For the geometry shown in Figure~\ref{fig:Jamming Geometry}, the JSR for side-lobe jamming is
+
+\begin{equation}
+JSR_{side lobe} = \frac{P_{j, r}}{P_r} = \frac{4\pi}{\sigma} \cdot 
+\frac{P_J \, G_J}{P_t \, G_t} \cdot 
+\frac{G_S \, R_T^4}{G_M \, R_J^2}
+\end{equation}
+
+where $G_M$ is the radar main-lobe gain in the direction of the target and $G_S$ is the radar side-lobe gain in the direction of the jammer. For a monostatic radar, the main-lobe receive gain is equal to the transmit gain, i.e., $G_M = G_t$. Compared to main-lobe jamming, side-lobe jamming is inherently less effective due to the lower antenna gain. To achieve a comparable level of interference, a side-lobe jammer must either increase its transmitted power or operate at a shorter distance from the radar.
+
+From the JSR expressions, the burn-through ranges can be determined as the distance at which the radar can detect is target \cite{RadarTutorial_Jamming, mitll_radar_course}.
+
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.9\linewidth]{figures/jamming_geo.png}
+    \caption{Jamming geometry effects.}
+    \label{fig:Jamming Geometry}
+\end{figure}
+
+
+Several recent studies have investigated radar jamming using more detailed radar and jammer effectiveness models than those typically employed in mission-level strike and EA coordination frameworks. Chen et al.~\cite{Chen2025HybridJamming} propose a hybrid model-data-driven approach for evaluating radar jamming effectiveness, combining physics-based jamming equations with machine learning techniques. Their method explicitly accounts for received-power relationships and lobing effects, and focuses on improving the accuracy of jamming effectiveness assessment rather than on multi-agent coordination, platform motion, or mission-level planning. The scenario is shown in Figure \ref{fig:Chen_jamming}.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.5\linewidth]{figures/Chen_jamming.png}
+    \caption{Schematic diagram of the scenario used in \cite{Chen2025HybridJamming}.}
+    \label{fig:Chen_jamming}
+\end{figure}
+
+Cai et al.~\cite{Cai2025CooperativeJammingMARL} formulate a multi-radar, multi-jammer confrontation as a Markov game and employ multi-agent reinforcement learning to optimize cooperative jamming decisions such as radar assignment, jamming mode selection, and transmit power. Their framework incorporates explicit radar detection and jamming models, including range-dependent propagation and main-lobe versus side-lobe effects. However, the jammers are treated as being at fixed locations (i.e., jammer mobility is not part of the learned policy), and the study does not address joint trajectory-and-jamming coordination as required in strike-EA multi-agent mission settings.
+
+These approaches provide more physically realistic representations of radar-jammer interactions. However, they do not focus on mission-level coordination (e.g. movement of platforms) of strike and electronic attack in multi-agent systems. 
+
+
+\subsection{EA-Strike Mission Profile}
+% Hows does an EA mission look like? 
+In typical EA-enabled strike or SEAD mission scenarios, teams of UAVs operate with distinct functional roles. Dedicated jammer platforms suppress or degrade adversary sensing and tracking performance, while strike platforms exploit these effects to penetrate defended airspace and engage designated targets. Such coordinated jammer-attacker mission structures have been adopted in the literature, as illustrated in Fig.~\ref{fig:EA_mission} \cite{yue2022uav_sead_hmarl,Lee2023MUMTSEAD,Fang2021CollaborativeCombat}.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.6\linewidth]{figures/EA_mission.png}
+    \caption{Schematic of a team of UAVs conducting a SEAD mission, where electronic attack (jamming) is used to degrade enemy interception range \cite{yue2022uav_sead_hmarl}.}
+    \label{fig:EA_mission}
+\end{figure}
+
+% What coordination challenges arise when electronic attack must be synchronized with kinetic actions?
+Effective electronic attack (EA) requires precise spatial, temporal, and power coordination between jamming and kinetic actions. Jamming must be applied at the appropriate time and location to sufficiently degrade air-defense system performance during critical phases of target detection, tracking, and engagement. This requirement is particularly important when considering the geometric effects of jamming, as antenna main-lobe and side-lobe coupling strongly influence jamming effectiveness. However, within agent-based modeling literature on strike and EA missions, these geometric effects are often neglected or simplified. As a result, misalignment in timing, positioning, or power allocation can significantly reduce mission effectiveness or increase the vulnerability of the attacking platform~\cite{yue2022uav_sead_hmarl, Lee2023MUMTSEAD, Fang2021CollaborativeCombat, cognitive_jammer_vs_radar_2025, RadarTutorial_Jamming}.
+
+% What are the limitations of EA (for onboard EA on ACPs/ACPs)?
+Electronic attack (EA) performance is limited by the requirement to achieve a minimum jamming-to-signal ratio (JSR) at the adversary radar receiver. Satisfying this requirement often necessitates high effective radiated power, which in turn drives increased electrical power consumption and thermal load for onboard EA systems. Noise jamming is further constrained by bandwidth limitations: spreading finite jammer power over a wide frequency band reduces the power spectral density at the radar receiver, potentially rendering the jamming ineffective. Moreover, jamming effectiveness is range-dependent~\cite{EW_Radar_Handbook, cognitive_jammer_vs_radar_2025, RadarTutorial_Jamming}.
+
+% How are EW effects typically abstracted or modeled in control and autonomy literature?
+In the relevant control and autonomy literature, electronic attack (EA) effects are commonly represented using highly abstract models. In~\cite{xu2025mdrl_uav_combat, yue2022uav_sead_hmarl}, the effective jamming region is modeled as a sector of a circle, as illustrated in Figure~\ref{fig:EA_mission}. Within these abstractions, EA effects on radar are typically captured by reducing the effective detection range by a fixed value~\cite{yue2022uav_sead_hmarl, Lee2023MUMTSEAD} or by decreasing the interception probability within defended regions~\cite{Fang2021CollaborativeCombat, cognitive_jammer_vs_radar_2025}. Ran et al. \cite{Ran2023UAVIPPO} model the sensing and electronic attack interaction such that a UAV can passively localize enemy radars only when they are actively emitting, assuming non-operating radars produce no detectable radiation. In jamming mode, a UAV creates a range-limited, sector-shaped blind region within the radar’s coverage where targets inside the sector are not detected.
+
+Some works explicitly model jamming as a discrete on/off action that enables or disables certain engagements~\cite{Lee2023MUMTSEAD, xu2025mdrl_uav_combat, Ran2023UAVIPPO}, while others assume continuous jamming throughout the mission. Although such abstractions simplify policy learning and large-scale simulation, explicit resource constraints—such as finite jamming duration, power availability, or thermal effects—are generally not modeled, with only limited exceptions~\cite{xu2025mdrl_uav_combat}.
+
+Finally, in \cite{Lee2023MUMTSEAD, xu2025mdrl_uav_combat, yue2022uav_sead_hmarl} EA simulations are limited to two-dimensional environments, where directional jamming is modeled as an azimuthal sector relative to the platform, neglecting three-dimensional effects such as altitude, antenna elevation patterns, platform attitude, and full lobe geometry, despite their significant impact on real-world jamming effectiveness.
+
+While these modeling approaches enable tractable optimization and learning in complex, multi-agent environments, they often omit several physically relevant effects discussed earlier in this chapter. In particular, geometric factors such as main-lobe versus side-lobe jamming, range-dependent propagation losses, bandwidth constraints, and power or thermal limitations of onboard EA systems are typically neglected. As a result, the relationship between platform positioning, jammer resource usage, and actual jamming effectiveness is roughly approximated.
+
+
+\section{Autonomous Collaborative Platforms}
+This section reviews how APC capabilities are represented in the literature, with emphasis on the abstractions used for platform dynamics, sensing, communication, navigation, and effects. These modeling assumptions directly influence the formulation and evaluation of control architectures and control methods in subsequent chapters.
+
+\subsection{APC Model}
+% How are ACPs modeled in literature? eg kinimatic model? 
+In the reviewed literature, ACPs are commonly represented by kinematic models operating in discrete time. Platform dynamics are typically simplified to low-order motion models that capture position, velocity, and heading (and, in some cases, altitude), while neglecting higher-order flight dynamics. Sensing, communication, and engagement behaviors are likewise abstracted, enabling tractable learning and coordination studies across multi-agent scenarios. This modeling approach is adopted consistently in  \cite{yue2022uav_sead_hmarl,Fang2021CollaborativeCombat,Lee2023MUMTSEAD,xu2025mdrl_uav_combat,Wang2025CooperativeUAV,yuksek2021cooperative, Jiang2025DDPGSwarmTaskPlanning, Fang2021CollaborativeCombat}.
+
+For example Wang et al. \cite{Wang2025CooperativeUAV} model a UAV as a point mass (or centroid) moving in a two-dimensional plane with constant speed and controllable heading. Under this assumption, the kinematics of UAV~$i$ can be expressed as
+\begin{equation}
+\begin{aligned}
+\dot{x}_i &= v_i \cos \psi_i, \\
+\dot{y}_i &= v_i \sin \psi_i, \\
+\dot{\psi}_i &= \omega_i,
+\end{aligned}
+\label{eq:unicycle_model}
+\end{equation}
+where $(x_i, y_i)$ denote the planar position of the UAV, $v_i$ is the translational speed, $\psi_i$ is the yaw (heading) angle, and $\omega_i$ is the yaw rate. 
+
+This unicycle-type kinematic model captures the essential maneuvering constraints of fixed-wing UAVs while remaining computationally efficient. As a result, it is widely used in multi-agent control, and mission-level simulation studies, despite neglecting higher-order dynamics such as acceleration limits, aerodynamic effects, and attitude dynamics \cite{yue2022uav_sead_hmarl,Fang2021CollaborativeCombat,Lee2023MUMTSEAD,xu2025mdrl_uav_combat,Wang2025CooperativeUAV,yuksek2021cooperative, Jiang2025DDPGSwarmTaskPlanning, Fang2021CollaborativeCombat}.
+
+\subsection{Missiles and Kinetic Effects}
+In addition to electronic attack, kinetic strike effects must be represented to model mission outcomes. Rather than simulating missile dynamics explicitly, the literature relies on abstract engagement rules. In some studies, a target is assumed to be destroyed when a UAV flies above or reaches a designated target area \cite{yuksek2021cooperative}. Other works define strike effects through geometric constraints, where targets within a specified range and angular sector of the UAV are considered destroyed \cite{Wang2025CooperativeUAV,yue2022uav_sead_hmarl}. In more detailed abstractions, a dedicated strike action must be executed by the agent, and successful engagement is only possible when the target lies within a predefined range and forward arc, see Fig.~\ref{fig:wang2025} \cite{Lee2023MUMTSEAD}. Missile guidance, time-of-flight, and dynamics or kinematics are typically not modeled. Moreover, strike effects are often treated deterministically, whereas in reality engagement outcomes are more stochastic due to factors such as guidance errors, countermeasures, environmental conditions, and system uncertainties.
+
+\subsection{Sensing} 
+From an operational perspective, ACPs need to employ a combination of internal and external sensing capabilities. Internal sensing provides information on platform state variables such as position, velocity, attitude, and remaining resources, while external sensing enables detection of peers, targets, and threats. In the literature, internal state information is typically assumed to be known, including variables such as flight speed, attitude, and remaining payload or energy \cite{xu2025mdrl_uav_combat,Lee2023MUMTSEAD}.
+
+Externally, real-world ACPs could rely on a variety of sensors operating across the electromagnetic spectrum. For example, passive radar receivers and electronic support measures can detect radar emissions, estimate the direction of a radar’s main lobe, and infer whether the platform is being illuminated or tracked. In addition, electro-optical and infrared sensors are commonly employed to detect, identify, and classify targets under a wide range of operational conditions~\cite{von_spreckelsen2018_ew_forgotten, AFDP3_85_2023, Adamy2001EW101, gunzinger2024cca, RadarTutorial_Jamming}.
+
+Belief maps are an abstraction used in multi-agent systems, robotics, and autonomy to represent a shared, probabilistic understanding of the environment, including adversary locations, threats, and associated uncertainties. A shared belief map represents a common perceived reality constructed from the observations of multiple agents and can be exchanged or fused among them to support coordinated decision-making~\cite{Huang2024BeliefMap, Wang2025CooperativeUAV}.
+
+In simulation, sensing is typically modeled at a high level of abstraction. Several studies represent sensors through limited detection ranges, within which targets or threats become observable \cite{Wang2025CooperativeUAV,Jiang2025DDPGSwarmTaskPlanning}. Studies that assume centralized coordination frequently impose no explicit observability constraints, providing agents access to global state information during execution \cite{yue2022uav_sead_hmarl, yuksek2021cooperative}. 
+
+
+\subsection{Communication} 
+% How is communication used in air defence operations? 
+Communication and coordination between air platforms, ground stations, and command-and-control (C2) elements are enabled by electromagnetic links. Voice communications and digital data links support the exchange of sensor information, mission updates, platform state data, and coordination commands. In collaborative air operations, including those involving ACPs, these links are essential for maintaining shared situational awareness and enabling synchronized action across distributed agents \cite{gunzinger2024cca}.
+
+% What communication constraints are typical in contested air operations?
+In contested air operations, communication is subject to significant constraints. One key limitation is range, as line-of-sight communication is often required to reduce susceptibility to jamming and interception. For collaborative combat aircraft (CCAs), reliable command-and-control through approximately 50 miles of line-of-sight communication is considered adequate for most operations \cite{gunzinger2024cca}. 
+
+Bandwidth limitations present an additional challenge. To reduce electromagnetic exposure and preserve stealth, communication links are typically constrained in data rate, limiting the volume and frequency of information exchange. As a result, ACPs are generally expected to share high-level, processed information rather than raw sensor data \cite{gunzinger2024cca, xu2025mdrl_uav_combat}.
+
+% How do jamming, intermittency, and range limitations affect coordination among ACPs?
+Electronic attack further exacerbates these constraints by introducing jamming, intermittency, and link degradation. Jamming can reduce communication range, increase loss, or temporarily deny connectivity, while deceptive interference may corrupt transmitted information \cite{Adamy2001EW101}. These effects can disrupt coordination by delaying or preventing the exchange of information and force platforms to rely more heavily on local sensing and autonomy. To mitigate these vulnerabilities, ACP communication architectures are commonly assumed to be decentralized and peer-to-peer \cite{gunzinger2024cca}.
+
+% How are communication limitations modelled in literature? 
+In the simulation literature, communication constraints are modeled in various ways. Explicit communication range limitations are included in \cite{Wang2025CooperativeUAV,Jiang2025DDPGSwarmTaskPlanning}, whereas most other studies do not model communication constraints during execution, either implicitly assuming reliable (peer to peer) information exchange or adopting centralized coordination schemes \cite{yue2022uav_sead_hmarl, yuksek2021cooperative}. Bandwidth limitations and intermittent connectivity are generally not represented explicitly.
+
+Wang et al. \cite{Wang2025CooperativeUAV} explicitly model communication constraints through a range-limited communication protocol. Each UAV communicates only with neighbors within a specified communication radius, and information sharing follows the resulting communication topology. In addition, the environment distinguishes role-dependent capability ranges, including reconnaissance (detection) ranges and strike engagement ranges, as illustrated in Fig.~\ref{fig:wang2025}.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=1\linewidth]{figures/wang2025.jpg}
+    \caption{Communication and capability ranges used in \cite{Wang2025CooperativeUAV}, illustrating unified communication range, unified reconnaissance range, strike range, and the induced communication topology.}
+    \label{fig:wang2025}
+\end{figure}
+
+
+
+\subsection{Navigation}
+Navigation and timing are key considerations for ACPs. As large and technologically advanced UAVs, ACPs are expected to employ multiple navigation modalities to ensure robustness and redundancy, including Global Navigation Satellite Systems (GNSS), inertial navigation systems (INS), and inertial measurement units (IMUs). The integration of these systems allows ACPs to maintain acceptable navigation performance even in contested environments. GNSS, however, is particularly vulnerable to electronic warfare. Jamming can deny signal reception, while spoofing can introduce false navigation information, leading to significant position errors and increased state uncertainty. Despite these vulnerabilities, ACPs are generally less susceptible to GNSS interference than small-scale UAVs due to their redundant navigation systems~\cite{Rados2024JammingSpoofingGNSS, gunzinger2024cca}.
+
+
+\section{Simulation Evaluation}
+
+This section reviews how strike and electronic attack (EA) scenarios are evaluated in the literature, focusing on commonly used performance metrics and evaluation methods for multi-agent reinforcement learning (MARL) systems.
+
+\subsection{Mission-Level Performance}
+
+Evaluation primarily focuses on mission effectiveness. A widely used metric is the \textit{task success rate}, defined as the proportion of simulation runs in which mission objectives are achieved, such as target destruction or successful SEAD execution \cite{xu2025mdrl_uav_combat, Lee2023MUMTSEAD, Fang2021CollaborativeCombat}. 
+
+Operational efficiency is commonly assessed using \textit{task completion time}, which measures the duration required to accomplish mission objectives \cite{xu2025mdrl_uav_combat, Fang2021CollaborativeCombat}. In addition, many studies report \textit{platform survivability}, typically expressed as the remaining asset ratio or survival rate of UAVs at the end of the mission. 
+
+To ensure safe and feasible behavior, some works also track \textit{constraint violations}, such as collisions between platforms, boundary incursions, or entry into restricted or high-risk regions (NFZs) \cite{Wang2025CooperativeUAV, yuksek2021cooperative}. These metrics provide insight into operational safety and rule compliance.
+
+In scenarios involving electronic attack, evaluation may further include \textit{resource usage} metrics, such as the duration or frequency of jamming actions, or overall energy or power expenditure. These measures reflect the efficiency of EA utilization and the ability to balance mission effectiveness with limited onboard resources.
+
+\subsection{Learning Performance}
+
+In addition to final mission outcomes, MARL methods are evaluated based on their learning behavior during training. The most common diagnostic is the \textit{average episode reward} plotted over training episodes, which indicates learning progress and policy convergence \cite{Lee2023MUMTSEAD, Fang2021CollaborativeCombat}. 
+
+\textit{Convergence speed} is assessed by the number of episodes required for performance to stabilize \cite{xu2025mdrl_uav_combat}. Some studies also report training losses, such as value or policy loss, to evaluate learning stability \cite{Lee2023MUMTSEAD}. Training settings, including episode length and total training steps, are typically provided to contextualize results.
+
+
+
+\section{Literature Overview}
+This section provides a brief overview of the simulation scenarios employed in the reviewed literature. The studies are categorized according to two mission types: strike, and combined strike and EA missions. Within these categories, the literature is examined with respect to the operational constraints incorporated into the simulation environments.
+
+The operational constraints reviewed include partial observability of the environment; communication limitations such as restricted range, limited bandwidth, or intermittent connectivity; sensor noise and uncertainty, including degraded navigation or sensing due to jamming; the presence of adversaries or interceptors, either fixed or mobile, that may lead to UAV loss; moving targets; no-fly zones that restrict available airspace; and temporal and spatial coordination requirements, such as precise timing between jamming and strike actions. Additionally, several studies consider heterogeneous teams composed of agents with distinct functional roles, such as strikers and jammers.
+
+Table~\ref{tab:mission_constraints_empty1} summarizes how these operational constraints are addressed across different mission types in the literature. Each entry indicates representative studies that explicitly model the corresponding constraint, while empty cells highlight areas that receive limited or no explicit treatment.
+
+\begin{table}[htbp]
+\centering
+\caption{Mapping of operational constraints to mission types addressed in the literature. Empty cells indicate limited or no explicit treatment.}
+\label{tab:mission_constraints_empty1}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Operational Constraint}
+& \textbf{Strike}
+& \textbf{Strike + EA} \\
+\midrule
+Partial observability 
+& \cite{Wang2025CooperativeUAV, Jiang2025DDPGSwarmTaskPlanning}
+& \cite{Fang2021CollaborativeCombat, Lee2023MUMTSEAD} \\
+
+Communication limitations  
+& \cite{Wang2025CooperativeUAV, Jiang2025DDPGSwarmTaskPlanning}
+& \cite{Fang2021CollaborativeCombat, xu2025mdrl_uav_combat, Ran2023UAVIPPO} \\
+
+Sensor noise or uncertainty   
+& \cite{Jiang2025DDPGSwarmTaskPlanning} 
+& \\
+
+Limited resources (e.g. battery, weapons)
+& 
+& \cite{xu2025mdrl_uav_combat, Lee2023MUMTSEAD} \\
+
+Adversaries / Interceptors (fixed or mobile)
+& \cite{Wang2025CooperativeUAV}
+& \cite{xu2025mdrl_uav_combat, yue2022uav_sead_hmarl, Fang2021CollaborativeCombat, Lee2023MUMTSEAD} \\
+
+Moving target
+& \cite{Wang2025CooperativeUAV, Jiang2025DDPGSwarmTaskPlanning}
+& \cite{Fang2021CollaborativeCombat} \\
+
+No-fly-zones 
+& \cite{yuksek2021cooperative}
+& \\
+
+Temporal and/or spatial coordination requirements 
+& \cite{yuksek2021cooperative}
+& \cite{xu2025mdrl_uav_combat, Lee2023MUMTSEAD} \\
+
+Heterogeneous agents (e.g. striker, jammer)
+& \cite{Wang2025CooperativeUAV}
+& \cite{yue2022uav_sead_hmarl, xu2025mdrl_uav_combat, Fang2021CollaborativeCombat, Lee2023MUMTSEAD} \\
+
+\bottomrule
+\end{tabular}
+\end{table}
+
+What can be observed from Table~\ref{tab:mission_constraints_empty1} is that most studies focus on a limited subset of operational constraints, typically modeling only two to four constraints simultaneously. Rather than aiming for comprehensive realism, the majority of works prioritize specific aspects of the problem, such as coordination under partial observability, target engagement in the presence of threats, or role differentiation within heterogeneous teams. As a result, no single study captures the full spectrum of constraints that autonomous collaborative platforms may face in contested environments.
+
+Sensor noise and degraded navigation are rarely modeled explicitly, even in EA-enabled scenarios where electromagnetic interference is central to the mission context. Adversarial effects are commonly abstracted through threat regions or probabilistic interception rather than explicit engagement dynamics, and resource constraints such as limited fuel, weapon counts, or jamming endurance are only considered in a small number of studies.
+
+Overall, the literature shows a trade-off between scenario realism and computational tractability, with abstractions chosen to enable efficient training and evaluation of control and learning methods. 
+
