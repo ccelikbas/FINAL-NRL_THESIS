@@ -7,7 +7,7 @@ from typing import List
 
 import torch
 from tensordict import TensorDict
-from torchrl.collectors import SyncDataCollector
+from torchrl.collectors import Collector
 from torchrl.objectives import ClipPPOLoss
 
 from strike_ea.env import StrikeEA2DEnv
@@ -35,17 +35,26 @@ def make_ppo_loss(actor, critic, clip_eps: float, entropy_coef: float) -> ClipPP
     return ClipPPOLoss(actor_network=actor, critic_network=critic, **kwargs)
 
 
-def make_collector(env, actor, frames_per_batch: int, n_iters: int, device: torch.device) -> SyncDataCollector:
-    """Instantiate SyncDataCollector, handling API differences across TorchRL versions."""
-    sig    = inspect.signature(SyncDataCollector.__init__)
+def make_collector(env, actor, frames_per_batch: int, n_iters: int, device: torch.device) -> Collector:
+    """Instantiate Collector (newer API, replaces deprecated SyncDataCollector)."""
+    sig    = inspect.signature(Collector.__init__)
     params = sig.parameters
 
-    kwargs: dict = dict(policy=actor, frames_per_batch=frames_per_batch, total_frames=frames_per_batch * n_iters)
+    # Total frames to collect across all iterations
+    total_frames = frames_per_batch * n_iters
+    
+    kwargs: dict = dict(
+        policy=actor, 
+        frames_per_batch=frames_per_batch, 
+        total_frames=total_frames
+    )
+    
+    # Handle different parameter names across TorchRL versions
     kwargs["env" if "env" in params else "create_env_fn"] = env
     if "device"         in params: kwargs["device"]         = device
     if "storing_device" in params: kwargs["storing_device"] = device
 
-    return SyncDataCollector(**kwargs)
+    return Collector(**kwargs)
 
 
 def get_loss_component(loss_td: TensorDict, candidates: List[str]) -> torch.Tensor:

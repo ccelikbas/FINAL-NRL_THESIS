@@ -208,7 +208,8 @@ class StrikeEA2DEnv(EnvBase):
         # action[..., 3:6]: heading/angular accelerations (or used as needed)
         acc = action.float() - 1.0  # Convert {0,1,2} to {-1,0,+1}  [B, A, 6]
         
-        alive = self.agent_alive.float()
+        alive = self.agent_alive  # Keep as bool for bitwise operations
+        alive_float = alive.float()  # Use for multiplication
         
         # ---- Velocity dynamics (discrete acceleration model) ----
         # Update velocity based on acceleration (first 3 actions combined or first action as primary)
@@ -220,7 +221,7 @@ class StrikeEA2DEnv(EnvBase):
         
         # Apply acceleration to speed
         self.agent_speed = (self.agent_speed + v_accel * accel_magnitude).clamp(0.0, self.v_max)
-        self.agent_speed = self.agent_speed * alive  # Dead agents don't move
+        self.agent_speed = self.agent_speed * alive_float  # Dead agents don't move
         
         # ---- Heading dynamics (discrete angular acceleration) ----
         # Use last action as heading angular acceleration
@@ -231,7 +232,7 @@ class StrikeEA2DEnv(EnvBase):
         
         # Apply angular acceleration
         self.agent_heading_rate = (self.agent_heading_rate + h_accel * h_accel_magnitude).clamp(-self.dpsi_max, self.dpsi_max)
-        self.agent_heading_rate = self.agent_heading_rate * alive  # Dead agents don't rotate
+        self.agent_heading_rate = self.agent_heading_rate * alive_float  # Dead agents don't rotate
         
         # Update heading based on heading rate
         self.agent_heading = (self.agent_heading + self.agent_heading_rate) % (2.0 * math.pi)
@@ -267,7 +268,7 @@ class StrikeEA2DEnv(EnvBase):
         rel_ar = self.radar_pos[:, None, :, :] - self.agent_pos[:, :, None, :]   # [B,A,R,2]
         dist_ar = torch.linalg.norm(rel_ar, dim=-1)                               # [B,A,R]
         in_radar = dist_ar <= radar_eff_range[:, None, :]
-        killed   = in_radar.any(dim=-1) & alive.bool()
+        killed   = in_radar.any(dim=-1) & alive
         self.agent_alive = self.agent_alive & (~killed)
 
         # ---- striker kinetic kills: Strikers automatically strike if target in engagement zone ----
@@ -278,7 +279,7 @@ class StrikeEA2DEnv(EnvBase):
             # Strikers automatically strike (no action needed) - always attempt to engage
             rel_st     = self.target_pos[:, None, :, :] - self.agent_pos[:, striker_idx, None, :]  # [B,ns,T,2]
             can        = self.striker.can_engage(rel_st, self.agent_heading[:, striker_idx][:, :, None])
-            can        = can & self.agent_alive[:, striker_idx, None] & self.target_alive[:, None, :]
+            can        = can & alive[:, striker_idx, None] & self.target_alive[:, None, :]
             kill_t     = can.any(dim=1)
             self.target_alive = self.target_alive & (~kill_t)
         else:
@@ -295,7 +296,7 @@ class StrikeEA2DEnv(EnvBase):
 
         border_pen = (
             (self.border_thresh - dist_bord) / self.border_thresh
-        ).clamp(0.0, 1.0) * float(rp.border) * alive.float()
+        ).clamp(0.0, 1.0) * float(rp.border) * alive_float
 
         rel_at_all = self.target_pos[:, None, :, :] - self.agent_pos[:, :, None, :]   # [B,A,T,2]
         dist_at    = torch.linalg.norm(rel_at_all, dim=-1)
@@ -303,7 +304,7 @@ class StrikeEA2DEnv(EnvBase):
         dist_masked = torch.where(mask_at, dist_at, torch.full_like(dist_at, float("inf")))
         dist_min, _ = dist_masked.min(dim=-1)
         max_dist    = math.hypot(self.high - self.low, self.high - self.low)
-        target_rew  = (1.0 - (dist_min / max_dist)).clamp_min(0.0) * float(rp.move_closer) * alive.float()
+        target_rew  = (1.0 - (dist_min / max_dist)).clamp_min(0.0) * float(rp.move_closer) * alive_float
 
         per_agent_shaping = target_rew - border_pen   # [B,A]
 
