@@ -298,29 +298,26 @@ class StrikeEA2DEnv(EnvBase):
         rp = self.reward_params
         
         # Convert discrete actions {0, 1, 2} to accelerations {-1, 0, +1}
-        # action[..., 0:3]: velocity accelerations (or used as needed)
-        # action[..., 3:6]: heading/angular accelerations (or used as needed)
+        # action[..., 0:3]: velocity accelerations
+        # action[..., 3:6]: heading/angular accelerations
         acc = action.float() - 1.0  # Convert {0,1,2} to {-1,0,+1}  [B, A, 6]
         
         alive = self.agent_alive  # Keep as bool for bitwise operations
         alive_float = alive.float()  # Use for multiplication
         
-        # ---- Velocity dynamics (discrete acceleration model) ----
-        # Update velocity based on acceleration (first 3 actions combined or first action as primary)
-        # For simplicity, use first action as main velocity acceleration
-        v_accel = acc[..., 0]  # [B, A] acceleration in {-1, 0, +1}
-        
-        # Apply acceleration to speed
-        self.agent_speed = (self.agent_speed + v_accel * self.accel_magnitude).clamp(0.0, self.v_max)
-        self.agent_speed = self.agent_speed * alive_float  # Dead agents don't move
-        
-        # ---- Heading dynamics (discrete angular acceleration) ----
-        # Use last action as heading angular acceleration
-        h_accel = acc[..., -1]  # [B, A] angular acceleration in {-1, 0, +1}
-        
-        # Apply angular acceleration
-        self.agent_heading_rate = (self.agent_heading_rate + h_accel * self.h_accel_magnitude).clamp(-self.dpsi_max, self.dpsi_max)
-        self.agent_heading_rate = self.agent_heading_rate * alive_float  # Dead agents don't rotate
+        # ---- Velocity dynamics (sum of 3 discrete acceleration dims) ----
+        v_accel = acc[..., :3].sum(dim=-1)  # [B, A] in {-3, ..., +3}
+        self.agent_speed = (
+            self.agent_speed + v_accel * (self.accel_magnitude / 3.0)
+        ).clamp(0.0, self.v_max)
+        self.agent_speed = self.agent_speed * alive_float
+
+        # ---- Heading dynamics (sum of 3 discrete angular acceleration dims) ----
+        h_accel = acc[..., 3:].sum(dim=-1)  # [B, A] in {-3, ..., +3}
+        self.agent_heading_rate = (
+            self.agent_heading_rate + h_accel * (self.h_accel_magnitude / 3.0)
+        ).clamp(-self.dpsi_max, self.dpsi_max)
+        self.agent_heading_rate = self.agent_heading_rate * alive_float
         
         # Update heading based on heading rate
         self.agent_heading = (self.agent_heading + self.agent_heading_rate) % (2.0 * math.pi)
@@ -335,20 +332,17 @@ class StrikeEA2DEnv(EnvBase):
         jammer_idx = torch.arange(self.n_strikers, self.n_agents, device=self.device)
 
         if jammer_idx.numel() > 0:
-            # Jammers are always "on" if within jam radius - no action needed
             rel_jr     = self.radar_pos[:, None, :, :] - self.agent_pos[:, jammer_idx, None, :]  # [B,nj,R,2]
             jam_mask   = self.jammer.jams_radar(rel_jr) & alive[:, jammer_idx, None]  # [B,nj,R]
             any_jam    = jam_mask.any(dim=1)                                           # [B,R]
-            jam_active = jam_mask.any(dim=2)                                           # [B,nj]
-            jam_active_count = jam_active.sum(dim=1).float()                           # [B]
-            team_jam_reward  = jam_active_count * float(rp.jamming)
+            jam_active = jam_mask.any(dim=2)                                           # [B,nj] per-jammer: actively jamming?
             radar_eff_range  = torch.where(
                 any_jam,
                 (radar_eff_range - self.jammer.delta_range).clamp_min(0.0),
                 radar_eff_range,
             )
         else:
-            team_jam_reward = torch.zeros(B, device=self.device)
+            jam_active = torch.zeros(B, 0, dtype=torch.bool, device=self.device)
 
         self.radar_eff_range = radar_eff_range.clone()
 
@@ -357,12 +351,10 @@ class StrikeEA2DEnv(EnvBase):
         dist_ar = torch.linalg.norm(rel_ar, dim=-1)                               # [B,A,R]
         in_radar = dist_ar <= radar_eff_range[:, None, :]                         # [B,A,R]
         
-        # Probabilistic kill: agent is killed if in radar range AND passes probability check
-        # Generate random samples for each agent-radar pair
         kill_samples = torch.rand(B, A, self.n_radars, device=self.device, generator=self._rng)
         kill_prob = self.radar.kill_probability
-        kills_from_radar = in_radar & (kill_samples < kill_prob)                  # [B,A,R]
-        killed = kills_from_radar.any(dim=-1) & alive                             # [B,A] - killed if any radar kills them
+        kills_from_radar = in_radar & (kill_samples < kill_prob)
+        killed = kills_from_radar.any(dim=-1) & alive
         self.agent_alive = self.agent_alive & (~killed)
 
         # ---- striker kinetic kills: Strikers automatically strike if target in engagement zone ----
@@ -370,59 +362,56 @@ class StrikeEA2DEnv(EnvBase):
         striker_idx = torch.arange(0, self.n_strikers, device=self.device)
 
         if striker_idx.numel() > 0:
-            # Strikers automatically strike (no action needed) - always attempt to engage
-            rel_st     = self.target_pos[:, None, :, :] - self.agent_pos[:, striker_idx, None, :]  # [B,ns,T,2]
+            rel_st     = self.target_pos[:, None, :, :] - self.agent_pos[:, striker_idx, None, :]
             can        = self.striker.can_engage(rel_st, self.agent_heading[:, striker_idx][:, :, None])
             can        = can & alive[:, striker_idx, None] & self.target_alive[:, None, :]
             kill_t     = can.any(dim=1)
             self.target_alive = self.target_alive & (~kill_t)
-        else:
-            can = None
 
-        # ---- shaping rewards ----
-        pos        = self.agent_pos
-        dist_bord  = torch.stack([
+        # ==================================================================
+        # Reward computation (simplified, role-specific shaping)
+        # ==================================================================
+        reward = torch.zeros(B, A, device=self.device)
+
+        # 1. Team reward: target destroyed — shared equally among alive agents
+        n_killed = kill_t.float().sum(dim=-1)                           # [B]
+        n_alive  = self.agent_alive.float().sum(dim=-1).clamp_min(1.0)  # [B]
+        team_kill = (n_killed * float(rp.target_destroyed) / n_alive)   # [B]
+        reward += team_kill.unsqueeze(-1) * alive_float                 # [B, A]
+
+        # 2. Border penalty (per agent, proportional to proximity)
+        pos       = self.agent_pos
+        dist_bord = torch.stack([
             pos[..., 0] - self.low,
             self.high - pos[..., 0],
             pos[..., 1] - self.low,
             self.high - pos[..., 1],
-        ], dim=-1).min(dim=-1).values                                             # [B,A]
-
+        ], dim=-1).min(dim=-1).values                                   # [B, A]
         border_pen = (
             (self.border_thresh - dist_bord) / self.border_thresh
-        ).clamp(0.0, 1.0) * float(rp.border) * alive_float
+        ).clamp(0.0, 1.0) * float(rp.border_penalty) * alive_float
+        reward += border_pen
 
-        rel_at_all = self.target_pos[:, None, :, :] - self.agent_pos[:, :, None, :]   # [B,A,T,2]
-        dist_at    = torch.linalg.norm(rel_at_all, dim=-1)
-        mask_at    = self.target_alive[:, None, :].expand(-1, self.n_agents, -1)
-        dist_masked = torch.where(mask_at, dist_at, torch.full_like(dist_at, float("inf")))
-        dist_min, _ = dist_masked.min(dim=-1)
-        max_dist    = math.hypot(self.high - self.low, self.high - self.low)
-        target_rew  = (1.0 - (dist_min / max_dist)).clamp_min(0.0) * float(rp.move_closer) * alive_float
+        # 3. Timestep penalty (per alive agent)
+        reward += float(rp.timestep_penalty) * alive_float
 
-        per_agent_shaping = target_rew - border_pen   # [B,A]
+        # 4. Jammer shaping: reward for actively jamming a radar
+        if jam_active.numel() > 0:
+            reward[:, self.n_strikers:] += jam_active.float() * float(rp.jammer_jamming)
 
-        # ---- kill / loss attribution ----
-        if can is not None:
-            killers       = can.float()
-            denom         = killers.sum(dim=1, keepdim=True).clamp_min(1.0)
-            share         = killers / denom              # [B,ns,T]
-            per_agent_kill = torch.zeros(B, A, device=self.device)
-            per_agent_kill[:, : self.n_strikers] = share.sum(dim=2)
-        else:
-            per_agent_kill = torch.zeros(B, A, device=self.device)
+        # 5. Striker shaping: proximity to nearest alive target
+        if striker_idx.numel() > 0 and self.n_targets > 0:
+            rel_st_all = self.target_pos[:, None, :, :] - self.agent_pos[:, :self.n_strikers, None, :]
+            dist_st    = torch.linalg.norm(rel_st_all, dim=-1)         # [B, ns, T]
+            mask_t     = self.target_alive[:, None, :].expand(-1, self.n_strikers, -1)
+            dist_masked = torch.where(mask_t, dist_st, torch.full_like(dist_st, float("inf")))
+            dist_min, _ = dist_masked.min(dim=-1)                      # [B, ns]
+            max_dist    = math.hypot(self.high - self.low, self.high - self.low)
+            prox_rew    = (1.0 - dist_min / max_dist).clamp_min(0.0) * float(rp.striker_proximity)
+            striker_alive = alive[:, :self.n_strikers].float()
+            reward[:, :self.n_strikers] += prox_rew * striker_alive
 
-        per_agent_kill_rew = per_agent_kill   * float(rp.target_destroyed)
-        per_agent_loss_pen = killed.float()   * float(rp.agent_destroyed)
-        team_jam_per_agent = (team_jam_reward.unsqueeze(-1).expand(B, A) / float(self.n_agents))
-
-        reward = (
-            per_agent_kill_rew
-            + per_agent_loss_pen
-            + per_agent_shaping
-            + team_jam_per_agent
-            + float(rp.small_step)
-        ).unsqueeze(-1).contiguous()   # [B, A, 1]
+        reward = reward.unsqueeze(-1).contiguous()  # [B, A, 1]
 
         # ---- done flags ----
         self.step_count += 1

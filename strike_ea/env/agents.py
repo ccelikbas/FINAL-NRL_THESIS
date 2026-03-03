@@ -12,7 +12,7 @@ class StrikerAgent:
 
     engage_range:   float = 0.12
     engage_fov_deg: float = 60.0
-    v_min:          float = 0.0
+    v_min:          float = 0.01
 
     def can_engage(
         self,
