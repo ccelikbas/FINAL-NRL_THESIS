@@ -54,12 +54,13 @@ class StrikeEA2DEnv(EnvBase):
         accel_magnitude: float = 0.01,
         dpsi_max:     float = math.radians(20.0),
         h_accel_magnitude_fraction: float = 0.1,
+        min_turn_radius: float = 0.05,
         # --- sensors ---
         R_obs:        float = 0.50,
         # --- striker capabilities ---
         striker_engage_range: float = 0.12,
         striker_engage_fov: float = 60.0,
-        striker_v_min: float = 0.0,
+        striker_v_min: float = 0.01,
         # --- jammer capabilities ---
         jammer_jam_radius: float = 0.25,
         jammer_jam_effect: float = 0.10,
@@ -93,6 +94,7 @@ class StrikeEA2DEnv(EnvBase):
         self.accel_magnitude = float(accel_magnitude)
         self.dpsi_max  = float(dpsi_max)
         self.h_accel_magnitude = float(dpsi_max) * float(h_accel_magnitude_fraction)
+        self.min_turn_radius   = float(min_turn_radius)
 
         # sensors
         self.R_obs       = float(R_obs)
@@ -275,7 +277,10 @@ class StrikeEA2DEnv(EnvBase):
 
         self.agent_pos     = self.low + (self.high - self.low) * torch.rand(B, A, 2, device=self.device)
         self.agent_heading = (2.0 * math.pi) * torch.rand(B, A, device=self.device)
-        self.agent_speed   = torch.zeros(B, A, device=self.device)  # Start with zero velocity
+        # Initialize at minimum speed (aircraft can't hover)
+        self.agent_speed = torch.zeros(B, A, device=self.device)
+        self.agent_speed[:, :self.n_strikers] = self.striker.v_min
+        self.agent_speed[:, self.n_strikers:] = self.jammer.v_min
         self.agent_heading_rate = torch.zeros(B, A, device=self.device)  # Start with zero angular velocity
         self.agent_alive   = torch.ones(B, A, dtype=torch.bool, device=self.device)
         self.radar_pos     = self.low + (self.high - self.low) * torch.rand(B, R, 2, device=self.device)
@@ -312,12 +317,28 @@ class StrikeEA2DEnv(EnvBase):
         ).clamp(0.0, self.v_max)
         self.agent_speed = self.agent_speed * alive_float
 
+        # Enforce minimum speed for alive agents (aircraft can't hover / spin in place)
+        v_min_per_agent = torch.zeros_like(self.agent_speed)
+        v_min_per_agent[:, :self.n_strikers] = self.striker.v_min
+        v_min_per_agent[:, self.n_strikers:] = self.jammer.v_min
+        self.agent_speed = torch.where(
+            alive, torch.max(self.agent_speed, v_min_per_agent), self.agent_speed
+        )
+
         # ---- Heading dynamics (sum of 3 discrete angular acceleration dims) ----
         h_accel = acc[..., 3:].sum(dim=-1)  # [B, A] in {-3, ..., +3}
         self.agent_heading_rate = (
             self.agent_heading_rate + h_accel * (self.h_accel_magnitude / 3.0)
         ).clamp(-self.dpsi_max, self.dpsi_max)
         self.agent_heading_rate = self.agent_heading_rate * alive_float
+
+        # Enforce minimum turn radius: max heading rate = speed / R_min
+        # Prevents tight circling; at low speed agents must make wider turns
+        if self.min_turn_radius > 0:
+            max_omega = (self.agent_speed / self.min_turn_radius).clamp(max=self.dpsi_max)
+            self.agent_heading_rate = torch.max(
+                torch.min(self.agent_heading_rate, max_omega), -max_omega
+            )
         
         # Update heading based on heading rate
         self.agent_heading = (self.agent_heading + self.agent_heading_rate) % (2.0 * math.pi)
@@ -410,6 +431,9 @@ class StrikeEA2DEnv(EnvBase):
             prox_rew    = (1.0 - dist_min / max_dist).clamp_min(0.0) * float(rp.striker_proximity)
             striker_alive = alive[:, :self.n_strikers].float()
             reward[:, :self.n_strikers] += prox_rew * striker_alive
+
+        # 6. Agent destruction penalty (applied to agents killed by radar this step)
+        reward += killed.float() * float(rp.agent_destroyed)
 
         reward = reward.unsqueeze(-1).contiguous()  # [B, A, 1]
 

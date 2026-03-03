@@ -60,6 +60,7 @@ class TestRunner:
             # Rewards
             border_thresh = env_cfg.border_thresh,
             reward_config = env_cfg.reward_config,
+            min_turn_radius = env_cfg.min_turn_radius,
         )
 
     @torch.no_grad()

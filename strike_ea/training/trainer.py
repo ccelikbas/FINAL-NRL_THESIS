@@ -63,6 +63,7 @@ def train_mappo(
         radar_kill_probability = env_cfg.radar_kill_probability,
         border_thresh = env_cfg.border_thresh,
         reward_config = env_cfg.reward_config,
+        min_turn_radius = env_cfg.min_turn_radius,
     )
 
     env = TransformedEnv(

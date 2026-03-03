@@ -54,5 +54,9 @@ class RewardConfig:
     # Formula: reward = (1 - dist_to_nearest_target / max_map_distance) × striker_proximity
     # Lower if strikers are too cautious; Higher if they rush blindly
 
-
-# TODO: negative reward if radar destoys an agent (encourage stealthier behavior)
+    # ─── DEATH PENALTIES (Per-agent, applied on the step the agent dies) ──────
+    agent_destroyed: float = -100.0
+    # Negative reward when an agent (striker or jammer) is killed by a radar
+    # Applied ONLY to the destroyed agent in the step it dies
+    # Encourages agents to avoid radar zones and develop stealthy/cautious behavior
+    # Higher magnitude = stronger radar avoidance; Lower = more risk-taking

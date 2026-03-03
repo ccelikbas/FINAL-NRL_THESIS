@@ -81,6 +81,13 @@ class EnvConfig:
     h_accel_magnitude_fraction: float = 0.1
     # Angular acceleration = dpsi_max × this fraction = 1.2°/min per action
     # Controls yaw acceleration (how quickly agents change turn rate)
+    
+    min_turn_radius: float = 0.05
+    # Minimum turn radius: 50 km. Prevents agents from spinning in tight circles
+    # Turn rate is limited by: omega_max = speed / min_turn_radius
+    # At v_min (0.01 = 10 km/min): max 11.5°/step turn rate
+    # At v_max (0.02 = 20 km/min): max 23°/step (but dpsi_max caps at 12°)
+    # Larger = wider turns (less agile); Smaller = tighter turns (more agile)
 
     # ─── Sensor / Observation (State Representation for MAPPO) ────────────────
     R_obs: float = 0.30
@@ -168,7 +175,7 @@ class TrainConfig:
     # Higher = better sample efficiency but higher memory cost
     # Rule of thumb: 20-32 steps per environment per iteration
     
-    n_iters: int = 500
+    n_iters: int = 50
     # Number of collect→update cycles. Each cycle collects frames_per_batch transitions
     # Higher = longer training, potential for better convergence
 
@@ -188,7 +195,7 @@ class TrainConfig:
     # clip_eps=0.2 means policy probability ratio clamped to [0.8, 1.2]
     # Smaller ε = more conservative updates; Larger ε = more aggressive exploration
     
-    gamma: float = 0.95
+    gamma: float = 0.99
     # Discount factor for returns: R_t = r_t + γ r_{t+1} + γ² r_{t+2} + ...
     # Closer to 1.0 = values distant future rewards (longer horizon, higher variance)
     # Closer to 0.0 = only immediate rewards matter (lower variance, less far-sighted)

@@ -46,11 +46,24 @@ from strike_ea.evaluation.visualize import animate_rollout, plot_training
 # Policy saving / loading
 # ─────────────────────────────────────────────────────────────────────────────
 
-def save_actor(actor, save_path: str):
-    """Save actor network state dict. Creates parent directories if needed."""
+def save_actor(actor, save_path: str, env_cfg=None, net_cfg=None, preset_name=None):
+    """Save actor network state dict + config metadata. Creates parent directories if needed.
+    
+    Saves a dict with:
+      - 'state_dict': network weights
+      - 'env_cfg': EnvConfig used during training (for correct env reconstruction)
+      - 'net_cfg': NetworkConfig (hidden size, etc.)
+      - 'preset': preset name used
+    """
     save_path = Path(save_path)
     save_path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(actor.state_dict(), save_path)
+    checkpoint = {
+        "state_dict": actor.state_dict(),
+        "env_cfg": env_cfg,
+        "net_cfg": net_cfg,
+        "preset": preset_name,
+    }
+    torch.save(checkpoint, save_path)
     print(f"Policy saved to: {save_path}")
 
 
@@ -68,12 +81,29 @@ def get_timestamped_policy_path(preset_name: str = "default", policy_dir: str = 
 
 
 def load_actor(actor, load_path: str):
+    """Load actor weights from a checkpoint file.
+    
+    Supports both new format (dict with 'state_dict' + metadata) and
+    legacy format (raw state_dict).
+    
+    Returns: (actor, env_cfg_or_None, net_cfg_or_None)
+    """
     load_path = Path(load_path)
     if not load_path.exists():
         raise FileNotFoundError(f"Policy file not found: {load_path}")
-    actor.load_state_dict(torch.load(load_path, weights_only=True))
-    print(f"Policy loaded from: {load_path}")
-    return actor
+    checkpoint = torch.load(load_path, weights_only=False)
+    if isinstance(checkpoint, dict) and "state_dict" in checkpoint:
+        actor.load_state_dict(checkpoint["state_dict"])
+        env_cfg = checkpoint.get("env_cfg")
+        net_cfg = checkpoint.get("net_cfg")
+        preset = checkpoint.get("preset", "unknown")
+        print(f"Policy loaded from: {load_path} (preset: {preset})")
+        return actor, env_cfg, net_cfg
+    else:
+        # Legacy format: raw state_dict
+        actor.load_state_dict(checkpoint)
+        print(f"Policy loaded from: {load_path} (legacy format, no metadata)")
+        return actor, None, None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -86,7 +116,7 @@ def run_single(env_cfg, train_cfg, net_cfg, *, label="run", animate=True, save_d
     plot_training(logs, save_dir=save_dir)
     
     if save_policy:
-        save_actor(actor, save_policy)
+        save_actor(actor, save_policy, env_cfg=env_cfg, net_cfg=net_cfg, preset_name=label)
     
     if animate:
         tester = TestRunner(actor, device=train_cfg.device, max_steps=220, seed=999, env_cfg=env_cfg)
@@ -96,11 +126,33 @@ def run_single(env_cfg, train_cfg, net_cfg, *, label="run", animate=True, save_d
 
 
 def run_play(env_cfg, train_cfg, net_cfg, policy_path=None):
+    """Play/test mode: load a saved policy and run a visual rollout.
+    
+    If the policy file contains saved config metadata, those configs are used
+    automatically (so you don't need to specify --preset to match training).
+    """
     print(f"\n{'='*60}\n  Play Mode\n{'='*60}")
     from strike_ea.models.actor import make_actor
     from strike_ea.env.environment import StrikeEA2DEnv
 
     device = train_cfg.device
+
+    # If a policy file is provided, peek at its metadata to get the right config
+    if policy_path:
+        ckpt_path = Path(policy_path)
+        if not ckpt_path.exists():
+            raise FileNotFoundError(f"Policy file not found: {ckpt_path}")
+        checkpoint = torch.load(ckpt_path, weights_only=False)
+        if isinstance(checkpoint, dict) and "state_dict" in checkpoint:
+            if checkpoint.get("env_cfg") is not None:
+                env_cfg = checkpoint["env_cfg"]
+                print(f"  Using env config from checkpoint")
+            if checkpoint.get("net_cfg") is not None:
+                net_cfg = checkpoint["net_cfg"]
+                print(f"  Using network config from checkpoint (hidden={net_cfg.hidden})")
+            preset = checkpoint.get("preset", "unknown")
+            print(f"  Trained with preset: {preset}")
+
     env = StrikeEA2DEnv(
         num_envs=1, max_steps=train_cfg.max_steps, device=device, seed=train_cfg.seed,
         n_strikers=env_cfg.n_strikers, n_jammers=env_cfg.n_jammers,
@@ -115,11 +167,12 @@ def run_play(env_cfg, train_cfg, net_cfg, policy_path=None):
         jammer_v_min=env_cfg.jammer_v_min,
         radar_range=env_cfg.radar_range, radar_kill_probability=env_cfg.radar_kill_probability,
         border_thresh=env_cfg.border_thresh, reward_config=env_cfg.reward_config,
+        min_turn_radius=env_cfg.min_turn_radius,
     )
 
     actor = make_actor(env, hidden=net_cfg.hidden)
     if policy_path:
-        actor = load_actor(actor, policy_path)
+        actor, _, _ = load_actor(actor, policy_path)
     else:
         print("Using random initial policy (no checkpoint loaded)")
 
@@ -157,6 +210,7 @@ def parse_args():
     p.add_argument("--accel_magnitude",  type=float, default=None)
     p.add_argument("--dpsi_max_deg",     type=float, default=None)
     p.add_argument("--h_accel_fraction", type=float, default=None)
+    p.add_argument("--min_turn_radius",  type=float, default=None, help="Minimum turn radius (0.05 = 50 km)")
 
     # Agent capabilities
     p.add_argument("--striker_engage_range", type=float, default=None)
@@ -174,6 +228,7 @@ def parse_args():
     p.add_argument("--border_penalty",     type=float, default=None)
     p.add_argument("--jam_reward",         type=float, default=None, help="jammer_jamming weight")
     p.add_argument("--striker_proximity",  type=float, default=None)
+    p.add_argument("--agent_destroyed",   type=float, default=None, help="Death penalty (e.g. -100)")
     return p.parse_args()
 
 
@@ -190,6 +245,7 @@ def apply_overrides(args, env_cfg, train_cfg, net_cfg):
     if args.accel_magnitude  is not None: env_cfg = replace(env_cfg, accel_magnitude=args.accel_magnitude)
     if args.dpsi_max_deg     is not None: env_cfg = replace(env_cfg, dpsi_max=math.radians(args.dpsi_max_deg))
     if args.h_accel_fraction is not None: env_cfg = replace(env_cfg, h_accel_magnitude_fraction=args.h_accel_fraction)
+    if args.min_turn_radius  is not None: env_cfg = replace(env_cfg, min_turn_radius=args.min_turn_radius)
 
     if args.striker_engage_range is not None: env_cfg = replace(env_cfg, striker_engage_range=args.striker_engage_range)
     if args.striker_engage_fov   is not None: env_cfg = replace(env_cfg, striker_engage_fov=args.striker_engage_fov)
@@ -206,6 +262,7 @@ def apply_overrides(args, env_cfg, train_cfg, net_cfg):
     if args.border_penalty    is not None: rw = replace(rw, border_penalty=args.border_penalty)
     if args.jam_reward        is not None: rw = replace(rw, jammer_jamming=args.jam_reward)
     if args.striker_proximity is not None: rw = replace(rw, striker_proximity=args.striker_proximity)
+    if args.agent_destroyed   is not None: rw = replace(rw, agent_destroyed=args.agent_destroyed)
     env_cfg = replace(env_cfg, reward_config=rw)
 
     return env_cfg, train_cfg, net_cfg
@@ -243,3 +300,13 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+# # Train (auto-saves to saved_policies/default/YYYY-MM-DD_HH-MM-SS.pt)
+# python run.py --no_animate
+
+# # Test any saved policy (config auto-loaded from file)
+# python run.py --play --policy_path saved_policies/default/2026-03-03_18-45-05.pt
+
+# # Override destruction penalty
+# python run.py --agent_destroyed -50 --no_animate
