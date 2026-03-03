@@ -175,14 +175,14 @@ class TrainConfig:
     # Higher = better sample efficiency but higher memory cost
     # Rule of thumb: 20-32 steps per environment per iteration
     
-    n_iters: int = 50
+    n_iters: int = 200
     # Number of collect→update cycles. Each cycle collects frames_per_batch transitions
     # Higher = longer training, potential for better convergence
 
     # ─── PPO Clipping & Advantage Estimation ───────────────────────────────
     # PPO Objective: min( rt * Ât, clip(rt, 1-ε, 1+ε) * Ât )
     # where rt = π_new(a|s) / π_old(a|s), Ât = advantage estimate
-    num_epochs: int = 15
+    num_epochs: int = 10
     # Number of repeat passes over collected data before next rollout
     # Higher = more gradient updates per sample (better convergence, higher risk of overfitting)
     
@@ -195,7 +195,7 @@ class TrainConfig:
     # clip_eps=0.2 means policy probability ratio clamped to [0.8, 1.2]
     # Smaller ε = more conservative updates; Larger ε = more aggressive exploration
     
-    gamma: float = 0.99
+    gamma: float = 0.95
     # Discount factor for returns: R_t = r_t + γ r_{t+1} + γ² r_{t+2} + ...
     # Closer to 1.0 = values distant future rewards (longer horizon, higher variance)
     # Closer to 0.0 = only immediate rewards matter (lower variance, less far-sighted)
@@ -205,13 +205,13 @@ class TrainConfig:
     # Advantage = λ * TD_error + λ² * TD_error_t+1 + ... (blend of n-step returns)
     # Higher λ → higher bias, lower variance; Lower λ → lower bias, higher variance
     
-    entropy_coef: float = 1e-3
+    entropy_coef: float = 0.01
     # Coefficient for entropy bonus in loss: loss_total = loss_policy + loss_value - entropy_coef * entropy
     # Encourages exploration (prevents premature convergence to deterministic policy)
     # Increase if agent gets stuck in local optima; Decrease if exploring too randomly
 
     # ─── Optimization (Gradient Step Control) ───────────────────────────────
-    lr: float = 4e-5
+    lr: float = 1e-4
     # Adam learning rate. Controls magnitude of gradient steps
     # Typical range: 1e-5 to 1e-3 for policy learning
     # Too high = unstable training; Too low = slow convergence
