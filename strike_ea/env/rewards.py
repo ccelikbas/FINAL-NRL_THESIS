@@ -27,13 +27,13 @@ class RewardConfig:
     # Formula: reward += target_destroyed × (n_targets_killed / n_alive_agents)
     # Higher = stronger emphasis on task; Lower = learn slower but more robust
     
-    timestep_penalty: float = -0.1
+    timestep_penalty: float = -1
     # Small per-step cost given to all agents every step
     # Encourages sample efficiency: "finish episodes faster = better"
     # Must be small (< 0) to avoid dominating target_destroyed signal
     # Typical: -0.001 to -0.1 (adjust if episode length is too short/long)
 
-    border_penalty: float = -0.1
+    border_penalty: float = -1
     # Penalty when agent enters boundary zone (50 km from edges)
     # Prevents agents from camping at map edges to avoid radar threats
     # Dynamically scaled: stronger penalty near boundary, zero when safe
