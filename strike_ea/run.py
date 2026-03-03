@@ -289,14 +289,13 @@ def main():
             policy_dir=args.policy_dir
         )
 
-    for _ in range(5):
-        run_single(
+    run_single(
             env_cfg, train_cfg, net_cfg,
             label=args.preset,
             animate=not args.no_animate,
             save_dir=args.save_dir,
             save_policy=save_policy,
-        )
+    )
 
 
 if __name__ == "__main__":

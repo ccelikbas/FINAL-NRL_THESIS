@@ -170,7 +170,7 @@ class TrainConfig:
 
     # ─── Data Collection (Off-policy → On-policy conversion) ────────────────
     # MAPPO uses on-policy learning: collect rollout data, then discard after update
-    frames_per_batch: int = 8_192
+    frames_per_batch: int = 51_200 # 51_200 = 200 steps per env * 256 envs
     # Total transitions collected across all num_envs before one policy update
     # Higher = better sample efficiency but higher memory cost
     # Rule of thumb: 20-32 steps per environment per iteration
