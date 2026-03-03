@@ -26,6 +26,7 @@ import argparse
 import math
 import sys
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 
 # Add repo root to path
@@ -46,10 +47,24 @@ from strike_ea.evaluation.visualize import animate_rollout, plot_training
 # ─────────────────────────────────────────────────────────────────────────────
 
 def save_actor(actor, save_path: str):
+    """Save actor network state dict. Creates parent directories if needed."""
     save_path = Path(save_path)
     save_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(actor.state_dict(), save_path)
     print(f"Policy saved to: {save_path}")
+
+
+def get_timestamped_policy_path(preset_name: str = "default", policy_dir: str = "saved_policies") -> str:
+    """Generate timestamped policy save path.
+    
+    Example: saved_policies/default/2026-03-03_17-22-46.pt
+    
+    This allows you to easily track when each policy was trained and compare
+    multiple training runs. Timestamp format: YYYY-MM-DD_HH-MM-SS
+    """
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    path = Path(policy_dir) / preset_name / f"{timestamp}.pt"
+    return str(path)
 
 
 def load_actor(actor, load_path: str):
@@ -69,8 +84,10 @@ def run_single(env_cfg, train_cfg, net_cfg, *, label="run", animate=True, save_d
     print(f"\n{'='*60}\n  Run: {label}\n{'='*60}")
     base_env, actor, critic, logs = train_mappo(train_cfg, env_cfg, net_cfg)
     plot_training(logs, save_dir=save_dir)
+    
     if save_policy:
         save_actor(actor, save_policy)
+    
     if animate:
         tester = TestRunner(actor, device=train_cfg.device, max_steps=220, seed=999, env_cfg=env_cfg)
         frames = tester.rollout()
@@ -122,8 +139,10 @@ def parse_args():
     p.add_argument("--policy_path",   default=None)
     p.add_argument("--preset",        default="default")
     p.add_argument("--no_animate",    action="store_true")
-    p.add_argument("--save_dir",      default=None)
-    p.add_argument("--save_policy",   default=None)
+    p.add_argument("--save_dir",      default=None, help="Directory to save training plots")
+    p.add_argument("--save_policy",   default=None, help="Explicit policy save path (default: auto-timestamped)")
+    p.add_argument("--policy_dir",    default="saved_policies", help="Directory for auto-saved policies (default: saved_policies)")
+    p.add_argument("--no_save_policy", action="store_true", help="Disable automatic policy saving")
 
     # Training overrides
     p.add_argument("--n_iters",        type=int,   default=None)
@@ -204,12 +223,21 @@ def main():
     env_cfg, train_cfg, net_cfg = get_preset(args.preset)
     env_cfg, train_cfg, net_cfg = apply_overrides(args, env_cfg, train_cfg, net_cfg)
 
+    # Handle policy saving: explicit > auto-timestamped > disabled
+    if args.no_save_policy:
+        save_policy = None
+    else:
+        save_policy = args.save_policy or get_timestamped_policy_path(
+            preset_name=args.preset,
+            policy_dir=args.policy_dir
+        )
+
     run_single(
         env_cfg, train_cfg, net_cfg,
         label=args.preset,
         animate=not args.no_animate,
         save_dir=args.save_dir,
-        save_policy=args.save_policy,
+        save_policy=save_policy,
     )
 
 

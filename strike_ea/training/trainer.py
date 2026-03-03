@@ -152,14 +152,18 @@ def train_mappo(
         except Exception:
             pass
 
-        # episode reward logging
+        # episode reward logging (filter NaN values for accurate averaging)
         try:
             done_mask = td.get(("next", base_env.group, "done"))
             ep_rew    = td.get(("next", base_env.group, "episode_reward"))[done_mask]
         except Exception:
             ep_rew = torch.tensor([], device=device)
 
-        ep_rew_mean = float(ep_rew.mean().item()) if ep_rew.numel() else float("nan")
+        # Use nanmean to skip NaN values; if no completed episodes, will be NaN
+        if ep_rew.numel() > 0:
+            ep_rew_mean = float(torch.nanmean(ep_rew).item())
+        else:
+            ep_rew_mean = float("nan")
         div = max(1, n_updates)
 
         logs["episode_reward_mean"].append(ep_rew_mean)

@@ -21,7 +21,7 @@ class RewardConfig:
     """
 
     # ─── TEAM REWARDS (Shared equally across all alive agents) ────────────────
-    target_destroyed: float = 10.0
+    target_destroyed: float = 100
     # Sparse reward signal when a target is eliminated (main objective)
     # Shared equally among all alive agents (promotes cooperation, no free-rider problem)
     # Formula: reward += target_destroyed × (n_targets_killed / n_alive_agents)
@@ -53,3 +53,6 @@ class RewardConfig:
     # Only strikers receive this; jammers use this to coordinate support
     # Formula: reward = (1 - dist_to_nearest_target / max_map_distance) × striker_proximity
     # Lower if strikers are too cautious; Higher if they rush blindly
+
+
+# TODO: negative reward if radar destoys an agent (encourage stealthier behavior)
