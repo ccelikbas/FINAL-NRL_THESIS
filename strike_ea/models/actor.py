@@ -6,8 +6,8 @@ Two separate policy networks:
   • Jammer  policy — shared parameters across all jammers
 
 Action space: 2 discrete dimensions per agent:
-  dim 0 — linear acceleration   Categorical(3) → {0,1,2} mapped to {-1,0,+1}
-  dim 1 — angular acceleration  Categorical(3) → {0,1,2} mapped to {-1,0,+1}
+  dim 0 — linear acceleration   Categorical(7) → {-1, -0.5, -0.1, 0, +0.1, +0.5, +1}
+  dim 1 — angular acceleration  Categorical(7) → {-1, -0.5, -0.1, 0, +0.1, +0.5, +1}
 """
 
 from __future__ import annotations
@@ -121,7 +121,7 @@ class DualPolicyNet(nn.Module):
         j_logits = self.jammer_net(obs[:, self.n_strikers :])        # (B, nj, act*n)
         all_logits = torch.cat([s_logits, j_logits], dim=1)          # (B, A, act*n)
         B, A, _ = all_logits.shape
-        return all_logits.view(B, A, self.act_dim, self.n_choices)   # (B, A, 2, 3)
+        return all_logits.view(B, A, self.act_dim, self.n_choices)   # (B, A, 2, 7)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -130,7 +130,7 @@ class DualPolicyNet(nn.Module):
 
 def make_actor(env: StrikeEA2DEnv, hidden: int = 256) -> ProbabilisticActor:
     """Build a dual-role discrete actor (strikers share params; jammers share params)."""
-    n_choices = 3  # each action dim: {0, 1, 2}
+    n_choices = env.n_choices  # 7 — read from environment
 
     backbone = DualPolicyNet(
         obs_dim=env.obs_dim,

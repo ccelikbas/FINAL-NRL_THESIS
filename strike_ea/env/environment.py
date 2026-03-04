@@ -132,7 +132,11 @@ class StrikeEA2DEnv(EnvBase):
         self._layouts = self._pregenerate_layouts() if n_env_layouts > 0 else None
 
         # dimensions
-        self.act_dim   = 2  # [acceleration, angular_acceleration], each Categorical(3) → {-1, 0, +1}
+        self.act_dim    = 2   # [acceleration, angular_acceleration]
+        self.n_choices  = 7   # per action dim: {-1, -0.5, -0.1, 0, +0.1, +0.5, +1}
+        self._act_table = torch.tensor(
+            [-1.0, -0.5, -0.1, 0.0, 0.1, 0.5, 1.0], device=self._device
+        )  # maps discrete index → continuous multiplier
         self.obs_dim   = self._compute_obs_dim()
         self.state_dim = self._compute_state_dim()
 
@@ -182,9 +186,12 @@ class StrikeEA2DEnv(EnvBase):
         return layouts
 
     def _compute_obs_dim(self) -> int:
-        # own(3) + other_agents_visible(n_agents-1, each with x,y,angle,alive=4) + radars(2 each) + targets(2 each)
-        # = 3 + (n_agents-1)*4 + n_radars*2 + n_targets*2
-        return 3 + (self.n_agents - 1) * 4 + self.n_radars * 2 + self.n_targets * 2
+        # Ego-centric relative observations:
+        #   own state:     [speed, heading_rate]                      = 2
+        #   other agents:  [dist, rel_angle] per agent (zeroed if not visible) = (n_agents-1)*2
+        #   radars:        [dist, rel_angle] per radar                = n_radars*2
+        #   targets:       [dist, rel_angle, alive] per target        = n_targets*3
+        return 2 + (self.n_agents - 1) * 2 + self.n_radars * 2 + self.n_targets * 3
 
     def _compute_state_dim(self) -> int:
         A, T, R = self.n_agents, self.n_targets, self.n_radars
@@ -268,7 +275,7 @@ class StrikeEA2DEnv(EnvBase):
         B = self.batch_size
 
         obs_spec   = Unbounded(shape=B + torch.Size([self.n_agents, self.obs_dim]),   dtype=torch.float32, device=self.device)
-        act_spec   = Categorical(n=3, shape=B + torch.Size([self.n_agents, self.act_dim]), dtype=torch.int64, device=self.device)
+        act_spec   = Categorical(n=self.n_choices, shape=B + torch.Size([self.n_agents, self.act_dim]), dtype=torch.int64, device=self.device)
         rew_spec   = Unbounded(shape=B + torch.Size([self.n_agents, 1]),              dtype=torch.float32, device=self.device)
         state_spec = Unbounded(shape=B + torch.Size([self.state_dim]),                dtype=torch.float32, device=self.device)
         done_leaf  = Categorical(n=2, shape=B + torch.Size([1]),                      dtype=torch.bool,    device=self.device)
@@ -345,20 +352,19 @@ class StrikeEA2DEnv(EnvBase):
         return td
 
     def _step(self, tensordict: TensorDict) -> TensorDict:
-        action = tensordict.get(self._action_key)  # [B, A, 2] discrete actions in {0, 1, 2} -> {-1, 0, +1}
+        action = tensordict.get(self._action_key)  # [B, A, 2] discrete in {0..6}
         B, A, _ = action.shape
         rp = self.reward_params
-        
-        # Convert discrete actions {0, 1, 2} to accelerations {-1, 0, +1}
-        # action[..., 0]: velocity (linear) acceleration
-        # action[..., 1]: heading (angular) acceleration
-        acc = action.float() - 1.0  # Convert {0,1,2} to {-1,0,+1}  [B, A, 2]
-        
+
+        # Map discrete indices to continuous multipliers via lookup table
+        # _act_table: [-1, -0.5, -0.1, 0, +0.1, +0.5, +1]
+        acc = self._act_table[action.long()]  # [B, A, 2] float in {-1,-0.5,-0.1,0,+0.1,+0.5,+1}
+
         alive = self.agent_alive  # Keep as bool for bitwise operations
         alive_float = alive.float()  # Use for multiplication
-        
+
         # ---- Velocity dynamics ----
-        v_accel = acc[..., 0]  # [B, A] in {-1, 0, +1}
+        v_accel = acc[..., 0]  # [B, A]
         self.agent_speed = (
             self.agent_speed + v_accel * self.accel_magnitude
         ).clamp(0.0, self.v_max)
@@ -373,7 +379,7 @@ class StrikeEA2DEnv(EnvBase):
         )
 
         # ---- Heading dynamics ----
-        h_accel = acc[..., 1]  # [B, A] in {-1, 0, +1}
+        h_accel = acc[..., 1]  # [B, A]
         self.agent_heading_rate = (
             self.agent_heading_rate + h_accel * self.h_accel_magnitude
         ).clamp(-self.dpsi_max, self.dpsi_max)
@@ -519,66 +525,107 @@ class StrikeEA2DEnv(EnvBase):
 
         return torch.cat([pos_a, head_sc, alive_a, pos_t, alive_t, pos_r], dim=-1)
 
-    def _build_local_obs(self) -> torch.Tensor:
+    # ------------------------------------------------------------------
+    # Ego-centric helpers
+    # ------------------------------------------------------------------
+
+    def _relative_polar(self, agent_pos, agent_heading, entity_pos):
+        """Compute (distance, relative_angle) from each agent to each entity.
+
+        Parameters
+        ----------
+        agent_pos     : [B, A, 2]
+        agent_heading : [B, A]       heading in radians
+        entity_pos    : [B, E, 2]    positions of E entities
+
+        Returns
+        -------
+        dist      : [B, A, E]   Euclidean distance
+        rel_angle : [B, A, E]   angle from agent heading to entity, in [-pi, pi]
         """
-        Observation for each agent:
-        - Own state: [x, y, heading] (3 dims)
-        - Other agents within obs range: [x, y, heading, alive] for each (n_agents-1, padded with zeros when not visible) (4 dims each)
-        - Radar positions: [x, y] for each radar (fixed, known) (2 dims each)
-        - Target positions: [x, y] for each target (fixed, known) (2 dims each)
+        # relative vector: entity - agent  →  [B, A, E, 2]
+        rel = entity_pos[:, None, :, :] - agent_pos[:, :, None, :]  # [B,A,E,2]
+        dist = torch.linalg.norm(rel, dim=-1).clamp_min(1e-8)       # [B,A,E]
+
+        # Absolute angle from agent to entity
+        abs_angle = torch.atan2(rel[..., 1], rel[..., 0])           # [B,A,E]
+
+        # Relative angle = abs_angle - heading, wrapped to [-pi, pi]
+        heading_exp = agent_heading[:, :, None].expand_as(abs_angle) # [B,A,E]
+        rel_angle = abs_angle - heading_exp
+        rel_angle = torch.atan2(torch.sin(rel_angle), torch.cos(rel_angle))  # wrap
+
+        return dist, rel_angle
+
+    def _build_local_obs(self) -> torch.Tensor:
+        """Ego-centric relative observation per agent.
+
+        Layout (per agent):
+          own:     [speed, heading_rate]                           (2)
+          agents:  [dist, rel_angle] × (n_agents-1)               (2 per other agent; zeroed if outside R_obs or dead)
+          radars:  [dist, rel_angle] × n_radars                   (2 per radar)
+          targets: [dist, rel_angle, alive] × n_targets            (3 per target)
+        Total obs_dim = 2 + 2*(A-1) + 2*R + 3*T
         """
         B, A, T, R = self.num_envs, self.n_agents, self.n_targets, self.n_radars
-        
-        # --- Own state [x, y, heading] ---
-        pos = self.agent_pos  # [B, A, 2]
-        h = self.agent_heading  # [B, A]
-        hs = torch.sin(h).unsqueeze(-1)  # [B, A, 1]
-        hc = torch.cos(h).unsqueeze(-1)  # [B, A, 1]
-        own = torch.cat([pos, hs, hc], dim=-1)  # [B, A, 4] -> actually [B,A,3] (x,y,heading encoded)
-        # Actually, let's use [x, y, angle] more directly:
-        own = torch.cat([pos, h.unsqueeze(-1)], dim=-1)  # [B, A, 3]
-        
-        # --- Other agents within observation range ---
-        # For each agent, include all OTHER agents within R_obs, padded to (A-1)
-        other_agents_obs = torch.zeros(B, A, (A-1), 4, dtype=torch.float32, device=self.device)
-        
-        # Compute distances between all pairs of agents
-        rel_aa = self.agent_pos[:, None, :, :] - self.agent_pos[:, :, None, :]  # [B, A, A, 2]
-        dist_aa = torch.linalg.norm(rel_aa, dim=-1)  # [B, A, A]
-        
-        # Mark own position to exclude self
-        eye = torch.eye(A, device=self.device, dtype=torch.bool).unsqueeze(0).expand(B, -1, -1)
-        dist_aa_masked = torch.where(eye, float('inf'), dist_aa)  # [B, A, A]
-        
-        # For each agent, find which other agents are visible
-        visible_mask = (dist_aa_masked <= self.R_obs)  # [B, A, A]
-        
-        # Build padded observation for other agents
+        max_dist = math.hypot(self.high - self.low, self.high - self.low)  # for normalisation
+
+        # --- Own kinematic state ---
+        speed_norm = (self.agent_speed / self.v_max).unsqueeze(-1)            # [B,A,1] in ~[0,1]
+        hrate_norm = (self.agent_heading_rate / self.dpsi_max).unsqueeze(-1)  # [B,A,1] in ~[-1,1]
+        own = torch.cat([speed_norm, hrate_norm], dim=-1)                     # [B,A,2]
+
+        # --- Other agents (relative distance + relative angle) ---
+        dist_aa, angle_aa = self._relative_polar(
+            self.agent_pos, self.agent_heading, self.agent_pos
+        )  # [B,A,A], [B,A,A]
+
+        # Exclude self by setting diagonal to inf / 0
+        eye = torch.eye(A, device=self.device, dtype=torch.bool).unsqueeze(0)  # [1,A,A]
+        dist_aa  = torch.where(eye, torch.tensor(float('inf'), device=self.device), dist_aa)
+        angle_aa = torch.where(eye, torch.zeros(1, device=self.device), angle_aa)
+
+        # Visibility mask: within R_obs AND alive
+        visible = (dist_aa <= self.R_obs) & self.agent_alive[:, None, :]  # [B,A,A]
+
+        # Normalise distance
+        dist_aa_norm = dist_aa / max_dist  # [B,A,A]
+        angle_aa_norm = angle_aa / math.pi  # [B,A,A] in [-1,1]
+
+        # Stack (dist, angle) and zero out invisible, then drop self-column
+        other_obs = torch.stack([dist_aa_norm, angle_aa_norm], dim=-1)  # [B,A,A,2]
+        other_obs = other_obs * visible.unsqueeze(-1).float()           # zero out non-visible
+
+        # Remove self-column: gather all-but-diagonal
+        # Build index list excluding self for each agent
+        idx = []
         for a in range(A):
-            # Get other agents (excluding self)
-            other_indices = torch.arange(A, device=self.device)
-            other_indices = other_indices[other_indices != a]
-            
-            # For this agent, get obs of other agents
-            for oth_idx, other_a in enumerate(other_indices):
-                other_agents_obs[:, a, oth_idx, 0] = self.agent_pos[:, other_a, 0]  # x
-                other_agents_obs[:, a, oth_idx, 1] = self.agent_pos[:, other_a, 1]  # y
-                other_agents_obs[:, a, oth_idx, 2] = torch.sin(self.agent_heading[:, other_a])  # sin(heading)
-                other_agents_obs[:, a, oth_idx, 3] = torch.cos(self.agent_heading[:, other_a])  # cos(heading)
-                
-                # Zero out if not visible or not alive
-                not_visible = ~visible_mask[:, a, other_a] | ~self.agent_alive[:, other_a]
-                other_agents_obs[:, a, oth_idx, :] *= (~not_visible).float().unsqueeze(-1)
-        
-        other_agents_obs = other_agents_obs.reshape(B, A, -1)  # [B, A, (A-1)*4]
-        
-        # --- Radar positions [x, y] (known, static) ---
-        radar_obs = self.radar_pos.unsqueeze(1).expand(B, A, R, 2).reshape(B, A, -1)  # [B, A, R*2]
-        
-        # --- Target positions [x, y] (known, static) ---
-        target_obs = self.target_pos.unsqueeze(1).expand(B, A, T, 2).reshape(B, A, -1)  # [B, A, T*2]
-        
-        # Concatenate all observations
-        obs = torch.cat([own, other_agents_obs, radar_obs, target_obs], dim=-1)  # [B, A, obs_dim]
-        
+            idx.append(torch.cat([torch.arange(0, a, device=self.device),
+                                  torch.arange(a + 1, A, device=self.device)]))
+        idx = torch.stack(idx, dim=0)  # [A, A-1]
+        idx_exp = idx[None, :, :, None].expand(B, A, A - 1, 2)  # [B,A,A-1,2]
+        other_obs = other_obs.gather(2, idx_exp)                 # [B,A,A-1,2]
+        other_obs = other_obs.reshape(B, A, -1)                  # [B,A,(A-1)*2]
+
+        # --- Radars (relative distance + relative angle) ---
+        dist_ar, angle_ar = self._relative_polar(
+            self.agent_pos, self.agent_heading, self.radar_pos
+        )  # [B,A,R]
+        dist_ar_norm  = dist_ar / max_dist
+        angle_ar_norm = angle_ar / math.pi
+        radar_obs = torch.stack([dist_ar_norm, angle_ar_norm], dim=-1)  # [B,A,R,2]
+        radar_obs = radar_obs.reshape(B, A, -1)                         # [B,A,R*2]
+
+        # --- Targets (relative distance + relative angle + alive flag) ---
+        dist_at, angle_at = self._relative_polar(
+            self.agent_pos, self.agent_heading, self.target_pos
+        )  # [B,A,T]
+        dist_at_norm  = dist_at / max_dist
+        angle_at_norm = angle_at / math.pi
+        alive_t = self.target_alive[:, None, :].expand(B, A, T).float()  # [B,A,T]
+        target_obs = torch.stack([dist_at_norm, angle_at_norm, alive_t], dim=-1)  # [B,A,T,3]
+        target_obs = target_obs.reshape(B, A, -1)                                 # [B,A,T*3]
+
+        # --- Concatenate ---
+        obs = torch.cat([own, other_obs, radar_obs, target_obs], dim=-1)  # [B,A,obs_dim]
         return obs
