@@ -47,7 +47,7 @@ class RewardConfig:
     # Only jammers receive this; strikers don't
     # Lower if jammers over-focus on jamming instead of helping strikers survive
     
-    striker_proximity: float = 10
+    striker_proximity: float = 0
     # Per-striker reward for closing distance to nearest alive target
     # Encourages strikers to navigate toward objectives
     # Only strikers receive this; jammers use this to coordinate support
@@ -55,7 +55,7 @@ class RewardConfig:
     # Lower if strikers are too cautious; Higher if they rush blindly
 
     # ─── DEATH PENALTIES (Per-agent, applied on the step the agent dies) ──────
-    agent_destroyed: float = -100.0
+    agent_destroyed: float = -200.0
     # Negative reward when an agent (striker or jammer) is killed by a radar
     # Applied ONLY to the destroyed agent in the step it dies
     # Encourages agents to avoid radar zones and develop stealthy/cautious behavior
