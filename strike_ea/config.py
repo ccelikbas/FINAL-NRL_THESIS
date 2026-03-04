@@ -135,7 +135,7 @@ class EnvConfig:
     # Prevents agents from fleeing to margins to avoid radar
 
     # ─── Environment Layout Control ──────────────────────────────────────────
-    n_env_layouts: int = 0
+    n_env_layouts: int = 1
     # Number of pre-generated environment layouts (radar positions).
     # 0 = fully random (new random radar positions every episode reset)
     # 1 = single fixed scenario (same radar positions in every episode)
@@ -183,7 +183,7 @@ class TrainConfig:
     # Higher = better sample efficiency but higher memory cost
     # Rule of thumb: 20-32 steps per environment per iteration
     
-    n_iters: int = 100
+    n_iters: int = 50
     # Number of collect→update cycles. Each cycle collects frames_per_batch transitions
     # Higher = longer training, potential for better convergence
 
