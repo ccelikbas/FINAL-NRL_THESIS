@@ -16,7 +16,7 @@ class TestRunner:
 
     def __init__(
         self,
-        policy:    ProbabilisticActor,
+        policy=None,
         *,
         device:    torch.device,
         max_steps: int = 220,
@@ -24,7 +24,7 @@ class TestRunner:
         env_cfg:   EnvConfig = None,
     ):
         self.device = device
-        self.policy = policy.eval()
+        self.policy = policy.eval() if policy is not None else None
         if env_cfg is None:
             env_cfg = EnvConfig()
         self.env = StrikeEA2DEnv(
@@ -61,6 +61,7 @@ class TestRunner:
             border_thresh = env_cfg.border_thresh,
             reward_config = env_cfg.reward_config,
             min_turn_radius = env_cfg.min_turn_radius,
+            n_env_layouts = getattr(env_cfg, 'n_env_layouts', 0),
         )
 
     @torch.no_grad()

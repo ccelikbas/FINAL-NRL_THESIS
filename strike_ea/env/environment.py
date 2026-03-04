@@ -74,6 +74,7 @@ class StrikeEA2DEnv(EnvBase):
         # --- misc ---
         device: Optional[torch.device] = None,
         seed:   int = 0,
+        n_env_layouts: int = 0,
     ):
         self._device = device if device is not None else torch.device("cpu")
         super().__init__(device=self._device, batch_size=torch.Size([num_envs]))
@@ -126,6 +127,10 @@ class StrikeEA2DEnv(EnvBase):
             self._rng = torch.Generator()
         self._set_seed(seed)
 
+        # Layout control (pre-generated radar positions for reproducible scenarios)
+        self.n_env_layouts = n_env_layouts
+        self._layouts = self._pregenerate_layouts() if n_env_layouts > 0 else None
+
         # dimensions
         self.act_dim   = 6  # 3 velocity accelerations + 3 heading accelerations, each discrete: -1, 0, +1
         self.obs_dim   = self._compute_obs_dim()
@@ -158,6 +163,23 @@ class StrikeEA2DEnv(EnvBase):
     def _set_seed(self, seed: int):
         self._rng.manual_seed(int(seed))
         return seed
+
+    def _pregenerate_layouts(self):
+        """Pre-generate fixed radar positions for n_env_layouts distinct scenarios.
+
+        Radars are placed in the top half of the map with margin from borders.
+        Each layout uses a deterministic seed for reproducibility.
+        """
+        layouts = []
+        margin = 0.1  # 100 km margin from borders
+        for seed_idx in range(self.n_env_layouts):
+            rng = torch.Generator()
+            rng.manual_seed(seed_idx + 1000)  # Offset to avoid collision with main RNG
+            radar_x = self.low + margin + (self.high - self.low - 2 * margin) * torch.rand(self.n_radars, generator=rng)
+            radar_y = 0.5 + (self.high - 0.5 - margin) * torch.rand(self.n_radars, generator=rng)
+            radar_pos = torch.stack([radar_x, radar_y], dim=-1)  # [R, 2]
+            layouts.append(radar_pos)
+        return layouts
 
     def _compute_obs_dim(self) -> int:
         # own(3) + other_agents_visible(n_agents-1, each with x,y,angle,alive=4) + radars(2 each) + targets(2 each)
@@ -275,18 +297,43 @@ class StrikeEA2DEnv(EnvBase):
     def _reset(self, tensordict: Optional[TensorDict] = None, **kwargs) -> TensorDict:
         B, A, T, R = self.num_envs, self.n_agents, self.n_targets, self.n_radars
 
-        self.agent_pos     = self.low + (self.high - self.low) * torch.rand(B, A, 2, device=self.device)
-        self.agent_heading = (2.0 * math.pi) * torch.rand(B, A, device=self.device)
+        # --- Agents spawn at bottom middle of map, facing north ---
+        center_x = (self.low + self.high) / 2.0
+        bottom_y = self.low + 0.05  # 50 km from bottom edge
+        spacing = 0.02  # 20 km between agents
+        self.agent_pos = torch.zeros(B, A, 2, device=self.device)
+        for a in range(A):
+            offset_x = (a - (A - 1) / 2.0) * spacing
+            self.agent_pos[:, a, 0] = center_x + offset_x
+            self.agent_pos[:, a, 1] = bottom_y
+        self.agent_heading = torch.full((B, A), math.pi / 2.0, device=self.device)  # Face north
+
         # Initialize at minimum speed (aircraft can't hover)
         self.agent_speed = torch.zeros(B, A, device=self.device)
         self.agent_speed[:, :self.n_strikers] = self.striker.v_min
         self.agent_speed[:, self.n_strikers:] = self.jammer.v_min
-        self.agent_heading_rate = torch.zeros(B, A, device=self.device)  # Start with zero angular velocity
-        self.agent_alive   = torch.ones(B, A, dtype=torch.bool, device=self.device)
-        self.radar_pos     = self.low + (self.high - self.low) * torch.rand(B, R, 2, device=self.device)
-        # Spawn targets in "safe zones" (within unconstrained radar range, outside constrained range of both radars)
-        self.target_pos    = self._spawn_targets_in_valid_zones(B, T, R, self.radar_pos)
-        self.target_alive  = torch.ones(B, T, dtype=torch.bool, device=self.device)
+        self.agent_heading_rate = torch.zeros(B, A, device=self.device)
+        self.agent_alive = torch.ones(B, A, dtype=torch.bool, device=self.device)
+
+        # --- Radars: top half of map, not too close to borders ---
+        if self._layouts is not None:
+            # Use pre-generated deterministic layouts (cycle through them)
+            for b in range(B):
+                layout_idx = b % len(self._layouts)
+                self.radar_pos[b] = self._layouts[layout_idx].to(self.device)
+        else:
+            # Fully random radar positions in top half with margin
+            margin = 0.1  # 100 km from borders
+            self.radar_pos[..., 0] = (self.low + margin
+                + (self.high - self.low - 2 * margin)
+                * torch.rand(B, R, device=self.device, generator=self._rng))
+            self.radar_pos[..., 1] = (0.5
+                + (self.high - 0.5 - margin)
+                * torch.rand(B, R, device=self.device, generator=self._rng))
+
+        # Spawn targets relative to radars (strategic zone logic)
+        self.target_pos = self._spawn_targets_in_valid_zones(B, T, R, self.radar_pos)
+        self.target_alive = torch.ones(B, T, dtype=torch.bool, device=self.device)
         self.radar_eff_range = torch.full((B, R), self.radar_range, device=self.device)
         self.step_count.zero_()
 

@@ -1,21 +1,26 @@
 #!/usr/bin/env python
-"""
+r"""
 run.py – Experiment entry point.
 
 Usage examples
 --------------
-# Default run
-python run.py
+# TRAINING (auto-saves policy + shows visualization after training)
+python run.py                       # Train with default config
+python run.py --preset fast         # Fast training (fewer iters, smaller net)
+python run.py --preset default --n_iters 50 --lr 1e-4  # Override params
+python run.py --no_animate          # Train + save policy, skip visualization
+python run.py --n_env_layouts 1     # Train on a single fixed radar layout
+python run.py --n_env_layouts 50    # Train on 50 distinct radar layouts
 
-# Use a named preset
-python run.py --preset fast
+# TEST / VISUALIZE A SAVED POLICY (no training)
+python run.py --test --policy_path saved_policies\default\2026-03-04_09-23-01.pt
+python run.py --test --preset default  # Test random (untrained) policy
 
-# Override individual params on the fly
-python run.py --preset default --n_iters 50 --lr 1e-4
+# LIST saved policies
+python run.py --list
 
-# Play/test mode
-python run.py --play --preset default
-python run.py --play --policy_path path/to/policy.pt
+# If python not in PATH:
+.venv\Scripts\python.exe run.py --test --policy_path saved_policies/default/2026-03-04_09-23-01.pt
 
 Available presets:  fast | default | high_kill | strong_jam | big_team | hard_radar | no_step_pen
 """
@@ -45,6 +50,34 @@ from strike_ea.evaluation.visualize import animate_rollout, plot_training
 # ─────────────────────────────────────────────────────────────────────────────
 # Policy saving / loading
 # ─────────────────────────────────────────────────────────────────────────────
+
+def list_saved_policies(policy_dir: str = "saved_policies"):
+    """Print all saved policy files, organized by preset."""
+    policy_path = Path(policy_dir)
+    if not policy_path.exists():
+        print(f"No saved policies found in {policy_dir}")
+        return
+    
+    print(f"\n{'='*70}")
+    print(f"Saved Policies in {policy_dir}:")
+    print(f"{'='*70}")
+    
+    presets = sorted([p for p in policy_path.iterdir() if p.is_dir()])
+    if not presets:
+        print("  (none)")
+        return
+    
+    for preset_dir in presets:
+        print(f"\n  📁 {preset_dir.name}/")
+        policies = sorted([p for p in preset_dir.glob("*.pt")])
+        if not policies:
+            print(f"     (empty)")
+        for policy in policies:
+            size_mb = policy.stat().st_size / (1024 * 1024)
+            print(f"     • {policy.name}  ({size_mb:.1f} MB)")
+    
+    print(f"\n{'='*70}\n")
+
 
 def save_actor(actor, save_path: str, env_cfg=None, net_cfg=None, preset_name=None):
     """Save actor network state dict + config metadata. Creates parent directories if needed.
@@ -96,13 +129,26 @@ def load_actor(actor, load_path: str):
         actor.load_state_dict(checkpoint["state_dict"])
         env_cfg = checkpoint.get("env_cfg")
         net_cfg = checkpoint.get("net_cfg")
+        # Backward compat: old checkpoints may lack n_env_layouts
+        if env_cfg is not None and not hasattr(env_cfg, 'n_env_layouts'):
+            object.__setattr__(env_cfg, 'n_env_layouts', 0)
         preset = checkpoint.get("preset", "unknown")
-        print(f"Policy loaded from: {load_path} (preset: {preset})")
+        print(f"  Policy loaded from: {load_path} (preset: {preset})")
         return actor, env_cfg, net_cfg
     else:
-        # Legacy format: raw state_dict
-        actor.load_state_dict(checkpoint)
-        print(f"Policy loaded from: {load_path} (legacy format, no metadata)")
+        # Legacy format: raw state_dict (no config metadata)
+        try:
+            actor.load_state_dict(checkpoint)
+        except (ValueError, RuntimeError) as e:
+            raise RuntimeError(
+                f"Cannot load legacy checkpoint: {load_path}\n"
+                f"  Error: {e}\n"
+                f"  This checkpoint was saved without config metadata.\n"
+                f"  The network dimensions don't match current config.\n"
+                f"  Fix: retrain with current code (auto-saves metadata),\n"
+                f"  or specify matching --preset / env params on the CLI."
+            ) from e
+        print(f"  Policy loaded from: {load_path} (legacy format, no metadata)")
         return actor, None, None
 
 
@@ -111,33 +157,35 @@ def load_actor(actor, load_path: str):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def run_single(env_cfg, train_cfg, net_cfg, *, label="run", animate=True, save_dir=None, save_policy=None):
-    print(f"\n{'='*60}\n  Run: {label}\n{'='*60}")
+    """Train, save policy, and optionally visualize a test rollout."""
+    print(f"\n{'='*60}\n  Training: {label}\n{'='*60}")
     base_env, actor, critic, logs = train_mappo(train_cfg, env_cfg, net_cfg)
     plot_training(logs, save_dir=save_dir)
-    
+
     if save_policy:
         save_actor(actor, save_policy, env_cfg=env_cfg, net_cfg=net_cfg, preset_name=label)
-    
+
     if animate:
-        tester = TestRunner(actor, device=train_cfg.device, max_steps=220, seed=999, env_cfg=env_cfg)
+        print(f"\n{'='*60}\n  Visualizing trained policy\n{'='*60}")
+        tester = TestRunner(actor, device=train_cfg.device, max_steps=train_cfg.max_steps, seed=999, env_cfg=env_cfg)
         frames = tester.rollout()
         animate_rollout(frames, tester.env)
+        print(f"Test rollout: {len(frames)} steps")
     return logs
 
 
-def run_play(env_cfg, train_cfg, net_cfg, policy_path=None):
-    """Play/test mode: load a saved policy and run a visual rollout.
-    
+def run_play(env_cfg, train_cfg, net_cfg, policy_path=None, animate=True):
+    """Test mode: load a saved policy and visualize a rollout (no training).
+
     If the policy file contains saved config metadata, those configs are used
     automatically (so you don't need to specify --preset to match training).
     """
-    print(f"\n{'='*60}\n  Play Mode\n{'='*60}")
+    print(f"\n{'='*60}\n  Test Mode (Visualization)\n{'='*60}")
     from strike_ea.models.actor import make_actor
-    from strike_ea.env.environment import StrikeEA2DEnv
 
     device = train_cfg.device
 
-    # If a policy file is provided, peek at its metadata to get the right config
+    # Load config from checkpoint if available
     if policy_path:
         ckpt_path = Path(policy_path)
         if not ckpt_path.exists():
@@ -146,40 +194,29 @@ def run_play(env_cfg, train_cfg, net_cfg, policy_path=None):
         if isinstance(checkpoint, dict) and "state_dict" in checkpoint:
             if checkpoint.get("env_cfg") is not None:
                 env_cfg = checkpoint["env_cfg"]
+                # Backward compat: old checkpoints may lack n_env_layouts
+                if not hasattr(env_cfg, 'n_env_layouts'):
+                    object.__setattr__(env_cfg, 'n_env_layouts', 0)
                 print(f"  Using env config from checkpoint")
             if checkpoint.get("net_cfg") is not None:
                 net_cfg = checkpoint["net_cfg"]
-                print(f"  Using network config from checkpoint (hidden={net_cfg.hidden})")
-            preset = checkpoint.get("preset", "unknown")
-            print(f"  Trained with preset: {preset}")
+                print(f"  Using network config (hidden={net_cfg.hidden})")
+            print(f"  Preset: {checkpoint.get('preset', 'unknown')}")
 
-    env = StrikeEA2DEnv(
-        num_envs=1, max_steps=train_cfg.max_steps, device=device, seed=train_cfg.seed,
-        n_strikers=env_cfg.n_strikers, n_jammers=env_cfg.n_jammers,
-        n_targets=env_cfg.n_targets, n_radars=env_cfg.n_radars,
-        dt=env_cfg.dt, world_bounds=env_cfg.world_bounds,
-        v_max=env_cfg.v_max, accel_magnitude=env_cfg.accel_magnitude,
-        dpsi_max=env_cfg.dpsi_max, h_accel_magnitude_fraction=env_cfg.h_accel_magnitude_fraction,
-        R_obs=env_cfg.R_obs,
-        striker_engage_range=env_cfg.striker_engage_range, striker_engage_fov=env_cfg.striker_engage_fov,
-        striker_v_min=env_cfg.striker_v_min,
-        jammer_jam_radius=env_cfg.jammer_jam_radius, jammer_jam_effect=env_cfg.jammer_jam_effect,
-        jammer_v_min=env_cfg.jammer_v_min,
-        radar_range=env_cfg.radar_range, radar_kill_probability=env_cfg.radar_kill_probability,
-        border_thresh=env_cfg.border_thresh, reward_config=env_cfg.reward_config,
-        min_turn_radius=env_cfg.min_turn_radius,
-    )
-
-    actor = make_actor(env, hidden=net_cfg.hidden)
+    # Create test environment and build actor from its specs
+    tester = TestRunner(device=device, max_steps=train_cfg.max_steps, seed=999, env_cfg=env_cfg)
+    actor = make_actor(tester.env, hidden=net_cfg.hidden)
     if policy_path:
         actor, _, _ = load_actor(actor, policy_path)
     else:
-        print("Using random initial policy (no checkpoint loaded)")
+        print("  No policy loaded — using random initial policy")
+    tester.policy = actor.eval()
 
-    tester = TestRunner(actor, device=device, max_steps=train_cfg.max_steps, seed=999, env_cfg=env_cfg)
+    # Run rollout
     frames = tester.rollout()
-    animate_rollout(frames, tester.env)
-    print(f"\nTest complete! Rollout length: {len(frames)} steps")
+    if animate:
+        animate_rollout(frames, tester.env)
+    print(f"\nTest complete! Rollout: {len(frames)} steps")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -188,8 +225,10 @@ def run_play(env_cfg, train_cfg, net_cfg, policy_path=None):
 
 def parse_args():
     p = argparse.ArgumentParser(description="Strike-EA MARL experiment runner")
-    p.add_argument("--play",          action="store_true")
-    p.add_argument("--policy_path",   default=None)
+    p.add_argument("--test",          action="store_true", help="Test mode: load + visualize a saved policy (no training)")
+    p.add_argument("--play",          action="store_true", help="(alias for --test)")
+    p.add_argument("--list",          action="store_true", help="List all saved policies and exit")
+    p.add_argument("--policy_path",   default=None, help="Path to saved policy file for testing")
     p.add_argument("--preset",        default="default")
     p.add_argument("--no_animate",    action="store_true")
     p.add_argument("--save_dir",      default=None, help="Directory to save training plots")
@@ -211,6 +250,9 @@ def parse_args():
     p.add_argument("--dpsi_max_deg",     type=float, default=None)
     p.add_argument("--h_accel_fraction", type=float, default=None)
     p.add_argument("--min_turn_radius",  type=float, default=None, help="Minimum turn radius (0.05 = 50 km)")
+
+    # Environment layout
+    p.add_argument("--n_env_layouts",  type=int, default=None, help="Pre-generated env layouts (0=random, 1=fixed, N=N scenarios)")
 
     # Agent capabilities
     p.add_argument("--striker_engage_range", type=float, default=None)
@@ -246,6 +288,7 @@ def apply_overrides(args, env_cfg, train_cfg, net_cfg):
     if args.dpsi_max_deg     is not None: env_cfg = replace(env_cfg, dpsi_max=math.radians(args.dpsi_max_deg))
     if args.h_accel_fraction is not None: env_cfg = replace(env_cfg, h_accel_magnitude_fraction=args.h_accel_fraction)
     if args.min_turn_radius  is not None: env_cfg = replace(env_cfg, min_turn_radius=args.min_turn_radius)
+    if args.n_env_layouts    is not None: env_cfg = replace(env_cfg, n_env_layouts=args.n_env_layouts)
 
     if args.striker_engage_range is not None: env_cfg = replace(env_cfg, striker_engage_range=args.striker_engage_range)
     if args.striker_engage_fov   is not None: env_cfg = replace(env_cfg, striker_engage_fov=args.striker_engage_fov)
@@ -271,12 +314,19 @@ def apply_overrides(args, env_cfg, train_cfg, net_cfg):
 def main():
     args = parse_args()
 
-    if args.play:
-        env_cfg, train_cfg, net_cfg = get_preset(args.preset)
-        env_cfg, train_cfg, net_cfg = apply_overrides(args, env_cfg, train_cfg, net_cfg)
-        run_play(env_cfg, train_cfg, net_cfg, policy_path=args.policy_path)
+    # List saved policies and exit
+    if args.list:
+        list_saved_policies(args.policy_dir)
         return
 
+    # --- Test mode: load a saved policy and visualize (no training) ---
+    if args.play or args.test:
+        env_cfg, train_cfg, net_cfg = get_preset(args.preset)
+        env_cfg, train_cfg, net_cfg = apply_overrides(args, env_cfg, train_cfg, net_cfg)
+        run_play(env_cfg, train_cfg, net_cfg, policy_path=args.policy_path, animate=not args.no_animate)
+        return
+
+    # --- Training mode: train + save + (optional) visualize ---
     env_cfg, train_cfg, net_cfg = get_preset(args.preset)
     env_cfg, train_cfg, net_cfg = apply_overrides(args, env_cfg, train_cfg, net_cfg)
 
@@ -290,23 +340,14 @@ def main():
         )
 
     run_single(
-            env_cfg, train_cfg, net_cfg,
-            label=args.preset,
-            animate=not args.no_animate,
-            save_dir=args.save_dir,
-            save_policy=save_policy,
+        env_cfg, train_cfg, net_cfg,
+        label=args.preset,
+        animate=not args.no_animate,
+        save_dir=args.save_dir,
+        save_policy=save_policy,
     )
 
 
 if __name__ == "__main__":
     main()
 
-
-# # Train (auto-saves to saved_policies/default/YYYY-MM-DD_HH-MM-SS.pt)
-# python run.py --no_animate
-
-# # Test any saved policy (config auto-loaded from file)
-# python run.py --play --policy_path saved_policies/default/2026-03-03_18-45-05.pt
-
-# # Override destruction penalty
-# python run.py --agent_destroyed -50 --no_animate

@@ -55,10 +55,10 @@ class EnvConfig:
 
     # ─── Team Composition ────────────────────────────────────────────────────
     # Multi-agent team structure affects network architecture and training stability
-    n_strikers: int = 2  # Agents with kinetic (offensive) capability; share policy parameters
-    n_jammers: int = 2   # Agents with electronic (defensive) capability; share policy parameters
-    n_targets: int = 2   # Objectives to destroy (define episode success criteria)
-    n_radars: int = 2    # Environmental threats (create intrinsic difficulty)
+    n_strikers: int = 1  # Agents with kinetic (offensive) capability; share policy parameters
+    n_jammers: int = 1   # Agents with electronic (defensive) capability; share policy parameters
+    n_targets: int = 1   # Objectives to destroy (define episode success criteria)
+    n_radars: int = 1    # Environmental threats (create intrinsic difficulty)
 
     # ─── World / Dynamics ──────────────────────────────────────────────────
     world_bounds: Tuple[float, float] = (0.0, 1.0)  # Normalized coordinate space (0-1000 km)
@@ -133,7 +133,15 @@ class EnvConfig:
     border_thresh: float = 0.05
     # Boundary penalty zone: 50 km from edge. Keeps agents in play area
     # Prevents agents from fleeing to margins to avoid radar
-    
+
+    # ─── Environment Layout Control ──────────────────────────────────────────
+    n_env_layouts: int = 0
+    # Number of pre-generated environment layouts (radar positions).
+    # 0 = fully random (new random radar positions every episode reset)
+    # 1 = single fixed scenario (same radar positions in every episode)
+    # N = N distinct scenarios, cycled across parallel environments
+    # Use n_env_layouts > 0 for controlled, reproducible training scenarios
+
     reward_config: RewardConfig = field(default_factory=RewardConfig)
     # Reward weights. Carefully tuned for MAPPO convergence:
     # - target_destroyed: team objective (cooperation)
@@ -175,7 +183,7 @@ class TrainConfig:
     # Higher = better sample efficiency but higher memory cost
     # Rule of thumb: 20-32 steps per environment per iteration
     
-    n_iters: int = 200
+    n_iters: int = 100
     # Number of collect→update cycles. Each cycle collects frames_per_batch transitions
     # Higher = longer training, potential for better convergence
 
