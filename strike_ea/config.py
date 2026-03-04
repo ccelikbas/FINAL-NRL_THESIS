@@ -65,13 +65,13 @@ class EnvConfig:
     dt: float = 1.0      # Time step = 1 minute. Larger dt = discretized actions have bigger effect
 
     # ─── Agent Kinematics (Physical Model) ───────────────────────────────────
-    # Kinematics define action semantics: 6 discrete dimensions mapped to accelerations
+    # Kinematics define action semantics: 2 discrete dimensions (accel, angular_accel), each Categorical(3)
     v_max: float = 0.02
     # Maximum velocity: 20 km/min ≈ Mach 0.95 aircraft cruise speed
     # Affects episode time scale and how far agents can travel
     
     accel_magnitude: float = 0.01
-    # Discrete acceleration magnitude per action dimension (3 velocity dims available)
+    # Discrete acceleration magnitude per action step
     # Determines maneuverability: how quickly agents can change speed
     
     dpsi_max: float = math.radians(12.0)

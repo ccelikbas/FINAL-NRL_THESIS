@@ -132,7 +132,7 @@ class StrikeEA2DEnv(EnvBase):
         self._layouts = self._pregenerate_layouts() if n_env_layouts > 0 else None
 
         # dimensions
-        self.act_dim   = 6  # 3 velocity accelerations + 3 heading accelerations, each discrete: -1, 0, +1
+        self.act_dim   = 2  # [acceleration, angular_acceleration], each Categorical(3) → {-1, 0, +1}
         self.obs_dim   = self._compute_obs_dim()
         self.state_dim = self._compute_state_dim()
 
@@ -345,22 +345,22 @@ class StrikeEA2DEnv(EnvBase):
         return td
 
     def _step(self, tensordict: TensorDict) -> TensorDict:
-        action = tensordict.get(self._action_key)  # [B, A, 6] discrete actions in {0, 1, 2} -> {-1, 0, +1}
+        action = tensordict.get(self._action_key)  # [B, A, 2] discrete actions in {0, 1, 2} -> {-1, 0, +1}
         B, A, _ = action.shape
         rp = self.reward_params
         
         # Convert discrete actions {0, 1, 2} to accelerations {-1, 0, +1}
-        # action[..., 0:3]: velocity accelerations
-        # action[..., 3:6]: heading/angular accelerations
-        acc = action.float() - 1.0  # Convert {0,1,2} to {-1,0,+1}  [B, A, 6]
+        # action[..., 0]: velocity (linear) acceleration
+        # action[..., 1]: heading (angular) acceleration
+        acc = action.float() - 1.0  # Convert {0,1,2} to {-1,0,+1}  [B, A, 2]
         
         alive = self.agent_alive  # Keep as bool for bitwise operations
         alive_float = alive.float()  # Use for multiplication
         
-        # ---- Velocity dynamics (sum of 3 discrete acceleration dims) ----
-        v_accel = acc[..., :3].sum(dim=-1)  # [B, A] in {-3, ..., +3}
+        # ---- Velocity dynamics ----
+        v_accel = acc[..., 0]  # [B, A] in {-1, 0, +1}
         self.agent_speed = (
-            self.agent_speed + v_accel * (self.accel_magnitude / 3.0)
+            self.agent_speed + v_accel * self.accel_magnitude
         ).clamp(0.0, self.v_max)
         self.agent_speed = self.agent_speed * alive_float
 
@@ -372,10 +372,10 @@ class StrikeEA2DEnv(EnvBase):
             alive, torch.max(self.agent_speed, v_min_per_agent), self.agent_speed
         )
 
-        # ---- Heading dynamics (sum of 3 discrete angular acceleration dims) ----
-        h_accel = acc[..., 3:].sum(dim=-1)  # [B, A] in {-3, ..., +3}
+        # ---- Heading dynamics ----
+        h_accel = acc[..., 1]  # [B, A] in {-1, 0, +1}
         self.agent_heading_rate = (
-            self.agent_heading_rate + h_accel * (self.h_accel_magnitude / 3.0)
+            self.agent_heading_rate + h_accel * self.h_accel_magnitude
         ).clamp(-self.dpsi_max, self.dpsi_max)
         self.agent_heading_rate = self.agent_heading_rate * alive_float
 

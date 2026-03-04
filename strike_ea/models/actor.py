@@ -5,8 +5,9 @@ Two separate policy networks:
   • Striker policy — shared parameters across all strikers
   • Jammer  policy — shared parameters across all jammers
 
-Action space: 6 discrete dimensions (3 velocity accel + 3 heading accel),
-each Categorical(n=3) → values {0, 1, 2} mapped to {-1, 0, +1} in the env.
+Action space: 2 discrete dimensions per agent:
+  dim 0 — linear acceleration   Categorical(3) → {0,1,2} mapped to {-1,0,+1}
+  dim 1 — angular acceleration  Categorical(3) → {0,1,2} mapped to {-1,0,+1}
 """
 
 from __future__ import annotations
@@ -120,7 +121,7 @@ class DualPolicyNet(nn.Module):
         j_logits = self.jammer_net(obs[:, self.n_strikers :])        # (B, nj, act*n)
         all_logits = torch.cat([s_logits, j_logits], dim=1)          # (B, A, act*n)
         B, A, _ = all_logits.shape
-        return all_logits.view(B, A, self.act_dim, self.n_choices)   # (B, A, 6, 3)
+        return all_logits.view(B, A, self.act_dim, self.n_choices)   # (B, A, 2, 3)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
