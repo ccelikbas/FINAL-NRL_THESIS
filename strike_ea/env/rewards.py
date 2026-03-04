@@ -21,13 +21,13 @@ class RewardConfig:
     """
 
     # ─── TEAM REWARDS (Shared equally across all alive agents) ────────────────
-    target_destroyed: float = 200
+    target_destroyed: float = 10
     # Sparse reward signal when a target is eliminated (main objective)
     # Shared equally among all alive agents (promotes cooperation, no free-rider problem)
     # Formula: reward += target_destroyed × (n_targets_killed / n_alive_agents)
     # Higher = stronger emphasis on task; Lower = learn slower but more robust
     
-    timestep_penalty: float = -1
+    timestep_penalty: float = -0.1
     # Small per-step cost given to all agents every step
     # Encourages sample efficiency: "finish episodes faster = better"
     # Must be small (< 0) to avoid dominating target_destroyed signal
@@ -41,13 +41,13 @@ class RewardConfig:
     
     # ─── ROLE-SPECIFIC SHAPING (Given only to relevant role) ──────────────────
     # These are potential-based reward shaping: guide exploration toward goal states
-    jammer_jamming: float = 10
+    jammer_jamming: float = 0.5
     # Per-jammer reward for actively suppressing a radar
     # Encourages jammers to position near radars to reduce threat
     # Only jammers receive this; strikers don't
     # Lower if jammers over-focus on jamming instead of helping strikers survive
     
-    striker_proximity: float = 0
+    striker_proximity: float = 0.5
     # Per-striker reward for closing distance to nearest alive target
     # Encourages strikers to navigate toward objectives
     # Only strikers receive this; jammers use this to coordinate support
@@ -55,7 +55,7 @@ class RewardConfig:
     # Lower if strikers are too cautious; Higher if they rush blindly
 
     # ─── DEATH PENALTIES (Per-agent, applied on the step the agent dies) ──────
-    agent_destroyed: float = -200.0
+    agent_destroyed: float = -10
     # Negative reward when an agent (striker or jammer) is killed by a radar
     # Applied ONLY to the destroyed agent in the step it dies
     # Encourages agents to avoid radar zones and develop stealthy/cautious behavior

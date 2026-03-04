@@ -469,9 +469,21 @@ class StrikeEA2DEnv(EnvBase):
         # 3. Timestep penalty (per alive agent)
         reward += float(rp.timestep_penalty) * alive_float
 
-        # 4. Jammer shaping: reward for actively jamming a radar
-        if jam_active.numel() > 0:
-            reward[:, self.n_strikers:] += jam_active.float() * float(rp.jammer_jamming)
+        # 4. Jammer shaping: proximity to nearest radar, but NOT within lethal radar range
+        #    Reward = (1 - dist/max_dist) × weight, zeroed if inside radar_eff_range (danger zone)
+        if jammer_idx.numel() > 0 and self.n_radars > 0:
+            rel_jr_all = self.radar_pos[:, None, :, :] - self.agent_pos[:, self.n_strikers:, None, :]
+            dist_jr    = torch.linalg.norm(rel_jr_all, dim=-1)         # [B, nj, R]
+            # Find nearest radar index per jammer
+            dist_jr_min, nearest_r = dist_jr.min(dim=-1)               # [B, nj]
+            max_dist_j = math.hypot(self.high - self.low, self.high - self.low)
+            # Get effective range of the nearest radar for each jammer
+            nearest_eff_range = radar_eff_range.gather(1, nearest_r)   # [B, nj]
+            # Proximity reward: closer → higher, but zero inside lethal radar range
+            safe_mask  = dist_jr_min > nearest_eff_range               # [B, nj]
+            prox_rew_j = (1.0 - dist_jr_min / max_dist_j).clamp_min(0.0) * float(rp.jammer_jamming)
+            jammer_alive = alive[:, self.n_strikers:].float()
+            reward[:, self.n_strikers:] += prox_rew_j * jammer_alive * safe_mask.float()
 
         # 5. Striker shaping: proximity to nearest alive target
         if striker_idx.numel() > 0 and self.n_targets > 0:
