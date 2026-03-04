@@ -184,14 +184,14 @@ class TrainConfig:
     # Higher = better sample efficiency but higher memory cost
     # Rule of thumb: 20-32 steps per environment per iteration
     
-    n_iters: int = 20
+    n_iters: int = 40
     # Number of collect→update cycles. Each cycle collects frames_per_batch transitions
     # Higher = longer training, potential for better convergence
 
     # ─── PPO Clipping & Advantage Estimation ───────────────────────────────
     # PPO Objective: min( rt * Ât, clip(rt, 1-ε, 1+ε) * Ât )
     # where rt = π_new(a|s) / π_old(a|s), Ât = advantage estimate
-    num_epochs: int = 10
+    num_epochs: int = 5
     # Number of repeat passes over collected data before next rollout
     # Higher = more gradient updates per sample (better convergence, higher risk of overfitting)
     
@@ -199,12 +199,12 @@ class TrainConfig:
     # Minibatch size for gradient descent within each epoch
     # Smaller = more noisy gradients but faster updates; Larger = fewer updates per epoch
     
-    clip_eps: float = 0.1
+    clip_eps: float = 0.2
     # PPO clipping range ε: prevents policy from changing too rapidly
     # clip_eps=0.2 means policy probability ratio clamped to [0.8, 1.2]
     # Smaller ε = more conservative updates; Larger ε = more aggressive exploration
     
-    gamma: float = 0.95
+    gamma: float = 0.99
     # Discount factor for returns: R_t = r_t + γ r_{t+1} + γ² r_{t+2} + ...
     # Closer to 1.0 = values distant future rewards (longer horizon, higher variance)
     # Closer to 0.0 = only immediate rewards matter (lower variance, less far-sighted)
