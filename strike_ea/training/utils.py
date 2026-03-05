@@ -29,7 +29,7 @@ def make_ppo_loss(actor, critic, clip_eps: float, entropy_coef: float) -> ClipPP
         kwargs["entropy_coef"] = entropy_coef
 
     if "actor_network" in params and "critic_network" in params:
-        return ClipPPOLoss(actor_network=actor, critic_network=critic, normalize_advantage=False, **kwargs)
+        return ClipPPOLoss(actor_network=actor, critic_network=critic, normalize_advantage=True, **kwargs)
     if "actor" in params and "critic" in params:
         return ClipPPOLoss(actor=actor, critic=critic, normalize_advantage=False, **kwargs)
     return ClipPPOLoss(actor_network=actor, critic_network=critic, **kwargs)

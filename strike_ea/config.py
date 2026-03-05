@@ -55,10 +55,10 @@ class EnvConfig:
 
     # ─── Team Composition ────────────────────────────────────────────────────
     # Multi-agent team structure affects network architecture and training stability
-    n_strikers: int = 1  # Agents with kinetic (offensive) capability; share policy parameters
-    n_jammers: int = 1   # Agents with electronic (defensive) capability; share policy parameters
-    n_targets: int = 1   # Objectives to destroy (define episode success criteria)
-    n_radars: int = 1    # Environmental threats (create intrinsic difficulty)
+    n_strikers: int = 2  # Agents with kinetic (offensive) capability; share policy parameters
+    n_jammers: int = 2   # Agents with electronic (defensive) capability; share policy parameters
+    n_targets: int = 2   # Objectives to destroy (define episode success criteria)
+    n_radars: int = 2    # Environmental threats (create intrinsic difficulty)
 
     # ─── World / Dynamics ──────────────────────────────────────────────────
     world_bounds: Tuple[float, float] = (0.0, 1.0)  # Normalized coordinate space (0-1000 km)
@@ -83,7 +83,7 @@ class EnvConfig:
     # Angular acceleration = dpsi_max × this fraction = 1.2°/min per action
     # Controls yaw acceleration (how quickly agents change turn rate)
     
-    min_turn_radius: float = 0.01
+    min_turn_radius: float = 0.005
     # Minimum turn radius: 50 km. Prevents agents from spinning in tight circles
     # Turn rate is limited by: omega_max = speed / min_turn_radius
     # At v_min (0.01 = 10 km/min): max 11.5°/step turn rate
@@ -91,7 +91,7 @@ class EnvConfig:
     # Larger = wider turns (less agile); Smaller = tighter turns (more agile)
 
     # ─── Sensor / Observation (State Representation for MAPPO) ────────────────
-    R_obs: float = 0.30
+    R_obs: float = 0.50
     # Observation radius: 300 km. Agents see allies/threats within this range
     # Affects network input size and partial observability (policy must infer unseen info)
     # Larger R_obs = more info → easier task; Smaller = harder (agent must predict)
@@ -110,15 +110,15 @@ class EnvConfig:
     # Can't hover; must keep moving. Affects energy/momentum constraints
 
     # ─── Jammer Capabilities (Defense dynamics) ───────────────────────────────
-    jammer_jam_radius: float = 0.25
+    jammer_jam_radius: float = 0.35
     # Electronic warfare coverage: 150 km. Suppresses radar effectiveness nearby
     # Enables team coordination: jammers create "safe zones" for strikers
     
-    jammer_jam_effect: float = 0.10
+    jammer_jam_effect: float = 0.15
     # Radar range reduction when jammed: 100 km reduction (0.20 - 0.10 = 0.10 effective)
     # Partially negates threat; doesn't eliminate it (creates strategic depth)
     
-    jammer_v_min: float = 0.01
+    jammer_v_min: float = 0.005
     # Minimum cruise speed (same as strikers)
 
     # ─── Radar Threat (Environmental pressure) ──────────────────────────────
@@ -136,7 +136,7 @@ class EnvConfig:
     # Prevents agents from fleeing to margins to avoid radar
 
     # ─── Environment Layout Control ──────────────────────────────────────────
-    n_env_layouts: int = 1
+    n_env_layouts: int = 0
     # Number of pre-generated environment layouts (radar positions).
     # 0 = fully random (new random radar positions every episode reset)
     # 1 = single fixed scenario (same radar positions in every episode)
@@ -184,7 +184,7 @@ class TrainConfig:
     # Higher = better sample efficiency but higher memory cost
     # Rule of thumb: 20-32 steps per environment per iteration
     
-    n_iters: int = 40
+    n_iters: int = 30
     # Number of collect→update cycles. Each cycle collects frames_per_batch transitions
     # Higher = longer training, potential for better convergence
 
