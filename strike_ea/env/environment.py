@@ -195,7 +195,9 @@ class StrikeEA2DEnv(EnvBase):
 
     def _compute_state_dim(self) -> int:
         A, T, R = self.n_agents, self.n_targets, self.n_radars
-        return (2 * A) + (2 * A) + A + (2 * T) + T + (2 * R)
+        # agent_pos(2A) + agent_heading(2A) + agent_alive(A) + agent_speed(A)
+        # + target_pos(2T) + target_alive(T) + radar_pos(2R) + radar_eff_range(R)
+        return (2 * A) + (2 * A) + A + A + (2 * T) + T + (2 * R) + R
 
     def _spawn_targets_in_valid_zones(self, B: int, T: int, R: int, radar_pos: torch.Tensor) -> torch.Tensor:
         """
@@ -453,7 +455,9 @@ class StrikeEA2DEnv(EnvBase):
         team_kill = (n_killed * float(rp.target_destroyed) / n_alive)   # [B]
         reward += team_kill.unsqueeze(-1) * alive_float                 # [B, A]
 
-        # 2. Border penalty (per agent, proportional to proximity)
+        # 2. Border penalty (per agent, quadratic scaling for stronger repulsion)
+        #    Linear fraction t = (border_thresh - dist) / border_thresh  in [0, 1]
+        #    Quadratic penalty = t^2 × weight  →  weak far from edge, very strong at edge
         pos       = self.agent_pos
         dist_bord = torch.stack([
             pos[..., 0] - self.low,
@@ -461,9 +465,10 @@ class StrikeEA2DEnv(EnvBase):
             pos[..., 1] - self.low,
             self.high - pos[..., 1],
         ], dim=-1).min(dim=-1).values                                   # [B, A]
-        border_pen = (
+        border_frac = (
             (self.border_thresh - dist_bord) / self.border_thresh
-        ).clamp(0.0, 1.0) * float(rp.border_penalty) * alive_float
+        ).clamp(0.0, 1.0)
+        border_pen = (border_frac ** 2) * float(rp.border_penalty) * alive_float
         reward += border_pen
 
         # 3. Timestep penalty (per alive agent)
@@ -486,14 +491,18 @@ class StrikeEA2DEnv(EnvBase):
             reward[:, self.n_strikers:] += prox_rew_j * jammer_alive * safe_mask.float()
 
         # 5. Striker shaping: proximity to nearest alive target
+        #    Uses alive targets only; when all targets dead the reward is zero
+        #    (no inf contamination — striker just gets the team kill bonus instead)
         if striker_idx.numel() > 0 and self.n_targets > 0:
             rel_st_all = self.target_pos[:, None, :, :] - self.agent_pos[:, :self.n_strikers, None, :]
             dist_st    = torch.linalg.norm(rel_st_all, dim=-1)         # [B, ns, T]
             mask_t     = self.target_alive[:, None, :].expand(-1, self.n_strikers, -1)
+            any_alive  = mask_t.any(dim=-1)                            # [B, ns] — any target still alive?
             dist_masked = torch.where(mask_t, dist_st, torch.full_like(dist_st, float("inf")))
             dist_min, _ = dist_masked.min(dim=-1)                      # [B, ns]
             max_dist    = math.hypot(self.high - self.low, self.high - self.low)
             prox_rew    = (1.0 - dist_min / max_dist).clamp_min(0.0) * float(rp.striker_proximity)
+            prox_rew    = prox_rew * any_alive.float()                 # zero shaping when all targets dead
             striker_alive = alive[:, :self.n_strikers].float()
             reward[:, :self.n_strikers] += prox_rew * striker_alive
 
@@ -531,11 +540,13 @@ class StrikeEA2DEnv(EnvBase):
         head     = self.agent_heading
         head_sc  = torch.stack([torch.sin(head), torch.cos(head)], dim=-1).reshape(B, 2 * A)
         alive_a  = self.agent_alive.float().reshape(B, A)
+        speed_a  = (self.agent_speed / self.v_max).reshape(B, A)   # normalised agent speeds
         pos_t    = self.target_pos.reshape(B, 2 * T)
         alive_t  = self.target_alive.float().reshape(B, T)
         pos_r    = self.radar_pos.reshape(B, 2 * R)
+        eff_r    = (self.radar_eff_range / self.radar_range).reshape(B, R)  # normalised radar effective range (1=unjammed, <1=jammed)
 
-        return torch.cat([pos_a, head_sc, alive_a, pos_t, alive_t, pos_r], dim=-1)
+        return torch.cat([pos_a, head_sc, alive_a, speed_a, pos_t, alive_t, pos_r, eff_r], dim=-1)
 
     # ------------------------------------------------------------------
     # Ego-centric helpers

@@ -36,8 +36,8 @@ class RewardConfig:
     border_penalty: float = -1
     # Penalty when agent enters boundary zone (50 km from edges)
     # Prevents agents from camping at map edges to avoid radar threats
-    # Dynamically scaled: stronger penalty near boundary, zero when safe
-    # Formula: penalty = max(0, (border_thresh - dist_to_edge) / border_thresh) × border_penalty × agent_alive
+    # Uses quadratic scaling: weak far from edge, very strong at edge
+    # Formula: penalty = ((border_thresh - dist_to_edge) / border_thresh)^2 × border_penalty × agent_alive
     
     # ─── ROLE-SPECIFIC SHAPING (Given only to relevant role) ──────────────────
     # These are potential-based reward shaping: guide exploration toward goal states

@@ -21,17 +21,21 @@ def make_ppo_loss(actor, critic, clip_eps: float, entropy_coef: float) -> ClipPP
     """Instantiate ClipPPOLoss, handling API differences across TorchRL versions."""
     sig    = inspect.signature(ClipPPOLoss.__init__)
     params = sig.parameters
-    kwargs: dict = dict(clip_epsilon=clip_eps)
+    kwargs: dict = dict(clip_epsilon=clip_eps, normalize_advantage=True)
 
     if "entropy_coeff" in params:
         kwargs["entropy_coeff"] = entropy_coef
     elif "entropy_coef" in params:
         kwargs["entropy_coef"] = entropy_coef
 
+    # Multi-agent: normalise over batch but keep agent dim independent
+    if "normalize_advantage_exclude_dims" in params:
+        kwargs["normalize_advantage_exclude_dims"] = [-1]
+
     if "actor_network" in params and "critic_network" in params:
-        return ClipPPOLoss(actor_network=actor, critic_network=critic, normalize_advantage=True, **kwargs)
+        return ClipPPOLoss(actor_network=actor, critic_network=critic, **kwargs)
     if "actor" in params and "critic" in params:
-        return ClipPPOLoss(actor=actor, critic=critic, normalize_advantage=False, **kwargs)
+        return ClipPPOLoss(actor=actor, critic=critic, **kwargs)
     return ClipPPOLoss(actor_network=actor, critic_network=critic, **kwargs)
 
 

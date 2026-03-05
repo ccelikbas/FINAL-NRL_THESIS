@@ -184,14 +184,14 @@ class TrainConfig:
     # Higher = better sample efficiency but higher memory cost
     # Rule of thumb: 20-32 steps per environment per iteration
     
-    n_iters: int = 50
+    n_iters: int = 60
     # Number of collect→update cycles. Each cycle collects frames_per_batch transitions
     # Higher = longer training, potential for better convergence
 
     # ─── PPO Clipping & Advantage Estimation ───────────────────────────────
     # PPO Objective: min( rt * Ât, clip(rt, 1-ε, 1+ε) * Ât )
     # where rt = π_new(a|s) / π_old(a|s), Ât = advantage estimate
-    num_epochs: int = 5
+    num_epochs: int = 3
     # Number of repeat passes over collected data before next rollout
     # Higher = more gradient updates per sample (better convergence, higher risk of overfitting)
     
@@ -199,7 +199,7 @@ class TrainConfig:
     # Minibatch size for gradient descent within each epoch
     # Smaller = more noisy gradients but faster updates; Larger = fewer updates per epoch
     
-    clip_eps: float = 0.1
+    clip_eps: float = 0.2
     # PPO clipping range ε: prevents policy from changing too rapidly
     # clip_eps=0.2 means policy probability ratio clamped to [0.8, 1.2]
     # Smaller ε = more conservative updates; Larger ε = more aggressive exploration
@@ -221,9 +221,18 @@ class TrainConfig:
 
     # ─── Optimization (Gradient Step Control) ───────────────────────────────
     lr: float = 1e-4
-    # Adam learning rate. Controls magnitude of gradient steps
+    # Legacy single learning rate (used if actor_lr/critic_lr are None)
     # Typical range: 1e-5 to 1e-3 for policy learning
-    # Too high = unstable training; Too low = slow convergence
+
+    actor_lr: float = 5e-4
+    # Actor (policy) learning rate. Lower = more conservative policy updates.
+    # Typical range: 1e-5 to 5e-4.
+    # The actor should update slowly to stay within the PPO trust region.
+
+    critic_lr: float = 1e-3
+    # Critic (value function) learning rate. Higher = faster value fitting.
+    # Typical range: 1e-4 to 1e-3.
+    # The critic benefits from faster convergence to accurate value estimates.
     
     max_grad_norm: float = 1.0
     # Gradient clipping: if ||∇loss|| > max_grad_norm, rescale to this norm

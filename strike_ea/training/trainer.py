@@ -92,8 +92,15 @@ def train_mappo(
         print(f"loss_module.set_keys warning (continuing): {e}")
 
     loss_module.make_value_estimator(ValueEstimators.GAE, gamma=train_cfg.gamma, lmbda=train_cfg.lmbda)
-    gae       = loss_module.value_estimator
-    optimizer = optim.Adam(loss_module.parameters(), lr=train_cfg.lr)
+    gae = loss_module.value_estimator
+
+    # Separate optimizers for actor and critic (different learning rates)
+    actor_params  = list(actor.parameters())
+    critic_params = list(critic.parameters())
+    actor_lr  = train_cfg.actor_lr if train_cfg.actor_lr is not None else train_cfg.lr
+    critic_lr = train_cfg.critic_lr if train_cfg.critic_lr is not None else train_cfg.lr
+    actor_optimizer  = optim.Adam(actor_params,  lr=actor_lr)
+    critic_optimizer = optim.Adam(critic_params, lr=critic_lr)
 
     logs: Dict[str, List[float]] = {
         "episode_reward_mean": [],
@@ -136,12 +143,21 @@ def train_mappo(
                 loss_policy  = get_loss_component(loss_vals, ["loss_objective", "loss_actor"])
                 loss_value   = get_loss_component(loss_vals, ["loss_critic",    "loss_value"])
                 loss_entropy = get_loss_component(loss_vals, ["loss_entropy"])
-                total_loss   = loss_policy + loss_value + loss_entropy
 
-                optimizer.zero_grad(set_to_none=True)
-                total_loss.backward()
-                nn.utils.clip_grad_norm_(loss_module.parameters(), train_cfg.max_grad_norm)
-                optimizer.step()
+                # --- Actor update (policy loss + entropy bonus) ---
+                actor_loss = loss_policy + loss_entropy
+                actor_optimizer.zero_grad(set_to_none=True)
+                actor_loss.backward(retain_graph=True)
+                nn.utils.clip_grad_norm_(actor_params, train_cfg.max_grad_norm)
+                actor_optimizer.step()
+
+                # --- Critic update (value loss only) ---
+                critic_optimizer.zero_grad(set_to_none=True)
+                loss_value.backward()
+                nn.utils.clip_grad_norm_(critic_params, train_cfg.max_grad_norm)
+                critic_optimizer.step()
+
+                total_loss = loss_policy + loss_value + loss_entropy
 
                 total_acc += float(total_loss.item())
                 pol_acc   += float(loss_policy.item())
