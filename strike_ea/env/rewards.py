@@ -27,7 +27,7 @@ class RewardConfig:
     # Formula: reward += target_destroyed × (n_targets_killed / n_alive_agents)
     # Higher = stronger emphasis on task; Lower = learn slower but more robust
     
-    timestep_penalty: float = -0.01
+    timestep_penalty: float = -0.02
     # Small per-step cost given to all agents every step
     # Encourages sample efficiency: "finish episodes faster = better"
     # Must be small (< 0) to avoid dominating target_destroyed signal
@@ -47,7 +47,7 @@ class RewardConfig:
     # Only jammers receive this; strikers don't
     # Lower if jammers over-focus on jamming instead of helping strikers survive
     
-    striker_proximity: float = 0.5
+    striker_proximity: float = 1
     # Per-striker reward for closing distance to nearest alive target
     # Encourages strikers to navigate toward objectives
     # Only strikers receive this; jammers use this to coordinate support

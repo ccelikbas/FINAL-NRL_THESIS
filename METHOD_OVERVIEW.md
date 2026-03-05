@@ -215,22 +215,41 @@ L^{VF}(φ) = E_t [ ( V_φ(s_t) − V^{targ}_t )² ]
 
 where `V^{targ}_t = Â_t + V(s_t)` (the GAE-corrected target).
 
-**Entropy bonus:**
-```
-L^{ENT}(θ) = E_t [ H( π_θ(· | o_t) ) ]
-```
+**Entropy bonus (regularisation for exploration):**
 
-For `MultiCategorical`, entropy is the sum of per-dimension Categorical entropies:
-```
-H = H(dim_0) + H(dim_1) = −Σ_a p_a log p_a  (for each dimension)
-```
+Entropy measures randomness in the policy distribution:
+$$H(\pi) = -\sum_a \pi(a) \log \pi(a)$$
+
+- **High entropy:** Distribution spread across many actions, agent explores.
+- **Low entropy:** Distribution peaked at one action, agent exploits.
+
+The loss term is:
+$$L^{\text{ENT}}(\theta) = \mathbb{E}_t [ H( \pi_\theta(· | o_t) ) ]$$
+
+For `MultiCategorical` (2 dimensions, 7 choices each):
+$$H_{\text{total}} = H(\text{dim}_0) + H(\text{dim}_1)$$
+
+where each dimension has entropy:
+$$H(\text{dim}) = -\sum_{i=0}^{6} p_i \log p_i$$
+
+**Why include entropy in PPO?**
+
+Without entropy regularisation, PPO converges to deterministic policies too quickly. Once it finds a locally good action (e.g., "move toward target"), the policy assigns probability ≈ 1.0 to that action and **never explores alternatives** (e.g., "approach from a different angle"). If that action is locally good but globally suboptimal, the agent gets stuck at a local optimum.
+
+Solution: Add entropy to the loss with a **negative coefficient** so that:
+- Minimising the loss → **maximising** entropy
+- Agents are incentivised to keep policies stochastic (exploratory)
 
 **Total combined loss (minimised):**
 ```
 L^{total} = −L^{CLIP} + c_v L^{VF} − c_e L^{ENT}
 ```
 
-with `entropy_coef = c_e = 0.01`. Note: `c_v` is internally set by `ClipPPOLoss` from TorchRL.
+with `entropy_coef = c_e = 0.01`. The **minus sign** before $c_e L^{\text{ENT}}$ means higher entropy → lower loss → optimizer reward.
+
+**Practical effect with your config:**
+
+With `c_e = 0.01`, the entropy bonus is **weak** (small coefficient). Agents will primarily optimise for task reward; exploration is secondary. If agents converge to suboptimal policies too quickly (e.g., always moving toward target regardless of radar), increase `entropy_coef` to `0.05–0.1` to encourage more exploration.
 
 ### 2.4 Data Collection
 
@@ -247,17 +266,58 @@ Per training iteration:
 ### 3.1 Architecture: `DualPolicyNet`
 
 ```
-Input: obs [B, A, obs_dim]
+Input: obs [B, A, obs_dim]   where obs_dim = 9 (default config)
          │
-         ├── obs[:, :n_strikers, :] ──► StrikerMLP ──► [B, ns, act_dim × n_choices]
-         │                                                     │
-         └── obs[:, n_strikers:, :] ──► JammerMLP  ──► [B, nj, act_dim × n_choices]
-                                                               │
-                                        cat(dim=1) ──► [B, A, act_dim × n_choices]
-                                                               │
-                                        reshape    ──► [B, A, act_dim, n_choices]
-                                             = [B, A, 2, 7]   (logits)
+         ├── obs[:, :n_strikers, :] ──► StrikerMLP ──► [B, ns, 14]
+         │   [B, 1, 9]                                       │
+         │                                                    │
+         └── obs[:, n_strikers:, :] ──► JammerMLP  ──► [B, nj, 14]
+             [B, 1, 9]                                       │
+                                                             │
+                                          cat(dim=1) ──► [B, A, 14]
+                                          = [B, 2, 14]       │
+                                                             │
+                                          reshape    ──► [B, 2, 2, 7]
+                                    = [B, n_agents, act_dim, n_choices]
 ```
+
+**Detailed breakdown for default config (A=2, obs_dim=9, n_choices=7):**
+
+| Layer | Neurons | Input/Output shape |
+|---|---|---|
+| Input | 9 | `[B, obs_dim]` |
+| Hidden 1 | 256 | `[B, 256]` (ReLU) |
+| Hidden 2 | 256 | `[B, 256]` (ReLU) |
+| Hidden 3 | 256 | `[B, 256]` (ReLU) |
+| Output | 14 | `[B, 14]` = `[B, act_dim × n_choices]` |
+
+**Why 14 output neurons, not 49?**
+
+The action space is 7 × 7 = 49 possible *joint* actions, but the network uses **factorised outputs**:
+- Outputs 2 independent categorical distributions (one per action dimension)
+- Each categorical has 7 logits
+- Total logits: 2 × 7 = 14 neurons
+
+This is far more efficient than outputting one neuron per joint action because:
+- **Parameter reduction:** 14 neurons vs 49 (3.5× smaller)
+- **Sample efficiency:** Learns independent policies per dimension naturally
+- **Scalability:** Adding actions (e.g., 8 choices instead of 7) only requires +2 outputs instead of +8
+
+**Network parameter count estimate:**
+- Layer 1: `(9 × 256) + 256 = 2,560` params
+- Layer 2: `(256 × 256) + 256 = 65,792` params
+- Layer 3: `(256 × 256) + 256 = 65,792` params
+- Output: `(256 × 14) + 14 = 3,598` params
+- **Total per role:** ~138K parameters
+- **Both roles:** ~276K parameters
+
+**Is `hidden=256` too small?**
+
+For a coordination task requiring agents to learn geographic reasoning ("radar is here, target is there, I must approach from this direction"), 256 neurons per layer is **reasonable but not overly large**. Consider increasing to `hidden=512` if:
+- Agents show signs of underfitting (e.g., loss oscillates wildly, high training error)
+- You increase to 2–4 agents per side (the observation space grows)
+
+For current single-agent-per-side, 256 is adequate.
 
 - **`StrikerMLP`** and **`JammerMLP`** are separate `MultiAgentMLP` networks (TorchRL).
 - Within each role, **all agents of that role share network parameters** (`share_params=True`).
@@ -271,6 +331,25 @@ The logits `[B, A, 2, 7]` are passed to a custom `MultiCategorical` distribution
 - **Sample:** argmax (deterministic eval) or categorical sample (stochastic training).
 - **Log probability:** `log π(a | o) = log π(a_0 | o) + log π(a_1 | o)` (sum over dims).
 - **Entropy:** `H = H_0 + H_1` (sum over dims).
+
+**Entropy computation for your policy:**
+
+For a Categorical distribution, Shannon entropy is:
+$$H = -\sum_{i=0}^{6} p_i \log p_i$$
+
+For `MultiCategorical` (2 independent dims):
+$$H_{\text{total}} = H(\text{dim}_0) + H(\text{dim}_1)$$
+
+**Example:** If the policy for acceleration (dim_0) puts 90% mass on action 3 ("hold"):
+- $p_3 = 0.9$, $p_{others} \approx 0.0125$ each
+- $H(\text{dim}_0) \approx -[0.9 \log(0.9) + 6 × 0.0125 \log(0.0125)] \approx 0.33$ (low entropy, deterministic)
+
+If uniform ($p_i = 1/7 \approx 0.143$ for all $i$):
+- $H(\text{dim}_0) = -7 × 0.143 \log(0.143) \approx 1.95$ (high entropy, random)
+
+This entropy value enters the loss as:
+$$L^{\text{ENT}} = -c_e \times H_{\text{total}}$$
+with `c_e = 0.01`. The **minus sign** means: **maximising entropy reduces the loss** → agents are rewarded for exploration.
 
 ### 3.3 TorchRL Integration
 
@@ -289,21 +368,57 @@ TensorDict out:  ("agents", "action")         → shape [B, A, 2]       ← samp
 
 ### 4.1 Architecture: `DualCentralisedCritic`
 
+**What does "dual-headed" mean?**
+
+The critic is a **single-input, multi-output** network:
+
 ```
-Input: global_state [B, state_dim]
+Input: global_state [B, state_dim=15] (centralised, shared by all agents)
          │
-         ├── StrikerHead (3-layer MLP) ──► [B, n_strikers]
+         ├─ Shared processing (implicit backbone)
+         │     │
+         │  256 → 256 → 256  (shared hidden layers)
+         │     │
+         ├── StrikerHead: Linear(256, n_strikers=1) ──► [B, 1]  (striker values)
          │
-         └── JammerHead  (3-layer MLP) ──► [B, n_jammers]
-                                                    │
-                     cat + unsqueeze ──► [B, n_agents, 1]
+         └── JammerHead:  Linear(256, n_jammers=1) ──► [B, 1]  (jammer values)
+              │
+              cat([striker_vals, jammer_vals], dim=-1)  → [B, 2]
+              unsqueeze(-1)  →  [B, 2, 1]  = [B, n_agents, 1]
 ```
 
-Each head: `state_dim → 256 → 256 → n_agents_in_role`.
+**What are the heads?**
+
+Two **separate output layers**, not two input pathways. Both heads:
+- Read the same hidden state representation
+- Output their own value predictions
+- **Do not share** output layer weights
+
+Each head: `state_dim → 256 → 256 → 256 → n_agents_in_role`.
+
+**Why two heads instead of one?**
+
+The strikers and jammers have **fundamentally different roles and objectives**:
+- Strikers: maximize proximity to targets and task success
+- Jammers: maximize proximity to radars while staying alive
+
+With two separate heads:
+- Each role's value function can **specialise independently**
+- The striker head learns "what is the value of a striker in state S?"
+- The jammer head learns "what is the value of a jammer in state S?"
+- Reduces feature entanglement; improves learning stability and convergence speed
+
+**Is it necessary?**
+
+No, but it's **beneficial**. You could use a single head for all agents and achieve similar results, but:
+- Single head forces both roles to use identical value logic → reduced expressiveness
+- Two heads allow role-specific learned generalisation → faster convergence
+
+**Analogy:** Think of hiring two specialists (one for strikers, one for jammers) vs. one generalist. Specialists can make better decisions.
 
 ### 4.2 Global State Composition
 
-The critic reads **absolute global state** (not ego-centric):
+The critic reads **absolute global state** (not ego-centric, unlike actor observations):
 
 ```
 state_dim = 2A + 2A + A + 2T + T + 2R
@@ -311,14 +426,34 @@ state_dim = 2A + 2A + A + 2T + T + 2R
 
 For default (A=2, T=1, R=1): `state_dim = 4 + 4 + 2 + 2 + 1 + 2 = 15`.
 
-| Component | Shape | Content |
-|---|---|---|
-| Agent positions | `[B, 2A]` | Absolute `(x, y)` per agent |
-| Agent headings | `[B, 2A]` | `(sin ψ, cos ψ)` per agent |
-| Agent alive | `[B, A]` | Binary alive flag |
-| Target positions | `[B, 2T]` | Absolute `(x, y)` per target |
-| Target alive | `[B, T]` | Binary alive flag |
-| Radar positions | `[B, 2R]` | Absolute `(x, y)` per radar |
+**Detailed breakdown:**
+
+| Component | Dimensions | Count per env | Content |
+|---|---|---|---|
+| Agent positions (x, y) | `[B, 2A]` | [B, 4] | Absolute `(x, y)` per agent |
+| Agent headings (sin ψ, cos ψ) | `[B, 2A]` | [B, 4] | Trigonometric encoding of heading angle |
+| Agent alive | `[B, A]` | [B, 2] | Binary flag (1 if alive, 0 if dead) |
+| Target positions (x, y) | `[B, 2T]` | [B, 2] | Absolute `(x, y)` per target |
+| Target alive | `[B, T]` | [B, 1] | Binary flag per target |
+| Radar positions (x, y) | `[B, 2R]` | [B, 2] | Absolute `(x, y)` per radar |
+| **TOTAL** | **[B, 15]** | **[B, 15]** | — |
+
+**Example unrolled state vector (B=1):**
+```
+[x_striker, y_striker, x_jammer, y_jammer,
+ sin_ψ_striker, cos_ψ_striker, sin_ψ_jammer, cos_ψ_jammer,
+ alive_striker, alive_jammer,
+ x_target, y_target,
+ alive_target,
+ x_radar, y_radar]
+```
+
+**Why absolute coordinates, not ego-centric?**
+
+The critic is **centralised** (at training time, has full information). Using absolute coordinates lets it:
+- See the exact geometry of the scene (distance between radar and target, etc.)
+- Make globally optimal value predictions without agent-relative transformations
+- Advantage: higher quality value estimates → better advantage estimates → more stable MAPPO training
 
 > ⚠️ **Missing from critic state:** Current `radar_eff_range` (whether any radar is currently being jammed), agent speeds, and step count. The critic therefore cannot distinguish a situation where the jammer is actively suppressing the radar from a situation where it is not.
 
@@ -330,6 +465,37 @@ TensorDict out:  ("agents", "state_value")        → shape [B, A, 1]
 ```
 
 A **separate head per role** means the striker value function and jammer value function can learn independently — a sensible design given their fundamentally different roles.
+
+### 4.4 Critic Network Parameter Count
+
+| Layer | Neurons | Parameters |
+|---|---|---|
+| Input→Hidden1 | 256 | `(15 × 256) + 256 = 3,840` |
+| Hidden1→Hidden2 | 256 | `(256 × 256) + 256 = 65,792` |
+| Hidden2→Hidden3 | 256 | `(256 × 256) + 256 = 65,792` |
+| Hidden3→Striker head | 1 | `(256 × 1) + 1 = 257` |
+| Hidden3→Jammer head | 1 | `(256 × 1) + 1 = 257` |
+| **Total (shared + both heads)** | — | **~135,938 parameters** |
+
+**Comparison:**
+- **Actor total:** ~276K params (both roles: 138K each)
+- **Critic total:** ~136K params (shared backbone, two thin heads)
+- **Combined:** ~412K parameters for the entire MAPPO system
+
+The critic is smaller than the actor because it only outputs per-agent scalars (1 value per agent) rather than 14 logits per agent.
+
+### 4.5 Architecture Summary: Actor vs Critic
+
+| Aspect | Actor | Critic |
+|---|---|---|
+| **Input** | Ego-centric observation `[B, A, 9]` per agent | Absolute global state `[B, 15]` (shared) |
+| **Architecture** | 2 separate MLPs (Striker, Jammer) | 1 shared backbone + 2 separate heads |
+| **Hidden layers** | 3 layers, 256 neurons each | 3 layers, 256 neurons, then split |
+| **Output** | 14 logits per agent (2 dims, 7 choices) | 1 scalar value per agent |
+| **Parameters** | ~276K (138K per role) | ~136K (shared + heads) |
+| **Decentralised?** | Yes (actors only see local obs) | No (centralized across both roles) |
+| **Training** | Policy gradient (PPO) | Value regression (MSE loss) |
+| **Execution** | Used at deployment | Not used at deployment |
 
 ---
 

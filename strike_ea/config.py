@@ -214,7 +214,7 @@ class TrainConfig:
     # Advantage = λ * TD_error + λ² * TD_error_t+1 + ... (blend of n-step returns)
     # Higher λ → higher bias, lower variance; Lower λ → lower bias, higher variance
     
-    entropy_coef: float = 0.01
+    entropy_coef: float = 0.05
     # Coefficient for entropy bonus in loss: loss_total = loss_policy + loss_value - entropy_coef * entropy
     # Encourages exploration (prevents premature convergence to deterministic policy)
     # Increase if agent gets stuck in local optima; Decrease if exploring too randomly
