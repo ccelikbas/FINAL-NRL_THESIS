@@ -83,7 +83,7 @@ class EnvConfig:
     # Angular acceleration = dpsi_max × this fraction = 1.2°/min per action
     # Controls yaw acceleration (how quickly agents change turn rate)
     
-    min_turn_radius: float = 0.05
+    min_turn_radius: float = 0.01
     # Minimum turn radius: 50 km. Prevents agents from spinning in tight circles
     # Turn rate is limited by: omega_max = speed / min_turn_radius
     # At v_min (0.01 = 10 km/min): max 11.5°/step turn rate
