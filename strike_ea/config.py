@@ -184,7 +184,7 @@ class TrainConfig:
     # Higher = better sample efficiency but higher memory cost
     # Rule of thumb: 20-32 steps per environment per iteration
     
-    n_iters: int = 30
+    n_iters: int = 50
     # Number of collect→update cycles. Each cycle collects frames_per_batch transitions
     # Higher = longer training, potential for better convergence
 
@@ -199,7 +199,7 @@ class TrainConfig:
     # Minibatch size for gradient descent within each epoch
     # Smaller = more noisy gradients but faster updates; Larger = fewer updates per epoch
     
-    clip_eps: float = 0.2
+    clip_eps: float = 0.1
     # PPO clipping range ε: prevents policy from changing too rapidly
     # clip_eps=0.2 means policy probability ratio clamped to [0.8, 1.2]
     # Smaller ε = more conservative updates; Larger ε = more aggressive exploration
