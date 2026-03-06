@@ -195,9 +195,15 @@ class StrikeEA2DEnv(EnvBase):
 
     def _compute_state_dim(self) -> int:
         A, T, R = self.n_agents, self.n_targets, self.n_radars
-        # agent_pos(2A) + agent_heading(2A) + agent_alive(A) + agent_speed(A)
-        # + target_pos(2T) + target_alive(T) + radar_pos(2R) + radar_eff_range(R)
-        return (2 * A) + (2 * A) + A + A + (2 * T) + T + (2 * R) + R
+        # Per-agent ego-centric relative polar:
+        #   (d, θ) to all targets:       2T per agent
+        #   (d, θ) to all other agents:  2(A-1) per agent
+        #   (d, θ) to all radars:        2R per agent
+        per_agent = 2 * T + 2 * (A - 1) + 2 * R
+        # Global boolean flags:
+        #   agent_alive(A) + target_alive(T) + radar_jammed(R)
+        flags = A + T + R
+        return A * per_agent + flags
 
     def _spawn_targets_in_valid_zones(self, B: int, T: int, R: int, radar_pos: torch.Tensor) -> torch.Tensor:
         """
@@ -533,20 +539,72 @@ class StrikeEA2DEnv(EnvBase):
     # ------------------------------------------------------------------
 
     def _build_global_state(self) -> torch.Tensor:
+        """Ego-centric global state for the centralised critic.
+
+        Layout (flat vector):
+          For each agent i  (A blocks):
+            (d, θ) to each target       → 2T
+            (d, θ) to each other agent   → 2(A-1)
+            (d, θ) to each radar         → 2R
+          Global flags:
+            agent_alive   → A
+            target_alive  → T
+            radar_jammed  → R
+
+        Total dim = A × (2T + 2(A-1) + 2R) + A + T + R
+        """
         B    = self.num_envs
         A, T, R = self.n_agents, self.n_targets, self.n_radars
+        max_dist = math.hypot(self.high - self.low, self.high - self.low)
 
-        pos_a    = self.agent_pos.reshape(B, 2 * A)
-        head     = self.agent_heading
-        head_sc  = torch.stack([torch.sin(head), torch.cos(head)], dim=-1).reshape(B, 2 * A)
-        alive_a  = self.agent_alive.float().reshape(B, A)
-        speed_a  = (self.agent_speed / self.v_max).reshape(B, A)   # normalised agent speeds
-        pos_t    = self.target_pos.reshape(B, 2 * T)
-        alive_t  = self.target_alive.float().reshape(B, T)
-        pos_r    = self.radar_pos.reshape(B, 2 * R)
-        eff_r    = (self.radar_eff_range / self.radar_range).reshape(B, R)  # normalised radar effective range (1=unjammed, <1=jammed)
+        per_agent_parts: list[torch.Tensor] = []
 
-        return torch.cat([pos_a, head_sc, alive_a, speed_a, pos_t, alive_t, pos_r, eff_r], dim=-1)
+        # --- Per-agent relative polar to targets ---
+        dist_at, angle_at = self._relative_polar(
+            self.agent_pos, self.agent_heading, self.target_pos
+        )  # [B, A, T]
+        dist_at_norm  = dist_at / max_dist          # normalise to ~[0,1]
+        angle_at_norm = angle_at / math.pi           # normalise to [-1,1]
+        # interleave (d, θ) per target: [B, A, 2T]
+        at_feat = torch.stack([dist_at_norm, angle_at_norm], dim=-1).reshape(B, A, 2 * T)
+        per_agent_parts.append(at_feat)
+
+        # --- Per-agent relative polar to other agents ---
+        dist_aa, angle_aa = self._relative_polar(
+            self.agent_pos, self.agent_heading, self.agent_pos
+        )  # [B, A, A]
+        dist_aa_norm  = dist_aa / max_dist
+        angle_aa_norm = angle_aa / math.pi
+        aa_feat = torch.stack([dist_aa_norm, angle_aa_norm], dim=-1)  # [B, A, A, 2]
+        # Remove self-column (diagonal)
+        idx = []
+        for a in range(A):
+            idx.append(torch.cat([torch.arange(0, a, device=self.device),
+                                  torch.arange(a + 1, A, device=self.device)]))
+        idx = torch.stack(idx, dim=0)  # [A, A-1]
+        idx_exp = idx[None, :, :, None].expand(B, A, A - 1, 2)
+        aa_feat = aa_feat.gather(2, idx_exp).reshape(B, A, 2 * (A - 1))  # [B, A, 2(A-1)]
+        per_agent_parts.append(aa_feat)
+
+        # --- Per-agent relative polar to radars ---
+        dist_ar, angle_ar = self._relative_polar(
+            self.agent_pos, self.agent_heading, self.radar_pos
+        )  # [B, A, R]
+        dist_ar_norm  = dist_ar / max_dist
+        angle_ar_norm = angle_ar / math.pi
+        ar_feat = torch.stack([dist_ar_norm, angle_ar_norm], dim=-1).reshape(B, A, 2 * R)
+        per_agent_parts.append(ar_feat)
+
+        # Flatten per-agent features: [B, A, feat_per_agent] → [B, A * feat_per_agent]
+        per_agent = torch.cat(per_agent_parts, dim=-1)  # [B, A, 2T+2(A-1)+2R]
+        per_agent_flat = per_agent.reshape(B, -1)        # [B, A*(2T+2(A-1)+2R)]
+
+        # --- Global boolean flags ---
+        alive_a  = self.agent_alive.float()              # [B, A]
+        alive_t  = self.target_alive.float()             # [B, T]
+        jammed_r = (self.radar_eff_range < self.radar_range).float()  # [B, R]  1=jammed
+
+        return torch.cat([per_agent_flat, alive_a, alive_t, jammed_r], dim=-1)
 
     # ------------------------------------------------------------------
     # Ego-centric helpers

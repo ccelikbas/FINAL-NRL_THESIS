@@ -104,7 +104,7 @@ def train_mappo(
 
     logs: Dict[str, List[float]] = {
         "episode_reward_mean": [],
-        "loss_total": [], "loss_policy": [], "loss_value": [], "loss_entropy": [],
+        "loss_policy": [], "loss_value": [],
     }
 
     for it, td in enumerate(collector):
@@ -127,7 +127,7 @@ def train_mappo(
         data     = td.reshape(-1).to(device)
         n_samples = data.batch_size[0] if len(data.batch_size) else data.numel()
 
-        total_acc = pol_acc = val_acc = ent_acc = 0.0
+        pol_acc = val_acc = 0.0
         n_updates = 0
 
         for _ in range(train_cfg.num_epochs):
@@ -142,12 +142,10 @@ def train_mappo(
 
                 loss_policy  = get_loss_component(loss_vals, ["loss_objective", "loss_actor"])
                 loss_value   = get_loss_component(loss_vals, ["loss_critic",    "loss_value"])
-                loss_entropy = get_loss_component(loss_vals, ["loss_entropy"])
 
-                # --- Actor update (policy loss + entropy bonus) ---
-                actor_loss = loss_policy + loss_entropy
+                # --- Actor update (policy loss only, no entropy) ---
                 actor_optimizer.zero_grad(set_to_none=True)
-                actor_loss.backward(retain_graph=True)
+                loss_policy.backward(retain_graph=True)
                 nn.utils.clip_grad_norm_(actor_params, train_cfg.max_grad_norm)
                 actor_optimizer.step()
 
@@ -157,12 +155,8 @@ def train_mappo(
                 nn.utils.clip_grad_norm_(critic_params, train_cfg.max_grad_norm)
                 critic_optimizer.step()
 
-                total_loss = loss_policy + loss_value + loss_entropy
-
-                total_acc += float(total_loss.item())
                 pol_acc   += float(loss_policy.item())
                 val_acc   += float(loss_value.item())
-                ent_acc   += float(loss_entropy.item())
                 n_updates += 1
 
         try:
@@ -185,16 +179,15 @@ def train_mappo(
         div = max(1, n_updates)
 
         logs["episode_reward_mean"].append(ep_rew_mean)
-        logs["loss_total"].append(total_acc / div)
         logs["loss_policy"].append(pol_acc / div)
         logs["loss_value"].append(val_acc / div)
-        logs["loss_entropy"].append(ent_acc / div)
 
         if train_cfg.log_every and (it + 1) % train_cfg.log_every == 0:
             print(
                 f"Iter {it+1:4d}/{train_cfg.n_iters} | "
                 f"ep_rew {ep_rew_mean: .3f} | "
-                f"loss {logs['loss_total'][-1]:.4f}"
+                f"pol_loss {logs['loss_policy'][-1]:.4f} | "
+                f"val_loss {logs['loss_value'][-1]:.4f}"
             )
 
         if it + 1 >= train_cfg.n_iters:
