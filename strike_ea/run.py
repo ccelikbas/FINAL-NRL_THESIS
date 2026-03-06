@@ -267,10 +267,7 @@ def parse_args():
     # Reward overrides (maps to RewardConfig fields)
     p.add_argument("--kill_reward",        type=float, default=None, help="target_destroyed weight")
     p.add_argument("--timestep_penalty",   type=float, default=None)
-    p.add_argument("--border_penalty",     type=float, default=None)
-    p.add_argument("--jam_reward",         type=float, default=None, help="jammer_jamming weight")
-    p.add_argument("--striker_proximity",  type=float, default=None)
-    p.add_argument("--agent_destroyed",   type=float, default=None, help="Death penalty (e.g. -100)")
+    p.add_argument("--agent_destroyed",    type=float, default=None, help="Death penalty (e.g. -10)")
     return p.parse_args()
 
 
@@ -302,9 +299,6 @@ def apply_overrides(args, env_cfg, train_cfg, net_cfg):
     rw = env_cfg.reward_config
     if args.kill_reward       is not None: rw = replace(rw, target_destroyed=args.kill_reward)
     if args.timestep_penalty  is not None: rw = replace(rw, timestep_penalty=args.timestep_penalty)
-    if args.border_penalty    is not None: rw = replace(rw, border_penalty=args.border_penalty)
-    if args.jam_reward        is not None: rw = replace(rw, jammer_jamming=args.jam_reward)
-    if args.striker_proximity is not None: rw = replace(rw, striker_proximity=args.striker_proximity)
     if args.agent_destroyed   is not None: rw = replace(rw, agent_destroyed=args.agent_destroyed)
     env_cfg = replace(env_cfg, reward_config=rw)
 

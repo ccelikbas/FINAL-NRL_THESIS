@@ -451,9 +451,10 @@ class StrikeEA2DEnv(EnvBase):
             self.target_alive = self.target_alive & (~kill_t)
 
         # ==================================================================
-        # Reward computation (simplified, role-specific shaping)
+        # Reward computation  (piecewise linear-exponential shaping)
         # ==================================================================
         reward = torch.zeros(B, A, device=self.device)
+        max_dist = math.hypot(self.high - self.low, self.high - self.low)
 
         # 1. Team reward: target destroyed — shared equally among alive agents
         n_killed = kill_t.float().sum(dim=-1)                           # [B]
@@ -461,9 +462,7 @@ class StrikeEA2DEnv(EnvBase):
         team_kill = (n_killed * float(rp.target_destroyed) / n_alive)   # [B]
         reward += team_kill.unsqueeze(-1) * alive_float                 # [B, A]
 
-        # 2. Border penalty (per agent, quadratic scaling for stronger repulsion)
-        #    Linear fraction t = (border_thresh - dist) / border_thresh  in [0, 1]
-        #    Quadratic penalty = t^2 × weight  →  weak far from edge, very strong at edge
+        # 2. Border avoidance  (piecewise lin-exp penalty, d_max = border_thresh)
         pos       = self.agent_pos
         dist_bord = torch.stack([
             pos[..., 0] - self.low,
@@ -471,48 +470,74 @@ class StrikeEA2DEnv(EnvBase):
             pos[..., 1] - self.low,
             self.high - pos[..., 1],
         ], dim=-1).min(dim=-1).values                                   # [B, A]
-        border_frac = (
-            (self.border_thresh - dist_bord) / self.border_thresh
-        ).clamp(0.0, 1.0)
-        border_pen = (border_frac ** 2) * float(rp.border_penalty) * alive_float
+        border_pen = -self._piecewise_lin_exp(
+            dist_bord,
+            d_max=self.border_thresh,
+            d_knee=rp.border_d_knee,
+            w_lin=rp.border_w_lin,
+            w_exp=rp.border_w_exp,
+            alpha=rp.border_alpha,
+        ) * alive_float
         reward += border_pen
 
         # 3. Timestep penalty (per alive agent)
         reward += float(rp.timestep_penalty) * alive_float
 
-        # 4. Jammer shaping: proximity to nearest radar, but NOT within lethal radar range
-        #    Reward = (1 - dist/max_dist) × weight, zeroed if inside radar_eff_range (danger zone)
+        # 4. Radar zone avoidance  (piecewise lin-exp penalty, ALL agents)
+        #    d = distance from nearest radar zone boundary (clamped ≥ 0)
+        d_zone = dist_ar - radar_eff_range[:, None, :]                  # [B, A, R]
+        d_zone_min = d_zone.min(dim=-1).values.clamp(min=0.0)           # [B, A]
+        radar_pen = -self._piecewise_lin_exp(
+            d_zone_min,
+            d_max=rp.radar_avoid_d_max,
+            d_knee=rp.radar_avoid_d_knee,
+            w_lin=rp.radar_avoid_w_lin,
+            w_exp=rp.radar_avoid_w_exp,
+            alpha=rp.radar_avoid_alpha,
+        ) * alive_float
+        reward += radar_pen
+
+        # 5. Jammer approach  (piecewise lin-exp reward toward nearest radar)
+        #    Zeroed if jammer is inside the radar detection zone (unsafe)
         if jammer_idx.numel() > 0 and self.n_radars > 0:
             rel_jr_all = self.radar_pos[:, None, :, :] - self.agent_pos[:, self.n_strikers:, None, :]
             dist_jr    = torch.linalg.norm(rel_jr_all, dim=-1)         # [B, nj, R]
-            # Find nearest radar index per jammer
             dist_jr_min, nearest_r = dist_jr.min(dim=-1)               # [B, nj]
-            max_dist_j = math.hypot(self.high - self.low, self.high - self.low)
-            # Get effective range of the nearest radar for each jammer
             nearest_eff_range = radar_eff_range.gather(1, nearest_r)   # [B, nj]
-            # Proximity reward: closer → higher, but zero inside lethal radar range
             safe_mask  = dist_jr_min > nearest_eff_range               # [B, nj]
-            prox_rew_j = (1.0 - dist_jr_min / max_dist_j).clamp_min(0.0) * float(rp.jammer_jamming)
+            jammer_approach = self._piecewise_lin_exp(
+                dist_jr_min,
+                d_max=max_dist,
+                d_knee=rp.jammer_d_knee,
+                w_lin=rp.jammer_w_lin,
+                w_exp=rp.jammer_w_exp,
+                alpha=rp.jammer_alpha,
+            )
             jammer_alive = alive[:, self.n_strikers:].float()
-            reward[:, self.n_strikers:] += prox_rew_j * jammer_alive * safe_mask.float()
+            reward[:, self.n_strikers:] += jammer_approach * jammer_alive * safe_mask.float()
 
-        # 5. Striker shaping: proximity to nearest alive target
-        #    Uses alive targets only; when all targets dead the reward is zero
-        #    (no inf contamination — striker just gets the team kill bonus instead)
+        # 6. Striker approach  (piecewise lin-exp reward toward nearest alive target)
+        #    Zero when all targets are dead (striker gets team kill bonus instead)
         if striker_idx.numel() > 0 and self.n_targets > 0:
             rel_st_all = self.target_pos[:, None, :, :] - self.agent_pos[:, :self.n_strikers, None, :]
             dist_st    = torch.linalg.norm(rel_st_all, dim=-1)         # [B, ns, T]
             mask_t     = self.target_alive[:, None, :].expand(-1, self.n_strikers, -1)
-            any_alive  = mask_t.any(dim=-1)                            # [B, ns] — any target still alive?
+            any_alive  = mask_t.any(dim=-1)                            # [B, ns]
             dist_masked = torch.where(mask_t, dist_st, torch.full_like(dist_st, float("inf")))
             dist_min, _ = dist_masked.min(dim=-1)                      # [B, ns]
-            max_dist    = math.hypot(self.high - self.low, self.high - self.low)
-            prox_rew    = (1.0 - dist_min / max_dist).clamp_min(0.0) * float(rp.striker_proximity)
-            prox_rew    = prox_rew * any_alive.float()                 # zero shaping when all targets dead
+            striker_approach = self._piecewise_lin_exp(
+                dist_min,
+                d_max=max_dist,
+                d_knee=rp.striker_d_knee,
+                w_lin=rp.striker_w_lin,
+                w_exp=rp.striker_w_exp,
+                alpha=rp.striker_alpha,
+            )
+            striker_approach = striker_approach * any_alive.float()
             striker_alive = alive[:, :self.n_strikers].float()
-            reward[:, :self.n_strikers] += prox_rew * striker_alive
+            reward[:, :self.n_strikers] += striker_approach * striker_alive
 
-        # 6. Agent destruction penalty (applied to agents killed by radar this step)
+        # 7. Agent destruction penalty (applied to agents killed by radar this step)
         reward += killed.float() * float(rp.agent_destroyed)
 
         reward = reward.unsqueeze(-1).contiguous()  # [B, A, 1]
@@ -609,6 +634,32 @@ class StrikeEA2DEnv(EnvBase):
     # ------------------------------------------------------------------
     # Ego-centric helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _piecewise_lin_exp(d: torch.Tensor, d_max: float, d_knee: float,
+                           w_lin: float, w_exp: float, alpha: float) -> torch.Tensor:
+        """Piecewise linear-exponential shaping (vectorised).
+
+        Returns a **positive** value that increases as *d* → 0.
+        Caller applies sign (positive for approach, negative for avoidance).
+
+        Regions
+        -------
+        d ≥ d_max          → 0
+        d_knee ≤ d < d_max → linear:  w_lin × (d_max − d) / (d_max − d_knee)
+        d < d_knee          → w_lin + w_exp × (e^{α·(1 − d/d_knee)} − 1)
+
+        Continuous at *d_knee* (exponential term = 0 at the boundary).
+        """
+        # Linear region: progress fraction 0 → 1 as d goes from d_max → d_knee
+        t_lin = ((d_max - d) / (d_max - d_knee + 1e-8)).clamp(0.0, 1.0)
+        lin_val = w_lin * t_lin
+
+        # Exponential bonus: 0 at d_knee, grows steeply toward d = 0
+        t_exp = ((d_knee - d) / (d_knee + 1e-8)).clamp(0.0, 1.0)
+        exp_val = w_exp * (torch.exp(alpha * t_exp) - 1.0)
+
+        return lin_val + exp_val
 
     def _relative_polar(self, agent_pos, agent_heading, entity_pos):
         """Compute (distance, relative_angle) from each agent to each entity.

@@ -184,7 +184,7 @@ class TrainConfig:
     # Higher = better sample efficiency but higher memory cost
     # Rule of thumb: 20-32 steps per environment per iteration
     
-    n_iters: int = 10
+    n_iters: int = 50
     # Number of collect→update cycles. Each cycle collects frames_per_batch transitions
     # Higher = longer training, potential for better convergence
 
@@ -243,7 +243,7 @@ class TrainConfig:
     seed: int = 0
     # Random seed for reproducibility (RNG for environment, policy init, sampling)
     
-    log_every: int = 10
+    log_every: int = 5
     # Print training stats every N iterations (useful for monitoring convergence)
     
     device: torch.device = field(
@@ -292,7 +292,7 @@ def get_preset(name: str) -> Tuple[EnvConfig, TrainConfig, NetworkConfig]:
             NetworkConfig(),
         ),
         "strong_jam": lambda: (
-            EnvConfig(reward_config=RewardConfig(jammer_jamming=3.0)),
+            EnvConfig(reward_config=RewardConfig(jammer_w_lin=1.0, jammer_w_exp=2.0)),
             TrainConfig(),
             NetworkConfig(),
         ),

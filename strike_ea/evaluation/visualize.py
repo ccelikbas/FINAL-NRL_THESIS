@@ -25,8 +25,9 @@ def plot_training(logs: Dict[str, List[float]], save_dir: Optional[str] = None):
     ax1.set_title("Training: Episode reward mean"); ax1.grid(True)
 
     fig2, ax2 = plt.subplots()
-    for k in ("loss_total", "loss_policy", "loss_value", "loss_entropy"):
-        ax2.plot(logs[k], label=k.replace("loss_", ""))
+    for k in ("loss_policy", "loss_value"):
+        if k in logs:
+            ax2.plot(logs[k], label=k.replace("loss_", ""))
     ax2.set_xlabel("Iteration"); ax2.set_ylabel("Loss")
     ax2.set_title("Training: Loss curves"); ax2.legend(); ax2.grid(True)
 
