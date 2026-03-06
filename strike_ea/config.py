@@ -184,7 +184,7 @@ class TrainConfig:
     # Higher = better sample efficiency but higher memory cost
     # Rule of thumb: 20-32 steps per environment per iteration
     
-    n_iters: int = 60
+    n_iters: int = 10
     # Number of collect→update cycles. Each cycle collects frames_per_batch transitions
     # Higher = longer training, potential for better convergence
 
@@ -214,7 +214,7 @@ class TrainConfig:
     # Advantage = λ * TD_error + λ² * TD_error_t+1 + ... (blend of n-step returns)
     # Higher λ → higher bias, lower variance; Lower λ → lower bias, higher variance
     
-    entropy_coef: float = 0.05
+    entropy_coef: float = 0.01
     # Coefficient for entropy bonus in loss: loss_total = loss_policy + loss_value - entropy_coef * entropy
     # Encourages exploration (prevents premature convergence to deterministic policy)
     # Increase if agent gets stuck in local optima; Decrease if exploring too randomly
@@ -229,7 +229,7 @@ class TrainConfig:
     # Typical range: 1e-5 to 5e-4.
     # The actor should update slowly to stay within the PPO trust region.
 
-    critic_lr: float = 1e-3
+    critic_lr: float = 1e-4
     # Critic (value function) learning rate. Higher = faster value fitting.
     # Typical range: 1e-4 to 1e-3.
     # The critic benefits from faster convergence to accurate value estimates.
