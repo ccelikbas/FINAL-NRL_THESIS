@@ -50,24 +50,24 @@ class RewardConfig:
     # ─── RADAR ZONE AVOIDANCE  (piecewise lin-exp penalty, ALL agents) ───────
     # d = distance from nearest radar detection-zone boundary (clamped ≥ 0).
     # Agents inside the zone get killed and receive agent_destroyed instead.
-    radar_avoid_w_lin:  float = 0.3
+    radar_avoid_w_lin:  float = 0.5
     radar_avoid_w_exp:  float = 1.0
-    radar_avoid_d_max:  float = 0.10  # penalty starts 100 km from zone edge
+    radar_avoid_d_max:  float = 0.05  # penalty starts 100 km from zone edge
     radar_avoid_d_knee: float = 0.03  # 30 km from zone → exponential
     radar_avoid_alpha:  float = 3.0
 
     # ─── STRIKER APPROACH  (piecewise lin-exp reward toward nearest target) ──
     # d = distance to nearest alive target.  d_max = map diagonal.
-    striker_w_lin:  float = 0.5
+    striker_w_lin:  float = 1
     striker_w_exp:  float = 0.5
-    striker_d_knee: float = 0.10   # 200 km → exponential kicks in
+    striker_d_knee: float = 0.05   # 200 km → exponential kicks in
     striker_alpha:  float = 3.0
 
     # ─── JAMMER APPROACH  (piecewise lin-exp reward toward nearest radar) ────
     # d = distance to nearest radar (outside detection zone).  d_max = map diag.
-    jammer_w_lin:  float = 0.3
+    jammer_w_lin:  float = 1
     jammer_w_exp:  float = 0.5
-    jammer_d_knee: float = 0.10   # 300 km → exponential kicks in
+    jammer_d_knee: float = 0.05   # 300 km → exponential kicks in
     jammer_alpha:  float = 3.0
 
 
