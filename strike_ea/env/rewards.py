@@ -56,19 +56,16 @@ class RewardConfig:
     radar_avoid_d_knee: float = 0.1  # 30 km from zone → exponential
     radar_avoid_alpha:  float = 0.3
 
-    # ─── STRIKER APPROACH  (piecewise lin-exp reward toward nearest target) ──
-    # d = distance to nearest alive target.  d_max = map diagonal.
-    striker_w_lin:  float = 0.5
-    striker_w_exp:  float = 0.5
-    striker_d_knee: float = 0.1   # 200 km → exponential kicks in
-    striker_alpha:  float = 3.0
+    # ─── STRIKER PROGRESS  (potential-based: reward ∝ reduction in distance to best target) ──
+    # Each step: reward += striker_progress_scale × max_j(prev_dist_j − curr_dist_j)
+    # Positive when striker moves closer to any alive target, negative when moving away.
+    # At max speed (~0.02 units/step) × scale=5 → up to ~0.10 reward/step.
+    striker_progress_scale: float = 5.0
 
-    # ─── JAMMER APPROACH  (piecewise lin-exp reward toward nearest radar) ────
-    # d = distance to nearest radar (outside detection zone).  d_max = map diag.
-    jammer_w_lin:  float = 0.5
-    jammer_w_exp:  float = 0.2
-    jammer_d_knee: float = 0.1   # 300 km → exponential kicks in
-    jammer_alpha:  float = 3
+    # ─── JAMMER ACTIVE-JAMMING  (binary reward per step of active jamming) ─────
+    # Reward given each step a jammer is within jam_radius of at least one radar.
+    # Replaces proximity shaping: jammers are only rewarded for actually jamming.
+    jammer_active_reward: float = 0.2
 
 
 
@@ -96,29 +93,13 @@ def _piecewise_lin_exp(d: torch.Tensor, d_max: float, d_knee: float,
 
 def plot_reward_functions(reward_config: RewardConfig, distance_range: Tuple[float, float]):
     """
-    Plot reward shaping functions for approach and avoidance components.
+    Plot reward shaping functions for avoidance components.
+
+    Note: Striker reward is now potential-based progress (prev_dist - curr_dist),
+    and jammer reward is binary per-step active-jamming — neither is a function
+    of distance alone, so they are not plotted here.
     """
     d = torch.linspace(distance_range[0], distance_range[1], 1000)
-
-    # Striker approach reward
-    striker = _piecewise_lin_exp(
-        d,
-        d_max=distance_range[1],
-        d_knee=reward_config.striker_d_knee,
-        w_lin=reward_config.striker_w_lin,
-        w_exp=reward_config.striker_w_exp,
-        alpha=reward_config.striker_alpha,
-    )
-
-    # Jammer approach reward
-    jammer = _piecewise_lin_exp(
-        d,
-        d_max=distance_range[1],
-        d_knee=reward_config.jammer_d_knee,
-        w_lin=reward_config.jammer_w_lin,
-        w_exp=reward_config.jammer_w_exp,
-        alpha=reward_config.jammer_alpha,
-    )
 
     # Radar avoidance penalty
     radar = -_piecewise_lin_exp(
@@ -141,21 +122,16 @@ def plot_reward_functions(reward_config: RewardConfig, distance_range: Tuple[flo
         alpha=reward_config.border_alpha,
     )
 
-    plt.figure(figsize=(10,6))
-
-    plt.plot(d.numpy(), striker.numpy(), label="Striker → Target")
-    plt.plot(d.numpy(), jammer.numpy(), label="Jammer → Radar")
+    plt.figure(figsize=(10, 6))
     plt.plot(d.numpy(), radar.numpy(), label="Radar Avoidance")
     plt.plot(d.numpy(), border.numpy(), label="Border Avoidance")
-
     plt.axhline(0)
     plt.xlabel("Distance")
     plt.ylabel("Reward / Penalty")
-    plt.title("Reward Shaping Functions")
+    plt.title("Reward Shaping Functions (avoidance only)")
     plt.legend()
     plt.grid(True)
-
     plt.show()
 
-reward_config = RewardConfig()
-plot_reward_functions(reward_config, distance_range=(0, 0.5))
+# reward_config = RewardConfig()
+# plot_reward_functions(reward_config, distance_range=(0, 0.5))

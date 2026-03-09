@@ -145,9 +145,9 @@ class EnvConfig:
 
     reward_config: RewardConfig = field(default_factory=RewardConfig)
     # Reward weights. Carefully tuned for MAPPO convergence:
-    # - target_destroyed: team objective (cooperation)
-    # - jammer_jamming: role-specific shaping (jammers discouraged from doing nothing)
-    # - striker_proximity: role-specific shaping (strikers encouraged toward goal)
+    # - target_destroyed:      team objective (cooperation)
+    # - jammer_active_reward:  binary reward per step actively jamming a radar
+    # - striker_progress_scale: scales the potential-based progress reward toward best target
     # - border_penalty, timestep_penalty: environment constraints
 
 
@@ -184,7 +184,7 @@ class TrainConfig:
     # Higher = better sample efficiency but higher memory cost
     # Rule of thumb: 20-32 steps per environment per iteration
     
-    n_iters: int = 30
+    n_iters: int = 60
     # Number of collect→update cycles. Each cycle collects frames_per_batch transitions
     # Higher = longer training, potential for better convergence
 
@@ -292,7 +292,7 @@ def get_preset(name: str) -> Tuple[EnvConfig, TrainConfig, NetworkConfig]:
             NetworkConfig(),
         ),
         "strong_jam": lambda: (
-            EnvConfig(reward_config=RewardConfig(jammer_w_lin=1.0, jammer_w_exp=2.0)),
+            EnvConfig(reward_config=RewardConfig(jammer_active_reward=1.0)),
             TrainConfig(),
             NetworkConfig(),
         ),
