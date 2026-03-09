@@ -13,7 +13,7 @@ python run.py --n_env_layouts 1     # Train on a single fixed radar layout
 python run.py --n_env_layouts 50    # Train on 50 distinct radar layouts
 
 # TEST / VISUALIZE A SAVED POLICY (no training)
-.\.venv\Scripts\python.exe .\strike_ea\run.py --test --policy_path .\saved_policies\default\2026-03-06_12-01-16.pt
+.\.venv\Scripts\python.exe .\strike_ea\run.py --test --policy_path .\saved_policies\default\2026-03-09_13-47-24.pt
 python run.py --test --preset default  # Test random (untrained) policy
 
 # LIST saved policies
@@ -44,7 +44,7 @@ from strike_ea.config import EnvConfig, TrainConfig, NetworkConfig, get_preset
 from strike_ea.env.rewards import RewardConfig
 from strike_ea.training import train_mappo
 from strike_ea.evaluation.runner import TestRunner, PolicyEvaluator
-from strike_ea.evaluation.visualize import animate_rollout, plot_training
+from strike_ea.evaluation.visualize import animate_rollout, plot_training, plot_evaluation_rewards
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -173,6 +173,7 @@ def run_single(env_cfg, train_cfg, net_cfg, *, label="run", animate=True, save_d
         )
         results = evaluator.evaluate(n_episodes=eval_episodes)
         PolicyEvaluator.print_report(results)
+        plot_evaluation_rewards(results, save_dir=save_dir)
 
     if animate:
         print(f"\n{'='*60}\n  Visualizing trained policy\n{'='*60}")

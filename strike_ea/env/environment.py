@@ -499,6 +499,7 @@ class StrikeEA2DEnv(EnvBase):
 
         # 5. Jammer approach  (piecewise lin-exp reward toward nearest radar)
         #    Zeroed if jammer is inside the radar detection zone (unsafe)
+        jammer_approach_full = torch.zeros(B, A, device=self.device)
         if jammer_idx.numel() > 0 and self.n_radars > 0:
             rel_jr_all = self.radar_pos[:, None, :, :] - self.agent_pos[:, self.n_strikers:, None, :]
             dist_jr    = torch.linalg.norm(rel_jr_all, dim=-1)         # [B, nj, R]
@@ -514,10 +515,13 @@ class StrikeEA2DEnv(EnvBase):
                 alpha=rp.jammer_alpha,
             )
             jammer_alive = alive[:, self.n_strikers:].float()
-            reward[:, self.n_strikers:] += jammer_approach * jammer_alive * safe_mask.float()
+            jammer_contrib = jammer_approach * jammer_alive * safe_mask.float()
+            reward[:, self.n_strikers:] += jammer_contrib
+            jammer_approach_full[:, self.n_strikers:] = jammer_contrib
 
         # 6. Striker approach  (piecewise lin-exp reward toward nearest alive target)
         #    Zero when all targets are dead (striker gets team kill bonus instead)
+        striker_approach_full = torch.zeros(B, A, device=self.device)
         if striker_idx.numel() > 0 and self.n_targets > 0:
             rel_st_all = self.target_pos[:, None, :, :] - self.agent_pos[:, :self.n_strikers, None, :]
             dist_st    = torch.linalg.norm(rel_st_all, dim=-1)         # [B, ns, T]
@@ -535,10 +539,25 @@ class StrikeEA2DEnv(EnvBase):
             )
             striker_approach = striker_approach * any_alive.float()
             striker_alive = alive[:, :self.n_strikers].float()
-            reward[:, :self.n_strikers] += striker_approach * striker_alive
+            striker_contrib = striker_approach * striker_alive
+            reward[:, :self.n_strikers] += striker_contrib
+            striker_approach_full[:, :self.n_strikers] = striker_contrib
 
         # 7. Agent destruction penalty (applied to agents killed by radar this step)
-        reward += killed.float() * float(rp.agent_destroyed)
+        death_pen = killed.float() * float(rp.agent_destroyed)          # [B, A]
+        reward += death_pen
+
+        # Store per-component reward breakdown (team-mean per step) for diagnostics
+        # Each is [B, A] averaged to scalar per batch element
+        self.last_reward_components = {
+            "target_destroyed":   (team_kill.unsqueeze(-1) * alive_float).detach(),   # [B, A]
+            "border_penalty":     border_pen.detach(),                                # [B, A]
+            "timestep_penalty":   (float(rp.timestep_penalty) * alive_float).detach(),# [B, A]
+            "radar_avoidance":    radar_pen.detach(),                                 # [B, A]
+            "striker_approach":   striker_approach_full.detach(),                      # [B, A]
+            "jammer_approach":    jammer_approach_full.detach(),                       # [B, A]
+            "agent_destroyed":    death_pen.detach(),                                 # [B, A]
+        }
 
         reward = reward.unsqueeze(-1).contiguous()  # [B, A, 1]
 

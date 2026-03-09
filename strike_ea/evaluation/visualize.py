@@ -87,6 +87,145 @@ def plot_training(logs: Dict[str, List[float]], save_dir: Optional[str] = None):
 
 
 # ------------------------------------------------------------------
+# Evaluation reward-component plots
+# ------------------------------------------------------------------
+
+def plot_evaluation_rewards(
+    results: Dict,
+    save_dir: Optional[str] = None,
+    max_step: Optional[int] = None,
+):
+    """Plot per-step reward components from a PolicyEvaluator run.
+
+    Creates two figures:
+    1. **Stacked area** – reward components over timesteps (shows relative
+       magnitude and sign of each component, plus total reward line).
+    2. **Individual lines** – each component as a separate line so the scale
+       of small components is visible.
+
+    Parameters
+    ----------
+    results : dict returned by ``PolicyEvaluator.evaluate()``.
+    save_dir : optional directory to save PNGs.
+    max_step : trim x-axis to this step (default: auto from episode counts).
+    """
+    rps = results.get("reward_components_per_step")
+    if rps is None:
+        return
+
+    ep_counts = np.array(rps["_episode_count"])
+    # Auto-determine max relevant step (where at least 5 % of episodes were still running)
+    if max_step is None:
+        threshold = max(1, int(0.05 * ep_counts[0]))
+        valid = np.where(ep_counts >= threshold)[0]
+        max_step = int(valid[-1]) + 1 if len(valid) else len(ep_counts)
+
+    x = np.arange(max_step)
+
+    component_names = [
+        "target_destroyed", "striker_approach", "jammer_approach",
+        "timestep_penalty", "border_penalty", "radar_avoidance",
+        "agent_destroyed",
+    ]
+    colors = {
+        "target_destroyed": "#2ca02c",   # green  – positive sparse
+        "striker_approach":  "#1f77b4",   # blue   – positive dense
+        "jammer_approach":   "#17becf",   # cyan   – positive dense
+        "timestep_penalty":  "#ff7f0e",   # orange – negative dense
+        "border_penalty":    "#d62728",   # red    – negative dense
+        "radar_avoidance":   "#9467bd",   # purple – negative dense
+        "agent_destroyed":   "#e377c2",   # pink   – negative sparse
+    }
+    labels = {
+        "target_destroyed": "Target destroyed",
+        "striker_approach":  "Striker approach",
+        "jammer_approach":   "Jammer approach",
+        "timestep_penalty":  "Timestep penalty",
+        "border_penalty":    "Border penalty",
+        "radar_avoidance":   "Radar avoidance",
+        "agent_destroyed":   "Agent destroyed",
+    }
+
+    # Gather arrays
+    comp_arrays = {}
+    for name in component_names:
+        arr = np.array(rps.get(name, [0.0] * max_step))[:max_step]
+        comp_arrays[name] = arr
+
+    total = np.array(rps.get("total", [0.0] * max_step))[:max_step]
+
+    # --- Figure 1: Stacked area with total line ---
+    fig1, ax1 = plt.subplots(figsize=(12, 6))
+
+    # Separate positive and negative components for stacked fill
+    pos_names = [n for n in component_names if comp_arrays[n].max() > 1e-8]
+    neg_names = [n for n in component_names if comp_arrays[n].min() < -1e-8]
+
+    # Stack positives from 0 upward
+    pos_cum = np.zeros(max_step)
+    for name in pos_names:
+        arr = np.maximum(comp_arrays[name], 0)
+        ax1.fill_between(x, pos_cum, pos_cum + arr, alpha=0.55,
+                         color=colors[name], label=labels[name])
+        pos_cum += arr
+
+    # Stack negatives from 0 downward
+    neg_cum = np.zeros(max_step)
+    for name in neg_names:
+        arr = np.minimum(comp_arrays[name], 0)
+        ax1.fill_between(x, neg_cum, neg_cum + arr, alpha=0.55,
+                         color=colors[name],
+                         label=labels[name] if name not in pos_names else None)
+        neg_cum += arr
+
+    ax1.plot(x, total, color="black", lw=2, label="Total reward")
+    ax1.axhline(0, color="gray", lw=0.5)
+    ax1.set_xlabel("Timestep")
+    ax1.set_ylabel("Mean reward (summed over agents)")
+    n_ep = int(results.get("n_episodes", 0))
+    ax1.set_title(f"Per-Step Reward Components (avg over {n_ep} episodes)")
+    ax1.legend(loc="best", fontsize=9)
+    ax1.grid(True, alpha=0.3)
+
+    # --- Figure 2: Individual component lines ---
+    fig2, ax2 = plt.subplots(figsize=(12, 6))
+    for name in component_names:
+        arr = comp_arrays[name]
+        if np.abs(arr).max() > 1e-10:
+            ax2.plot(x, arr, label=labels[name], color=colors[name], lw=1.5)
+    ax2.plot(x, total, color="black", lw=2, ls="--", label="Total reward")
+    ax2.axhline(0, color="gray", lw=0.5)
+    ax2.set_xlabel("Timestep")
+    ax2.set_ylabel("Mean reward (summed over agents)")
+    ax2.set_title(f"Per-Step Reward Components – Line View (avg over {n_ep} episodes)")
+    ax2.legend(loc="best", fontsize=9)
+    ax2.grid(True, alpha=0.3)
+
+    # --- Figure 3: Cumulative reward over time ---
+    fig3, ax3 = plt.subplots(figsize=(12, 6))
+    cum_total = np.cumsum(total)
+    for name in component_names:
+        arr = comp_arrays[name]
+        if np.abs(arr).max() > 1e-10:
+            ax3.plot(x, np.cumsum(arr), label=labels[name], color=colors[name], lw=1.5)
+    ax3.plot(x, cum_total, color="black", lw=2, label="Total (cumulative)")
+    ax3.axhline(0, color="gray", lw=0.5)
+    ax3.set_xlabel("Timestep")
+    ax3.set_ylabel("Cumulative reward (summed over agents)")
+    ax3.set_title(f"Cumulative Reward Components (avg over {n_ep} episodes)")
+    ax3.legend(loc="best", fontsize=9)
+    ax3.grid(True, alpha=0.3)
+
+    if save_dir:
+        os.makedirs(save_dir, exist_ok=True)
+        fig1.savefig(os.path.join(save_dir, "eval_reward_components_stacked.png"), dpi=160, bbox_inches="tight")
+        fig2.savefig(os.path.join(save_dir, "eval_reward_components_lines.png"),   dpi=160, bbox_inches="tight")
+        fig3.savefig(os.path.join(save_dir, "eval_reward_cumulative.png"),         dpi=160, bbox_inches="tight")
+
+    plt.show()
+
+
+# ------------------------------------------------------------------
 # Rollout animation
 # ------------------------------------------------------------------
 

@@ -31,44 +31,44 @@ class RewardConfig:
     """
 
     # ─── SPARSE TEAM REWARDS ─────────────────────────────────────────────────
-    target_destroyed: float = 50.0
+    target_destroyed: float = 200
     # Shared equally among alive agents when a target is killed.
 
-    timestep_penalty: float = -0.1
+    timestep_penalty: float = -0.05
     # Small per-step cost for every alive agent (encourages finishing fast).
 
-    agent_destroyed: float = -50.0
+    agent_destroyed: float = -100
     # One-time penalty applied to an agent the step it is killed by a radar.
 
     # ─── BORDER AVOIDANCE  (piecewise lin-exp penalty, per alive agent) ──────
     # d = distance from nearest map edge.  d_max = border_thresh (EnvConfig).
-    border_w_lin:  float = 1.0
-    border_w_exp:  float = 2.0
-    border_d_knee: float = 0.02   # 20 km from edge → exponential kicks in
+    border_w_lin:  float = 0.5
+    border_w_exp:  float = 1.0
+    border_d_knee: float = 0.01   # 20 km from edge → exponential kicks in
     border_alpha:  float = 3.0
 
     # ─── RADAR ZONE AVOIDANCE  (piecewise lin-exp penalty, ALL agents) ───────
     # d = distance from nearest radar detection-zone boundary (clamped ≥ 0).
     # Agents inside the zone get killed and receive agent_destroyed instead.
-    radar_avoid_w_lin:  float = 0.5
-    radar_avoid_w_exp:  float = 1.0
-    radar_avoid_d_max:  float = 0.05  # penalty starts 100 km from zone edge
-    radar_avoid_d_knee: float = 0.03  # 30 km from zone → exponential
-    radar_avoid_alpha:  float = 3.0
+    radar_avoid_w_lin:  float = 0.1
+    radar_avoid_w_exp:  float = 0.5
+    radar_avoid_d_max:  float = 0.1  # penalty starts 100 km from zone edge
+    radar_avoid_d_knee: float = 0.1  # 30 km from zone → exponential
+    radar_avoid_alpha:  float = 0.3
 
     # ─── STRIKER APPROACH  (piecewise lin-exp reward toward nearest target) ──
     # d = distance to nearest alive target.  d_max = map diagonal.
-    striker_w_lin:  float = 1
+    striker_w_lin:  float = 0.5
     striker_w_exp:  float = 0.5
-    striker_d_knee: float = 0.05   # 200 km → exponential kicks in
+    striker_d_knee: float = 0.1   # 200 km → exponential kicks in
     striker_alpha:  float = 3.0
 
     # ─── JAMMER APPROACH  (piecewise lin-exp reward toward nearest radar) ────
     # d = distance to nearest radar (outside detection zone).  d_max = map diag.
-    jammer_w_lin:  float = 1
-    jammer_w_exp:  float = 0.5
-    jammer_d_knee: float = 0.05   # 300 km → exponential kicks in
-    jammer_alpha:  float = 3.0
+    jammer_w_lin:  float = 0.5
+    jammer_w_exp:  float = 0.2
+    jammer_d_knee: float = 0.1   # 300 km → exponential kicks in
+    jammer_alpha:  float = 3
 
 
 

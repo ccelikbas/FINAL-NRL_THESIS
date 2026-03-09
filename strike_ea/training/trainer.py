@@ -219,8 +219,9 @@ def train_mappo(
 
         # --- Per-agent reward logging ---
         try:
-            # td reward shape: [B*T, A, 1] after reshape → per-agent mean
-            agent_rewards = data.get(base_env._reward_key)  # [N, A, 1]
+            # Reward lives at ("next", "agents", "reward") in collector data
+            next_reward_key = ("next",) + base_env._reward_key
+            agent_rewards = data.get(next_reward_key)  # [N, A, 1]
             if agent_rewards is not None:
                 agent_rewards = agent_rewards.squeeze(-1)    # [N, A]
                 for ai in range(n_agents):

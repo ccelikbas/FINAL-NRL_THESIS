@@ -132,8 +132,15 @@ class PolicyEvaluator:
         self.env_cfg = env_cfg if env_cfg is not None else EnvConfig()
 
     @torch.no_grad()
-    def evaluate(self, n_episodes: int = 100, seed_offset: int = 10_000) -> Dict[str, float]:
-        """Run *n_episodes* rollouts and return a dict of aggregate metrics."""
+    def evaluate(self, n_episodes: int = 100, seed_offset: int = 10_000) -> Dict:
+        """Run *n_episodes* rollouts and return a dict of aggregate metrics.
+
+        Returns a dict with scalar summary stats plus a 'reward_components_per_step'
+        sub-dict mapping component names to lists of length max_steps, where each
+        entry is the average (over all agents and episodes) reward from that
+        component at that timestep.
+        """
+        import numpy as np
 
         all_rewards: List[float] = []
         targets_destroyed_frac: List[float] = []
@@ -143,6 +150,16 @@ class PolicyEvaluator:
 
         n_targets = self.env_cfg.n_targets
         n_agents = self.env_cfg.n_strikers + self.env_cfg.n_jammers
+
+        # Per-step component accumulators: component_name → [max_steps] running sum
+        component_names = [
+            "target_destroyed", "border_penalty", "timestep_penalty",
+            "radar_avoidance", "striker_approach", "jammer_approach",
+            "agent_destroyed",
+        ]
+        step_component_sums = {name: np.zeros(self.max_steps) for name in component_names}
+        step_total_sums     = np.zeros(self.max_steps)
+        step_counts         = np.zeros(self.max_steps)  # how many episodes contributed to each step
 
         for ep in range(n_episodes):
             env = StrikeEA2DEnv(
@@ -179,7 +196,7 @@ class PolicyEvaluator:
             cumulative_reward = 0.0
             steps = 0
 
-            for _ in range(self.max_steps):
+            for t in range(self.max_steps):
                 td = self.actor(td)
                 td = env.step(td)
                 steps += 1
@@ -187,9 +204,21 @@ class PolicyEvaluator:
                 # Accumulate per-step team reward
                 try:
                     rew = td.get(("next", env.group, "reward"))  # [1, A, 1]
-                    cumulative_reward += float(rew.sum().item())
+                    step_reward = float(rew.sum().item())
+                    cumulative_reward += step_reward
+                    step_total_sums[t] += step_reward
                 except Exception:
                     pass
+
+                # Read per-component breakdown from env
+                if hasattr(env, 'last_reward_components'):
+                    for name in component_names:
+                        comp = env.last_reward_components.get(name)
+                        if comp is not None:
+                            # Sum over agents, take batch element 0
+                            step_component_sums[name][t] += float(comp[0].sum().item())
+
+                step_counts[t] += 1
 
                 done_flag = False
                 try:
@@ -215,7 +244,7 @@ class PolicyEvaluator:
             if targets_killed == n_targets:
                 full_completions += 1
 
-        # Aggregate
+        # Aggregate scalar stats
         import statistics
         results = {
             "n_episodes":             n_episodes,
@@ -227,6 +256,17 @@ class PolicyEvaluator:
             "mean_duration":          statistics.mean(durations),
             "std_duration":           statistics.pstdev(durations),
         }
+
+        # Average per-step reward components (only steps that had data)
+        safe_counts = np.maximum(step_counts, 1)
+        reward_per_step: Dict[str, List[float]] = {}
+        for name in component_names:
+            reward_per_step[name] = (step_component_sums[name] / safe_counts).tolist()
+        reward_per_step["total"] = (step_total_sums / safe_counts).tolist()
+        # Also store how many episodes were still running at each step
+        reward_per_step["_episode_count"] = step_counts.tolist()
+
+        results["reward_components_per_step"] = reward_per_step
         return results
 
     @staticmethod
