@@ -123,14 +123,17 @@ def plot_evaluation_rewards(
     x = np.arange(max_step)
 
     component_names = [
-        "target_destroyed", "striker_approach", "jammer_approach",
+        "target_destroyed", "striker_progress", "jammer_progress",
+        "jammer_jam_bonus", "formation",
         "timestep_penalty", "border_penalty", "radar_avoidance",
         "agent_destroyed",
     ]
     colors = {
         "target_destroyed": "#2ca02c",   # green  – positive sparse
-        "striker_approach":  "#1f77b4",   # blue   – positive dense
-        "jammer_approach":   "#17becf",   # cyan   – positive dense
+        "striker_progress":  "#1f77b4",   # blue   – positive dense
+        "jammer_progress":   "#17becf",   # cyan   – positive dense
+        "jammer_jam_bonus":  "#aec7e8",   # light blue – positive dense
+        "formation":         "#8c564b",   # brown  – positive dense
         "timestep_penalty":  "#ff7f0e",   # orange – negative dense
         "border_penalty":    "#d62728",   # red    – negative dense
         "radar_avoidance":   "#9467bd",   # purple – negative dense
@@ -138,8 +141,10 @@ def plot_evaluation_rewards(
     }
     labels = {
         "target_destroyed": "Target destroyed",
-        "striker_approach":  "Striker approach",
-        "jammer_approach":   "Jammer approach",
+        "striker_progress":  "Striker progress",
+        "jammer_progress":   "Jammer progress",
+        "jammer_jam_bonus":  "Jammer jam bonus",
+        "formation":         "Formation cohesion",
         "timestep_penalty":  "Timestep penalty",
         "border_penalty":    "Border penalty",
         "radar_avoidance":   "Radar avoidance",

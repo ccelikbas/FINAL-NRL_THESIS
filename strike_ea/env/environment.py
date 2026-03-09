@@ -159,6 +159,8 @@ class StrikeEA2DEnv(EnvBase):
         self.step_count    = torch.zeros(B, 1, dtype=torch.int64, device=self.device)
         # Previous striker→target distances for progress reward (potential-based shaping)
         self._striker_prev_dist = torch.zeros(B, n_strikers, n_targets, device=self._device)
+        # Previous jammer→radar distances for progress reward (potential-based shaping)
+        self._jammer_prev_dist = torch.zeros(B, n_jammers, n_radars, device=self._device)
 
         self._make_specs()
 
@@ -357,6 +359,13 @@ class StrikeEA2DEnv(EnvBase):
         else:
             self._striker_prev_dist = torch.zeros(B, self.n_strikers, T, device=self.device)
 
+        # Initialise previous distances for jammer progress reward
+        if self.n_jammers > 0 and self.n_radars > 0:
+            rel_jr_init = self.radar_pos[:, None, :, :] - self.agent_pos[:, self.n_strikers:, None, :]
+            self._jammer_prev_dist = torch.linalg.norm(rel_jr_init, dim=-1)  # [B, nj, R]
+        else:
+            self._jammer_prev_dist = torch.zeros(B, self.n_jammers, R, device=self.device)
+
         td = TensorDict({}, batch_size=[B], device=self.device)
         td.set(self._obs_key, self._build_local_obs())
         td.set("state",       self._build_global_state())
@@ -502,19 +511,35 @@ class StrikeEA2DEnv(EnvBase):
         ) * alive_float
         reward += radar_pen
 
-        # 5. Jammer active-jamming reward  (binary: reward only when actively jamming a radar)
-        jammer_approach_full = torch.zeros(B, A, device=self.device)
+        # 5. Jammer progress toward nearest radar (potential-based)
+        #    + active-jamming bonus when within jam_radius
+        jammer_progress_full  = torch.zeros(B, A, device=self.device)
+        jammer_jam_bonus_full = torch.zeros(B, A, device=self.device)
         if jammer_idx.numel() > 0 and self.n_radars > 0:
-            # jam_active: [B, nj] — True if jammer i is currently jamming ≥ 1 radar
-            jammer_alive_f = alive[:, self.n_strikers:].float()      # [B, nj]
-            jam_reward = float(rp.jammer_active_reward) * jam_active.float() * jammer_alive_f
-            reward[:, self.n_strikers:] += jam_reward
-            jammer_approach_full[:, self.n_strikers:] = jam_reward
+            rel_jr_all = self.radar_pos[:, None, :, :] - self.agent_pos[:, self.n_strikers:, None, :]
+            dist_jr = torch.linalg.norm(rel_jr_all, dim=-1)           # [B, nj, R]
+            jammer_alive_f = alive[:, self.n_strikers:].float()        # [B, nj]
 
-        # 6. Striker progress reward  (potential-based: max_j [prev_dist_j − curr_dist_j])
-        #    Positive when a striker moves closer to any alive target; also can be negative.
+            # Progress toward nearest radar (potential-based: prev_nearest - curr_nearest)
+            dist_jr_min_curr, _ = dist_jr.min(dim=-1)                  # [B, nj]
+            dist_jr_min_prev, _ = self._jammer_prev_dist.min(dim=-1)   # [B, nj]
+            progress_j = dist_jr_min_prev - dist_jr_min_curr           # positive = moved closer
+            jammer_prog = float(rp.jammer_progress_scale) * progress_j * jammer_alive_f
+            reward[:, self.n_strikers:] += jammer_prog
+            jammer_progress_full[:, self.n_strikers:] = jammer_prog
+
+            # Active-jamming bonus (on top of progress)
+            jam_bonus = float(rp.jammer_jam_bonus) * jam_active.float() * jammer_alive_f
+            reward[:, self.n_strikers:] += jam_bonus
+            jammer_jam_bonus_full[:, self.n_strikers:] = jam_bonus
+
+            # Update stored distances for next step
+            self._jammer_prev_dist = dist_jr.detach()
+
+        # 6. Striker progress toward best alive target (potential-based)
+        #    Positive when a striker moves closer to any alive target; can be negative.
         #    Zero when all targets are already destroyed.
-        striker_approach_full = torch.zeros(B, A, device=self.device)
+        striker_progress_full = torch.zeros(B, A, device=self.device)
         if striker_idx.numel() > 0 and self.n_targets > 0:
             rel_st_all = self.target_pos[:, None, :, :] - self.agent_pos[:, :self.n_strikers, None, :]
             dist_st    = torch.linalg.norm(rel_st_all, dim=-1)         # [B, ns, T]
@@ -537,12 +562,31 @@ class StrikeEA2DEnv(EnvBase):
             striker_alive_f = alive[:, :self.n_strikers].float()
             striker_contrib = float(rp.striker_progress_scale) * progress_max * striker_alive_f
             reward[:, :self.n_strikers] += striker_contrib
-            striker_approach_full[:, :self.n_strikers] = striker_contrib
+            striker_progress_full[:, :self.n_strikers] = striker_contrib
 
             # Update stored distances for next step
             self._striker_prev_dist = dist_st.detach()
 
-        # 7. Agent destruction penalty (applied to agents killed by radar this step)
+        # 7. Formation cohesion (reward for staying close to nearest alive ally)
+        formation_full = torch.zeros(B, A, device=self.device)
+        if A > 1 and rp.formation_scale > 0:
+            # Pairwise inter-agent distances: [B, A, A]
+            d_pairs = torch.linalg.norm(
+                self.agent_pos[:, :, None, :] - self.agent_pos[:, None, :, :], dim=-1
+            )
+            eye_aa = torch.eye(A, device=self.device, dtype=torch.bool).unsqueeze(0)
+            d_pairs = torch.where(eye_aa, torch.full_like(d_pairs, float('inf')), d_pairs)
+            # Mask out dead allies so they don't count
+            dead_ally = ~self.agent_alive[:, None, :].expand(B, A, A)
+            d_pairs = torch.where(dead_ally, torch.full_like(d_pairs, float('inf')), d_pairs)
+            d_nearest = d_pairs.min(dim=-1).values                      # [B, A]
+            form_rew = float(rp.formation_scale) * (
+                1.0 - d_nearest / float(rp.formation_ref_dist)
+            ).clamp(min=0.0) * alive_float
+            reward += form_rew
+            formation_full = form_rew
+
+        # 8. Agent destruction penalty (applied to agents killed by radar this step)
         death_pen = killed.float() * float(rp.agent_destroyed)          # [B, A]
         reward += death_pen
 
@@ -553,8 +597,10 @@ class StrikeEA2DEnv(EnvBase):
             "border_penalty":     border_pen.detach(),                                # [B, A]
             "timestep_penalty":   (float(rp.timestep_penalty) * alive_float).detach(),# [B, A]
             "radar_avoidance":    radar_pen.detach(),                                 # [B, A]
-            "striker_approach":   striker_approach_full.detach(),                      # [B, A]
-            "jammer_approach":    jammer_approach_full.detach(),                       # [B, A]
+            "striker_progress":   striker_progress_full.detach(),                      # [B, A]
+            "jammer_progress":    jammer_progress_full.detach(),                       # [B, A]
+            "jammer_jam_bonus":   jammer_jam_bonus_full.detach(),                      # [B, A]
+            "formation":          formation_full.detach(),                             # [B, A]
             "agent_destroyed":    death_pen.detach(),                                 # [B, A]
         }
 

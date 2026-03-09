@@ -55,10 +55,10 @@ class EnvConfig:
 
     # ─── Team Composition ────────────────────────────────────────────────────
     # Multi-agent team structure affects network architecture and training stability
-    n_strikers: int = 2  # Agents with kinetic (offensive) capability; share policy parameters
-    n_jammers: int = 2   # Agents with electronic (defensive) capability; share policy parameters
-    n_targets: int = 2   # Objectives to destroy (define episode success criteria)
-    n_radars: int = 2    # Environmental threats (create intrinsic difficulty)
+    n_strikers: int = 1  # Agents with kinetic (offensive) capability; share policy parameters
+    n_jammers: int = 1   # Agents with electronic (defensive) capability; share policy parameters
+    n_targets: int = 1   # Objectives to destroy (define episode success criteria)
+    n_radars: int = 1    # Environmental threats (create intrinsic difficulty)
 
     # ─── World / Dynamics ──────────────────────────────────────────────────
     world_bounds: Tuple[float, float] = (0.0, 1.0)  # Normalized coordinate space (0-1000 km)
@@ -145,10 +145,12 @@ class EnvConfig:
 
     reward_config: RewardConfig = field(default_factory=RewardConfig)
     # Reward weights. Carefully tuned for MAPPO convergence:
-    # - target_destroyed:      team objective (cooperation)
-    # - jammer_active_reward:  binary reward per step actively jamming a radar
-    # - striker_progress_scale: scales the potential-based progress reward toward best target
-    # - border_penalty, timestep_penalty: environment constraints
+    # - target_destroyed:      sparse team objective (cooperation)
+    # - striker_progress_scale: potential-based approach toward best target
+    # - jammer_progress_scale:  potential-based approach toward nearest radar
+    # - jammer_jam_bonus:       per-step bonus for actively jamming
+    # - formation_scale:        cohesion reward for staying close as a pair
+    # - border_penalty, radar_avoidance, timestep_penalty: constraints
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -214,7 +216,7 @@ class TrainConfig:
     # Advantage = λ * TD_error + λ² * TD_error_t+1 + ... (blend of n-step returns)
     # Higher λ → higher bias, lower variance; Lower λ → lower bias, higher variance
     
-    entropy_coef: float = 0
+    entropy_coef: float = 0.01
     # Coefficient for entropy bonus in loss: loss_total = loss_policy + loss_value - entropy_coef * entropy
     # Encourages exploration (prevents premature convergence to deterministic policy)
     # Increase if agent gets stuck in local optima; Decrease if exploring too randomly
@@ -292,7 +294,7 @@ def get_preset(name: str) -> Tuple[EnvConfig, TrainConfig, NetworkConfig]:
             NetworkConfig(),
         ),
         "strong_jam": lambda: (
-            EnvConfig(reward_config=RewardConfig(jammer_active_reward=1.0)),
+            EnvConfig(reward_config=RewardConfig(jammer_jam_bonus=0.3, jammer_progress_scale=8.0)),
             TrainConfig(),
             NetworkConfig(),
         ),

@@ -154,8 +154,8 @@ class PolicyEvaluator:
         # Per-step component accumulators: component_name → [max_steps] running sum
         component_names = [
             "target_destroyed", "border_penalty", "timestep_penalty",
-            "radar_avoidance", "striker_approach", "jammer_approach",
-            "agent_destroyed",
+            "radar_avoidance", "striker_progress", "jammer_progress",
+            "jammer_jam_bonus", "formation", "agent_destroyed",
         ]
         step_component_sums = {name: np.zeros(self.max_steps) for name in component_names}
         step_total_sums     = np.zeros(self.max_steps)
