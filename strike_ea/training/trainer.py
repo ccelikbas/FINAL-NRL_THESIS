@@ -105,6 +105,7 @@ def train_mappo(
     logs: Dict[str, List[float]] = {
         "episode_reward_mean": [],
         "loss_policy": [], "loss_value": [],
+        "entropy": [], "approx_kl": [], "clip_fraction": [], "advantage_std": [],
     }
 
     for it, td in enumerate(collector):
@@ -128,7 +129,16 @@ def train_mappo(
         n_samples = data.batch_size[0] if len(data.batch_size) else data.numel()
 
         pol_acc = val_acc = 0.0
+        entropy_acc = kl_acc = clip_frac_acc = 0.0
         n_updates = 0
+
+        # Advantage std from the full batch (before per-minibatch normalisation)
+        try:
+            adv_key = (base_env.group, "advantage")
+            adv_vals = data.get(adv_key) if adv_key in data.keys(True) else data.get("advantage")
+            adv_std = float(adv_vals.std().item()) if adv_vals is not None else float("nan")
+        except Exception:
+            adv_std = float("nan")
 
         for _ in range(train_cfg.num_epochs):
             perm = torch.randperm(n_samples, device=device)
@@ -157,6 +167,21 @@ def train_mappo(
 
                 pol_acc   += float(loss_policy.item())
                 val_acc   += float(loss_value.item())
+
+                # --- Extra diagnostic metrics ---
+                try:
+                    entropy_acc  += float(loss_vals.get("entropy").mean().item())
+                except Exception:
+                    pass
+                try:
+                    kl_acc       += float(loss_vals.get("kl_approx").mean().item())
+                except Exception:
+                    pass
+                try:
+                    clip_frac_acc += float(loss_vals.get("clip_fraction").mean().item())
+                except Exception:
+                    pass
+
                 n_updates += 1
 
         try:
@@ -181,13 +206,21 @@ def train_mappo(
         logs["episode_reward_mean"].append(ep_rew_mean)
         logs["loss_policy"].append(pol_acc / div)
         logs["loss_value"].append(val_acc / div)
+        logs["entropy"].append(entropy_acc / div)
+        logs["approx_kl"].append(kl_acc / div)
+        logs["clip_fraction"].append(clip_frac_acc / div)
+        logs["advantage_std"].append(adv_std)
 
         if train_cfg.log_every and (it + 1) % train_cfg.log_every == 0:
             print(
                 f"Iter {it+1:4d}/{train_cfg.n_iters} | "
                 f"ep_rew {ep_rew_mean: .3f} | "
                 f"pol_loss {logs['loss_policy'][-1]:.4f} | "
-                f"val_loss {logs['loss_value'][-1]:.4f}"
+                f"val_loss {logs['loss_value'][-1]:.4f} | "
+                f"entropy {logs['entropy'][-1]:.4f} | "
+                f"approx_kl {logs['approx_kl'][-1]:.4f} | "
+                f"clip_frac {logs['clip_fraction'][-1]:.4f} | "
+                f"adv_std {logs['advantage_std'][-1]:.4f}"
             )
 
         if it + 1 >= train_cfg.n_iters:

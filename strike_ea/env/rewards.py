@@ -34,7 +34,7 @@ class RewardConfig:
     target_destroyed: float = 10.0
     # Shared equally among alive agents when a target is killed.
 
-    timestep_penalty: float = -0.02
+    timestep_penalty: float = -0.04
     # Small per-step cost for every alive agent (encourages finishing fast).
 
     agent_destroyed: float = -10.0
@@ -60,7 +60,7 @@ class RewardConfig:
     # d = distance to nearest alive target.  d_max = map diagonal.
     striker_w_lin:  float = 0.5
     striker_w_exp:  float = 0.5
-    striker_d_knee: float = 0.20   # 200 km → exponential kicks in
+    striker_d_knee: float = 0.30   # 200 km → exponential kicks in
     striker_alpha:  float = 3.0
 
     # ─── JAMMER APPROACH  (piecewise lin-exp reward toward nearest radar) ────

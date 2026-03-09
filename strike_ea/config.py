@@ -83,7 +83,7 @@ class EnvConfig:
     # Angular acceleration = dpsi_max × this fraction = 1.2°/min per action
     # Controls yaw acceleration (how quickly agents change turn rate)
     
-    min_turn_radius: float = 0.005
+    min_turn_radius: float = 0.001
     # Minimum turn radius: 50 km. Prevents agents from spinning in tight circles
     # Turn rate is limited by: omega_max = speed / min_turn_radius
     # At v_min (0.01 = 10 km/min): max 11.5°/step turn rate
@@ -91,7 +91,7 @@ class EnvConfig:
     # Larger = wider turns (less agile); Smaller = tighter turns (more agile)
 
     # ─── Sensor / Observation (State Representation for MAPPO) ────────────────
-    R_obs: float = 0.50
+    R_obs: float = 1
     # Observation radius: 300 km. Agents see allies/threats within this range
     # Affects network input size and partial observability (policy must infer unseen info)
     # Larger R_obs = more info → easier task; Smaller = harder (agent must predict)
@@ -105,7 +105,7 @@ class EnvConfig:
     # Engagement cone: targets must be in ±30° arc ahead. Refines targeting
     # Requires agents to orient their heading correctly, not just distance
     
-    striker_v_min: float = 0.01
+    striker_v_min: float = 0.005
     # Minimum cruise speed for strikers: 10 km/min ≈ Mach 0.5
     # Can't hover; must keep moving. Affects energy/momentum constraints
 
@@ -184,7 +184,7 @@ class TrainConfig:
     # Higher = better sample efficiency but higher memory cost
     # Rule of thumb: 20-32 steps per environment per iteration
     
-    n_iters: int = 50
+    n_iters: int = 75
     # Number of collect→update cycles. Each cycle collects frames_per_batch transitions
     # Higher = longer training, potential for better convergence
 
@@ -234,7 +234,7 @@ class TrainConfig:
     # Typical range: 1e-4 to 1e-3.
     # The critic benefits from faster convergence to accurate value estimates.
     
-    max_grad_norm: float = 1.0
+    max_grad_norm: float = 1
     # Gradient clipping: if ||∇loss|| > max_grad_norm, rescale to this norm
     # Prevents exploding gradients and stabilizes training
     # Typical values: 0.5 to 1.0

@@ -13,7 +13,7 @@ python run.py --n_env_layouts 1     # Train on a single fixed radar layout
 python run.py --n_env_layouts 50    # Train on 50 distinct radar layouts
 
 # TEST / VISUALIZE A SAVED POLICY (no training)
-.\.venv\Scripts\python.exe .\strike_ea\run.py --test --policy_path .\saved_policies\default\2026-03-05_09-15-46.pt
+.\.venv\Scripts\python.exe .\strike_ea\run.py --test --policy_path .\saved_policies\default\2026-03-06_12-01-16.pt
 python run.py --test --preset default  # Test random (untrained) policy
 
 # LIST saved policies
