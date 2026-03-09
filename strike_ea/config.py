@@ -191,7 +191,7 @@ class TrainConfig:
     # ─── PPO Clipping & Advantage Estimation ───────────────────────────────
     # PPO Objective: min( rt * Ât, clip(rt, 1-ε, 1+ε) * Ât )
     # where rt = π_new(a|s) / π_old(a|s), Ât = advantage estimate
-    num_epochs: int = 3
+    num_epochs: int = 6
     # Number of repeat passes over collected data before next rollout
     # Higher = more gradient updates per sample (better convergence, higher risk of overfitting)
     
