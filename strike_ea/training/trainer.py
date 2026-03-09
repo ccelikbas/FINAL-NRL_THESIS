@@ -107,6 +107,12 @@ def train_mappo(
         "loss_policy": [], "loss_value": [],
         "entropy": [], "approx_kl": [], "clip_fraction": [], "advantage_std": [],
     }
+    # Per-agent log keys
+    n_agents = base_env.n_agents
+    for ai in range(n_agents):
+        role = "striker" if ai < base_env.n_strikers else "jammer"
+        logs[f"reward_agent_{ai}_{role}"] = []
+        logs[f"entropy_agent_{ai}_{role}"] = []
 
     for it, td in enumerate(collector):
         td = td.to(device)
@@ -210,6 +216,44 @@ def train_mappo(
         logs["approx_kl"].append(kl_acc / div)
         logs["clip_fraction"].append(clip_frac_acc / div)
         logs["advantage_std"].append(adv_std)
+
+        # --- Per-agent reward logging ---
+        try:
+            # td reward shape: [B*T, A, 1] after reshape → per-agent mean
+            agent_rewards = data.get(base_env._reward_key)  # [N, A, 1]
+            if agent_rewards is not None:
+                agent_rewards = agent_rewards.squeeze(-1)    # [N, A]
+                for ai in range(n_agents):
+                    role = "striker" if ai < base_env.n_strikers else "jammer"
+                    logs[f"reward_agent_{ai}_{role}"].append(float(agent_rewards[:, ai].mean().item()))
+            else:
+                for ai in range(n_agents):
+                    role = "striker" if ai < base_env.n_strikers else "jammer"
+                    logs[f"reward_agent_{ai}_{role}"].append(float("nan"))
+        except Exception:
+            for ai in range(n_agents):
+                role = "striker" if ai < base_env.n_strikers else "jammer"
+                logs[f"reward_agent_{ai}_{role}"].append(float("nan"))
+
+        # --- Per-agent policy entropy logging ---
+        try:
+            log_probs = data.get((base_env.group, "sample_log_prob"))  # [N, A] or [N, A, act_dim]
+            if log_probs is not None:
+                # Entropy ≈ -mean(log_prob) per agent
+                if log_probs.dim() > 2:
+                    log_probs = log_probs.sum(dim=-1)  # sum over action dims
+                for ai in range(n_agents):
+                    role = "striker" if ai < base_env.n_strikers else "jammer"
+                    ent_approx = -float(log_probs[:, ai].mean().item())
+                    logs[f"entropy_agent_{ai}_{role}"].append(ent_approx)
+            else:
+                for ai in range(n_agents):
+                    role = "striker" if ai < base_env.n_strikers else "jammer"
+                    logs[f"entropy_agent_{ai}_{role}"].append(float("nan"))
+        except Exception:
+            for ai in range(n_agents):
+                role = "striker" if ai < base_env.n_strikers else "jammer"
+                logs[f"entropy_agent_{ai}_{role}"].append(float("nan"))
 
         if train_cfg.log_every and (it + 1) % train_cfg.log_every == 0:
             print(

@@ -43,7 +43,7 @@ import torch
 from strike_ea.config import EnvConfig, TrainConfig, NetworkConfig, get_preset
 from strike_ea.env.rewards import RewardConfig
 from strike_ea.training import train_mappo
-from strike_ea.evaluation.runner import TestRunner
+from strike_ea.evaluation.runner import TestRunner, PolicyEvaluator
 from strike_ea.evaluation.visualize import animate_rollout, plot_training
 
 
@@ -156,14 +156,23 @@ def load_actor(actor, load_path: str):
 # Run modes
 # ─────────────────────────────────────────────────────────────────────────────
 
-def run_single(env_cfg, train_cfg, net_cfg, *, label="run", animate=True, save_dir=None, save_policy=None):
-    """Train, save policy, and optionally visualize a test rollout."""
+def run_single(env_cfg, train_cfg, net_cfg, *, label="run", animate=True, save_dir=None, save_policy=None, eval_episodes=0):
+    """Train, save policy, evaluate, and optionally visualize a test rollout."""
     print(f"\n{'='*60}\n  Training: {label}\n{'='*60}")
     base_env, actor, critic, logs = train_mappo(train_cfg, env_cfg, net_cfg)
     plot_training(logs, save_dir=save_dir)
 
     if save_policy:
         save_actor(actor, save_policy, env_cfg=env_cfg, net_cfg=net_cfg, preset_name=label)
+
+    # --- Post-training evaluation ---
+    if eval_episodes > 0:
+        print(f"\n{'='*60}\n  Evaluating trained policy ({eval_episodes} episodes)\n{'='*60}")
+        evaluator = PolicyEvaluator(
+            actor, device=train_cfg.device, max_steps=train_cfg.max_steps, env_cfg=env_cfg,
+        )
+        results = evaluator.evaluate(n_episodes=eval_episodes)
+        PolicyEvaluator.print_report(results)
 
     if animate:
         print(f"\n{'='*60}\n  Visualizing trained policy\n{'='*60}")
@@ -235,6 +244,7 @@ def parse_args():
     p.add_argument("--save_policy",   default=None, help="Explicit policy save path (default: auto-timestamped)")
     p.add_argument("--policy_dir",    default="saved_policies", help="Directory for auto-saved policies (default: saved_policies)")
     p.add_argument("--no_save_policy", action="store_true", help="Disable automatic policy saving")
+    p.add_argument("--eval_episodes",  type=int, default=100, help="Number of test episodes for post-training evaluation (0 to skip)")
 
     # Training overrides
     p.add_argument("--n_iters",        type=int,   default=None)
@@ -339,6 +349,7 @@ def main():
         animate=not args.no_animate,
         save_dir=args.save_dir,
         save_policy=save_policy,
+        eval_episodes=args.eval_episodes,
     )
 
 

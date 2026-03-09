@@ -101,3 +101,143 @@ class TestRunner:
             "radar_pos":      env.radar_pos[0].detach().cpu(),
             "radar_eff_range": env.radar_eff_range[0].detach().cpu(),
         }
+
+
+# ---------------------------------------------------------------------------
+# Batch evaluation (post-training performance assessment)
+# ---------------------------------------------------------------------------
+
+class PolicyEvaluator:
+    """Run N independent test episodes and compute aggregate performance metrics.
+
+    Metrics reported:
+    - **Task completion rate**: % of episodes where all targets were destroyed.
+    - **Mean targets destroyed**: average fraction of targets killed per episode.
+    - **Platform survival rate**: average fraction of agents alive at episode end.
+    - **Mission duration**: mean episode length (timesteps).
+    - **Mean episode reward**: average cumulative reward per episode.
+    """
+
+    def __init__(
+        self,
+        actor,
+        *,
+        device: torch.device,
+        max_steps: int = 200,
+        env_cfg: EnvConfig = None,
+    ):
+        self.actor = actor.eval()
+        self.device = device
+        self.max_steps = max_steps
+        self.env_cfg = env_cfg if env_cfg is not None else EnvConfig()
+
+    @torch.no_grad()
+    def evaluate(self, n_episodes: int = 100, seed_offset: int = 10_000) -> Dict[str, float]:
+        """Run *n_episodes* rollouts and return a dict of aggregate metrics."""
+
+        all_rewards: List[float] = []
+        targets_destroyed_frac: List[float] = []
+        agents_alive_frac: List[float] = []
+        durations: List[int] = []
+        full_completions: int = 0
+
+        n_targets = self.env_cfg.n_targets
+        n_agents = self.env_cfg.n_strikers + self.env_cfg.n_jammers
+
+        for ep in range(n_episodes):
+            env = StrikeEA2DEnv(
+                num_envs=1,
+                max_steps=self.max_steps,
+                device=self.device,
+                seed=seed_offset + ep,
+                n_strikers=self.env_cfg.n_strikers,
+                n_jammers=self.env_cfg.n_jammers,
+                n_targets=self.env_cfg.n_targets,
+                n_radars=self.env_cfg.n_radars,
+                dt=self.env_cfg.dt,
+                world_bounds=self.env_cfg.world_bounds,
+                v_max=self.env_cfg.v_max,
+                accel_magnitude=self.env_cfg.accel_magnitude,
+                dpsi_max=self.env_cfg.dpsi_max,
+                h_accel_magnitude_fraction=self.env_cfg.h_accel_magnitude_fraction,
+                R_obs=self.env_cfg.R_obs,
+                striker_engage_range=self.env_cfg.striker_engage_range,
+                striker_engage_fov=self.env_cfg.striker_engage_fov,
+                striker_v_min=self.env_cfg.striker_v_min,
+                jammer_jam_radius=self.env_cfg.jammer_jam_radius,
+                jammer_jam_effect=self.env_cfg.jammer_jam_effect,
+                jammer_v_min=self.env_cfg.jammer_v_min,
+                radar_range=self.env_cfg.radar_range,
+                radar_kill_probability=self.env_cfg.radar_kill_probability,
+                border_thresh=self.env_cfg.border_thresh,
+                reward_config=self.env_cfg.reward_config,
+                min_turn_radius=self.env_cfg.min_turn_radius,
+                n_env_layouts=getattr(self.env_cfg, 'n_env_layouts', 0),
+            )
+
+            td = env.reset()
+            cumulative_reward = 0.0
+            steps = 0
+
+            for _ in range(self.max_steps):
+                td = self.actor(td)
+                td = env.step(td)
+                steps += 1
+
+                # Accumulate per-step team reward
+                try:
+                    rew = td.get(("next", env.group, "reward"))  # [1, A, 1]
+                    cumulative_reward += float(rew.sum().item())
+                except Exception:
+                    pass
+
+                done_flag = False
+                try:
+                    done_flag = bool(td.get(("next", "done")).item())
+                except Exception:
+                    try:
+                        done_flag = bool(td.get("done").item())
+                    except Exception:
+                        pass
+
+                if done_flag:
+                    break
+                td = td.get("next")
+
+            # End-of-episode stats
+            targets_killed = int((~env.target_alive[0]).sum().item())
+            agents_surviving = int(env.agent_alive[0].sum().item())
+
+            all_rewards.append(cumulative_reward)
+            targets_destroyed_frac.append(targets_killed / max(n_targets, 1))
+            agents_alive_frac.append(agents_surviving / max(n_agents, 1))
+            durations.append(steps)
+            if targets_killed == n_targets:
+                full_completions += 1
+
+        # Aggregate
+        import statistics
+        results = {
+            "n_episodes":             n_episodes,
+            "mean_reward":            statistics.mean(all_rewards),
+            "std_reward":             statistics.pstdev(all_rewards),
+            "task_completion_rate":   full_completions / n_episodes,
+            "mean_targets_destroyed": statistics.mean(targets_destroyed_frac),
+            "platform_survival_rate": statistics.mean(agents_alive_frac),
+            "mean_duration":          statistics.mean(durations),
+            "std_duration":           statistics.pstdev(durations),
+        }
+        return results
+
+    @staticmethod
+    def print_report(results: Dict[str, float]):
+        """Pretty-print evaluation results to console."""
+        print(f"\n{'='*60}")
+        print(f"  Policy Evaluation Report  ({int(results['n_episodes'])} episodes)")
+        print(f"{'='*60}")
+        print(f"  Mean Episode Reward ....... {results['mean_reward']:>10.2f}  (std {results['std_reward']:.2f})")
+        print(f"  Task Completion Rate ...... {results['task_completion_rate']*100:>10.1f}%  (all targets destroyed)")
+        print(f"  Mean Targets Destroyed .... {results['mean_targets_destroyed']*100:>10.1f}%")
+        print(f"  Platform Survival Rate .... {results['platform_survival_rate']*100:>10.1f}%  (agents alive at end)")
+        print(f"  Mean Mission Duration ..... {results['mean_duration']:>10.1f}  steps  (std {results['std_duration']:.1f})")
+        print(f"{'='*60}\n")

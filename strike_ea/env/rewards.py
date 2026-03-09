@@ -60,21 +60,21 @@ class RewardConfig:
     # d = distance to nearest alive target.  d_max = map diagonal.
     striker_w_lin:  float = 0.5
     striker_w_exp:  float = 0.5
-    striker_d_knee: float = 0.30   # 200 km → exponential kicks in
+    striker_d_knee: float = 0.10   # 200 km → exponential kicks in
     striker_alpha:  float = 3.0
 
     # ─── JAMMER APPROACH  (piecewise lin-exp reward toward nearest radar) ────
     # d = distance to nearest radar (outside detection zone).  d_max = map diag.
     jammer_w_lin:  float = 0.3
     jammer_w_exp:  float = 0.5
-    jammer_d_knee: float = 0.30   # 300 km → exponential kicks in
+    jammer_d_knee: float = 0.10   # 300 km → exponential kicks in
     jammer_alpha:  float = 3.0
 
 
 
 
 '''
-Visualisation of the piecewise linear-exponential shaping function:
+RUN: Visualisation of the piecewise linear-exponential shaping function using current paramters:
 '''
 from typing import Tuple
 import torch
