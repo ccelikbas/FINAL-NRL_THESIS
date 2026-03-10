@@ -136,7 +136,7 @@ class EnvConfig:
     # Prevents agents from fleeing to margins to avoid radar
 
     # ─── Target Spawn Control ─────────────────────────────────────────────
-    target_spawn_angle_range: Tuple[float, float] = (0.0, 360.0)
+    target_spawn_angle_range: Tuple[float, float] = (180, 270)
     # Angular range (degrees, clockwise from "east" / +x axis) within which
     # targets are spawned around their assigned radar.
     # (0, 360) = full circle (default, legacy behaviour).
@@ -198,14 +198,14 @@ class TrainConfig:
     # Higher = better sample efficiency but higher memory cost
     # Rule of thumb: 20-32 steps per environment per iteration
     
-    n_iters: int = 10
+    n_iters: int = 50
     # Number of collect→update cycles. Each cycle collects frames_per_batch transitions
     # Higher = longer training, potential for better convergence
 
     # ─── PPO Clipping & Advantage Estimation ───────────────────────────────
     # PPO Objective: min( rt * Ât, clip(rt, 1-ε, 1+ε) * Ât )
     # where rt = π_new(a|s) / π_old(a|s), Ât = advantage estimate
-    num_epochs: int = 5
+    num_epochs: int = 6
     # Number of repeat passes over collected data before next rollout
     # Higher = more gradient updates per sample (better convergence, higher risk of overfitting)
     

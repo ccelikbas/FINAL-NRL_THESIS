@@ -31,19 +31,19 @@ class RewardConfig:
     """
 
     # ─── SPARSE TEAM REWARDS ─────────────────────────────────────────────────
-    target_destroyed: float = 20.0
+    target_destroyed: float = 500
     # Reward when a target is killed.
     # Distribution controlled by team_spirit parameter (see below).
 
-    timestep_penalty: float = -0.1
+    timestep_penalty: float = -0.5
     # Small per-step cost for every alive agent (encourages finishing fast).
 
-    agent_destroyed: float = -20.0
+    agent_destroyed: float = -500
     # Penalty applied when an agent is killed by a radar.
     # Distribution controlled by team_spirit parameter (see below).
 
     # ─── TEAM vs INDIVIDUAL REWARD DISTRIBUTION ─────────────────────────────
-    team_spirit: float = 1.0
+    team_spirit: float = 0
     # Controls how team rewards (target_destroyed, agent_destroyed) are
     # distributed among agents:
     #   1.0 = fully shared equally across all alive agents (cooperative)
@@ -74,7 +74,7 @@ class RewardConfig:
     # Uses the same shaping function as avoidance but with positive sign.
     striker_approach_w_lin:  float = 0.5
     striker_approach_w_exp:  float = 0.2
-    striker_approach_d_max:  float = 1.0    # reward active from map diagonal
+    striker_approach_d_max:  float = 0.5    # reward active from map diagonal
     striker_approach_d_knee: float = 0.20   # near engage range → exponential
     striker_approach_alpha:  float = 2.0
     striker_nearest_only:    bool  = True
@@ -87,7 +87,7 @@ class RewardConfig:
     # exponential kicks in as the jammer enters effective jamming range.
     jammer_approach_w_lin:  float = 0.3
     jammer_approach_w_exp:  float = 0.1
-    jammer_approach_d_max:  float = 1.0    # reward active from map diagonal
+    jammer_approach_d_max:  float = 0.5    # reward active from map diagonal
     jammer_approach_d_knee: float = 0.35   # = jammer_jam_radius → exponential in jam range
     jammer_approach_alpha:  float = 2.0
     jammer_nearest_only:    bool  = True
