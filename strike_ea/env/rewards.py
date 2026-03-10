@@ -35,15 +35,16 @@ class RewardConfig:
     # Reward when a target is killed.
     # Distribution controlled by team_spirit parameter (see below).
 
-    timestep_penalty: float = -0.5
-    # Small per-step cost for every alive agent (encourages finishing fast).
+    timestep_penalty: float = -0.15
+    # Per-step cost per alive agent. Over 50 steps × 2 agents = −15 total,
+    # ≈ 30% of the kill reward — creates meaningful urgency without overwhelming.
 
     agent_destroyed: float = -50
     # Penalty applied when an agent is killed by a radar.
     # Distribution controlled by team_spirit parameter (see below).
 
     # ─── TEAM vs INDIVIDUAL REWARD DISTRIBUTION ─────────────────────────────
-    team_spirit: float = 0
+    team_spirit: float = 0.8
     # Controls how team rewards (target_destroyed, agent_destroyed) are
     # distributed among agents:
     #   1.0 = fully shared equally across all alive agents (cooperative)
@@ -51,31 +52,34 @@ class RewardConfig:
     #          the target, or the agent that was destroyed)
     #   0.5 = 50% shared + 50% individual
     # Formula: reward_i = team_spirit × (team_avg) + (1 - team_spirit) × (individual_i)
+    # 0.8: jammer receives 80% of kill credit → incentivises it to enable the striker,
+    # which is the primary driver for agents flying together toward the objective.
     # timestep_penalty is always per alive agent (not affected by team_spirit).
 
     # ─── BORDER AVOIDANCE  (piecewise lin-exp penalty, per alive agent) ──────
     # d = distance from nearest map edge.  d_max = border_thresh (EnvConfig).
-    border_w_lin:  float = 0
-    border_w_exp:  float = 0.5
+    border_w_lin:  float = 0.1   # gentle early-warning ramp (50 km → 30 km from edge)
+    border_w_exp:  float = 0.3
     border_d_knee: float = 0.03   # 30 km from edge → exponential kicks in
     border_alpha:  float = 2
 
     # ─── RADAR ZONE AVOIDANCE  (piecewise lin-exp penalty, ALL agents) ───────
     # d = distance from *effective* radar zone boundary (adapts when jammed).
     # Agents inside the zone get killed and receive agent_destroyed instead.
-    radar_avoid_w_lin:  float = 0.2
-    radar_avoid_w_exp:  float = 0.5
-    radar_avoid_d_max:  float = 0.20   # penalty starts 100 km outside zone edge
+    radar_avoid_w_lin:  float = 0.15  # reduced so approach reward dominates
+    radar_avoid_w_exp:  float = 0.4
+    radar_avoid_d_max:  float = 0.20   # penalty starts 200 km outside zone edge
     radar_avoid_d_knee: float = 0.03   # 30 km from zone → exponential
     radar_avoid_alpha:  float = 2
 
     # ─── STRIKER APPROACH  (piecewise lin-exp reward toward targets) ──────────
     # Positive reward that increases as striker gets closer to alive targets.
-    # Uses the same shaping function as avoidance but with positive sign.
-    striker_approach_w_lin:  float = 0.5
+    # Scaled for 50-step episode: realistic total ≈ 15–20 over full trajectory
+    # (well below the +50 kill reward, so the terminal goal stays dominant).
+    striker_approach_w_lin:  float = 0.3   # reduced from 0.5 for 50-step balance
     striker_approach_w_exp:  float = 0.2
     striker_approach_d_max:  float = 0.5    # reward active from map diagonal
-    striker_approach_d_knee: float = 0.20   # near engage range → exponential
+    striker_approach_d_knee: float = 0.15   # tighter: exponential kicks in near engage range (0.10)
     striker_approach_alpha:  float = 2.0
     striker_nearest_only:    bool  = True
     # True  = reward based only on distance to nearest alive target
@@ -83,12 +87,12 @@ class RewardConfig:
 
     # ─── JAMMER APPROACH  (piecewise lin-exp reward toward radars) ────────────
     # Positive reward that increases as jammer gets closer to radars.
-    # d_knee should be set near jammer_jam_radius (from EnvConfig) so the
-    # exponential kicks in as the jammer enters effective jamming range.
+    # d_knee reduced to 0.25 (inside jam_radius of 0.35) so the exponential
+    # onset no longer overlaps with the radar avoidance penalty zone boundary.
     jammer_approach_w_lin:  float = 0.3
     jammer_approach_w_exp:  float = 0.1
     jammer_approach_d_max:  float = 0.5    # reward active from map diagonal
-    jammer_approach_d_knee: float = 0.35   # = jammer_jam_radius → exponential in jam range
+    jammer_approach_d_knee: float = 0.25   # reduced from 0.35 → less conflict with avoidance
     jammer_approach_alpha:  float = 2.0
     jammer_nearest_only:    bool  = True
     # True  = reward based only on distance to nearest radar
@@ -106,8 +110,12 @@ class RewardConfig:
     # ─── FORMATION COHESION  (proximity to nearest alive ally) ───────────────
     # Reward = scale × max(0, 1 − d_nearest_ally / ref_dist) per alive agent.
     # Encourages striker and jammer to move as a pair / close formation.
-    formation_scale:    float = 0.5
-    formation_ref_dist: float = 0.3   # 300 km — reward decays to 0 beyond this
+    # Scaled up to be competitive with individual approach gradients:
+    #   gradient = scale / ref_dist = 0.4 / 0.25 = 1.6 per unit — comparable
+    #   to the striker approach linear gradient (~1.0/unit), so the cohesion
+    #   signal meaningfully steers agents toward each other.
+    formation_scale:    float = 0.4   # increased from 0.1 — must compete with approach
+    formation_ref_dist: float = 0.25  # 250 km — tighter than before, sharper gradient
 
 
 

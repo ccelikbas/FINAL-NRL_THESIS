@@ -126,7 +126,7 @@ class EnvConfig:
     # Baseline radar detection range: 200 km. Agents killed if detected for 1 step
     # Main source of episode failure; drives jamming necessity
     
-    radar_kill_probability: float = 1.0
+    radar_kill_probability: float = 0
     # Probability [0,1] of kill per detected step. 1.0 = instant kill if seen
     # Lower values make radars less threatening, easier for learner
 
@@ -189,7 +189,7 @@ class TrainConfig:
     # [Frames per batch / num_envs] = steps collected from each environment per iteration
     # (frames_per_batch / 256 = max_steps steps per env per iteration)
     
-    max_steps: int = 100
+    max_steps: int = 50
     # Maximum steps per episode (100 steps × 1 min/step = 100 minutes per episode)
     # Episodes can terminate early if all targets destroyed or all agents dead
 
@@ -201,7 +201,7 @@ class TrainConfig:
     #   This means each iteration collects exactly one full episode per environment.
     # OVERRIDE: set an explicit int to control collection size manually.
     
-    n_iters: int = 50
+    n_iters: int = 100
     # Number of collect→update cycles. Each cycle collects frames_per_batch transitions
     # Higher = longer training, potential for better convergence
 
@@ -216,7 +216,7 @@ class TrainConfig:
     # Minibatch size for gradient descent within each epoch
     # Smaller = more noisy gradients but faster updates; Larger = fewer updates per epoch
     
-    clip_eps: float = 0.2
+    clip_eps: float = 0.1
     # PPO clipping range ε: prevents policy from changing too rapidly
     # clip_eps=0.2 means policy probability ratio clamped to [0.8, 1.2]
     # Smaller ε = more conservative updates; Larger ε = more aggressive exploration
@@ -260,7 +260,7 @@ class TrainConfig:
     seed: int = 0
     # Random seed for reproducibility (RNG for environment, policy init, sampling)
     
-    log_every: int = 5
+    log_every: int = 10
     # Print training stats every N iterations (useful for monitoring convergence)
 
     eval_episodes: int = 10
