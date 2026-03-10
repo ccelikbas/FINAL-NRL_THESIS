@@ -71,6 +71,8 @@ class StrikeEA2DEnv(EnvBase):
         # --- reward shaping ---
         border_thresh: float = 0.05,
         reward_config: Optional[RewardConfig] = None,
+        # --- target spawn control ---
+        target_spawn_angle_range: Tuple[float, float] = (0.0, 360.0),
         # --- misc ---
         device: Optional[torch.device] = None,
         seed:   int = 0,
@@ -103,6 +105,11 @@ class StrikeEA2DEnv(EnvBase):
 
         # shaping
         self.border_thresh = float(border_thresh)
+
+        # target spawn angle range (store in radians)
+        lo_deg, hi_deg = target_spawn_angle_range
+        self.target_spawn_angle_lo = math.radians(lo_deg)
+        self.target_spawn_angle_hi = math.radians(hi_deg)
 
         # reward params
         self.reward_params = reward_config if reward_config is not None else RewardConfig()
@@ -161,6 +168,9 @@ class StrikeEA2DEnv(EnvBase):
         self._striker_prev_dist = torch.zeros(B, n_strikers, n_targets, device=self._device)
         # Previous jammer→radar distances for progress reward (potential-based shaping)
         self._jammer_prev_dist = torch.zeros(B, n_jammers, n_radars, device=self._device)
+
+        # Episode outcome tracking (bypasses tensordict auto-reset overwrite)
+        self._completed_episodes: list = []
 
         self._make_specs()
 
@@ -257,8 +267,13 @@ class StrikeEA2DEnv(EnvBase):
                 assigned_radar_idx = radar_assignments[t].item()
                 radar = radar_pos[b, assigned_radar_idx, :]  # [2]
                 
-                # Random angle around the radar
-                angle = 2.0 * math.pi * torch.rand(1, device=self.device).item()
+                # Random angle around the radar (within configured range)
+                lo = self.target_spawn_angle_lo
+                hi = self.target_spawn_angle_hi
+                span = (hi - lo) % (2.0 * math.pi)  # handle wrap-around
+                if span == 0.0:
+                    span = 2.0 * math.pi  # full circle when lo == hi
+                angle = lo + span * torch.rand(1, device=self.device).item()
                 
                 # Offset at fixed distance in random direction
                 offset = spawn_distance * torch.tensor([
@@ -469,21 +484,45 @@ class StrikeEA2DEnv(EnvBase):
         # ==================================================================
         reward = torch.zeros(B, A, device=self.device)
         max_dist = math.hypot(self.high - self.low, self.high - self.low)
+        ts = float(rp.team_spirit)  # team vs individual mixing coefficient
 
-        # 1. Team reward: target destroyed — shared equally among alive agents
-        n_killed = kill_t.float().sum(dim=-1)                           # [B]
-        n_alive  = self.agent_alive.float().sum(dim=-1).clamp_min(1.0)  # [B]
-        team_kill = (n_killed * float(rp.target_destroyed) / n_alive)   # [B]
-        reward += team_kill.unsqueeze(-1) * alive_float                 # [B, A]
+        # ------------------------------------------------------------------
+        # 1. Team reward: target destroyed  (team_spirit blends team ↔ individual)
+        # ------------------------------------------------------------------
+        n_killed = kill_t.float().sum(dim=-1)                             # [B]
+        n_alive  = self.agent_alive.float().sum(dim=-1).clamp_min(1.0)    # [B]
+        target_destroyed_full = torch.zeros(B, A, device=self.device)
+        if float(rp.target_destroyed) != 0.0 and kill_t.any():
+            # Team component: shared equally among alive agents
+            team_share = (n_killed * float(rp.target_destroyed) / n_alive)  # [B]
+            team_comp = team_share.unsqueeze(-1) * alive_float              # [B, A]
 
+            # Individual component: credit to strikers that actually engaged
+            indiv_comp = torch.zeros(B, A, device=self.device)
+            if striker_idx.numel() > 0:
+                # can: [B, ns, T] — which striker-target pairs had engagement
+                # kill_t: [B, T] — which targets were killed this step
+                engaged_kills = can & kill_t[:, None, :]                    # [B, ns, T]
+                n_engaged_per_target = engaged_kills.float().sum(dim=1).clamp_min(1.0)  # [B, T]
+                # Credit per striker = sum_t (target_destroyed / n_strikers_that_engaged_t)
+                credit_per_pair = engaged_kills.float() * (float(rp.target_destroyed) / n_engaged_per_target[:, None, :])
+                indiv_comp[:, :self.n_strikers] = credit_per_pair.sum(dim=-1)  # [B, ns]
+
+            # Blend: team_spirit × team + (1 - team_spirit) × individual
+            target_rew = ts * team_comp + (1.0 - ts) * indiv_comp
+            reward += target_rew
+            target_destroyed_full = target_rew
+
+        # ------------------------------------------------------------------
         # 2. Border avoidance  (piecewise lin-exp penalty, d_max = border_thresh)
+        # ------------------------------------------------------------------
         pos       = self.agent_pos
         dist_bord = torch.stack([
             pos[..., 0] - self.low,
             self.high - pos[..., 0],
             pos[..., 1] - self.low,
             self.high - pos[..., 1],
-        ], dim=-1).min(dim=-1).values                                   # [B, A]
+        ], dim=-1).min(dim=-1).values                                     # [B, A]
         border_pen = -self._piecewise_lin_exp(
             dist_bord,
             d_max=self.border_thresh,
@@ -494,13 +533,17 @@ class StrikeEA2DEnv(EnvBase):
         ) * alive_float
         reward += border_pen
 
-        # 3. Timestep penalty (per alive agent)
-        reward += float(rp.timestep_penalty) * alive_float
+        # ------------------------------------------------------------------
+        # 3. Timestep penalty (per alive agent — NOT affected by team_spirit)
+        # ------------------------------------------------------------------
+        timestep_rew = float(rp.timestep_penalty) * alive_float
+        reward += timestep_rew
 
+        # ------------------------------------------------------------------
         # 4. Radar zone avoidance  (piecewise lin-exp penalty, ALL agents)
-        #    d = distance from nearest radar zone boundary (clamped ≥ 0)
-        d_zone = dist_ar - radar_eff_range[:, None, :]                  # [B, A, R]
-        d_zone_min = d_zone.min(dim=-1).values.clamp(min=0.0)           # [B, A]
+        # ------------------------------------------------------------------
+        d_zone = dist_ar - radar_eff_range[:, None, :]                    # [B, A, R]
+        d_zone_min = d_zone.min(dim=-1).values.clamp(min=0.0)             # [B, A]
         radar_pen = -self._piecewise_lin_exp(
             d_zone_min,
             d_max=rp.radar_avoid_d_max,
@@ -511,97 +554,170 @@ class StrikeEA2DEnv(EnvBase):
         ) * alive_float
         reward += radar_pen
 
-        # 5. Jammer progress toward nearest radar (potential-based)
-        #    + active-jamming bonus when within jam_radius
+        # ------------------------------------------------------------------
+        # 5. Striker approach  (piecewise lin-exp reward toward targets)
+        # ------------------------------------------------------------------
+        striker_approach_full = torch.zeros(B, A, device=self.device)
+        if striker_idx.numel() > 0 and self.n_targets > 0:
+            rel_st_all = self.target_pos[:, None, :, :] - self.agent_pos[:, :self.n_strikers, None, :]
+            dist_st    = torch.linalg.norm(rel_st_all, dim=-1)            # [B, ns, T]
+            mask_t     = self.target_alive[:, None, :].expand(-1, self.n_strikers, -1)  # [B, ns, T]
+
+            # Compute shaping value per striker-target pair
+            app_vals = self._piecewise_lin_exp(
+                dist_st,
+                d_max=rp.striker_approach_d_max,
+                d_knee=rp.striker_approach_d_knee,
+                w_lin=rp.striker_approach_w_lin,
+                w_exp=rp.striker_approach_w_exp,
+                alpha=rp.striker_approach_alpha,
+            )  # [B, ns, T]
+            app_vals = app_vals * mask_t.float()  # zero for dead targets
+
+            if rp.striker_nearest_only:
+                # Nearest alive target only
+                big_dist = torch.where(mask_t, dist_st, torch.full_like(dist_st, 1e6))
+                nearest_idx = big_dist.argmin(dim=-1, keepdim=True)       # [B, ns, 1]
+                striker_app = app_vals.gather(-1, nearest_idx).squeeze(-1) # [B, ns]
+            else:
+                # Mean over all alive targets
+                n_alive_t = mask_t.float().sum(dim=-1).clamp_min(1.0)     # [B, ns]
+                striker_app = app_vals.sum(dim=-1) / n_alive_t            # [B, ns]
+
+            # Zero when all targets dead
+            any_alive = mask_t.any(dim=-1)
+            striker_app = torch.where(any_alive, striker_app, torch.zeros_like(striker_app))
+
+            striker_alive_f = alive[:, :self.n_strikers].float()
+            striker_app = striker_app * striker_alive_f
+            reward[:, :self.n_strikers] += striker_app
+            striker_approach_full[:, :self.n_strikers] = striker_app
+
+        # ------------------------------------------------------------------
+        # 6. Jammer approach  (piecewise lin-exp reward toward radars)
+        # ------------------------------------------------------------------
+        jammer_approach_full = torch.zeros(B, A, device=self.device)
+        if jammer_idx.numel() > 0 and self.n_radars > 0:
+            rel_jr_all = self.radar_pos[:, None, :, :] - self.agent_pos[:, self.n_strikers:, None, :]
+            dist_jr    = torch.linalg.norm(rel_jr_all, dim=-1)            # [B, nj, R]
+            jammer_alive_f = alive[:, self.n_strikers:].float()
+
+            # Compute shaping value per jammer-radar pair
+            app_vals_j = self._piecewise_lin_exp(
+                dist_jr,
+                d_max=rp.jammer_approach_d_max,
+                d_knee=rp.jammer_approach_d_knee,
+                w_lin=rp.jammer_approach_w_lin,
+                w_exp=rp.jammer_approach_w_exp,
+                alpha=rp.jammer_approach_alpha,
+            )  # [B, nj, R]
+
+            if rp.jammer_nearest_only:
+                nearest_idx_j = dist_jr.argmin(dim=-1, keepdim=True)      # [B, nj, 1]
+                jammer_app = app_vals_j.gather(-1, nearest_idx_j).squeeze(-1)  # [B, nj]
+            else:
+                jammer_app = app_vals_j.mean(dim=-1)                      # [B, nj]
+
+            jammer_app = jammer_app * jammer_alive_f
+            reward[:, self.n_strikers:] += jammer_app
+            jammer_approach_full[:, self.n_strikers:] = jammer_app
+
+        # ------------------------------------------------------------------
+        # 7. Potential-based progress  (legacy, deactivated by default)
+        # ------------------------------------------------------------------
         jammer_progress_full  = torch.zeros(B, A, device=self.device)
         jammer_jam_bonus_full = torch.zeros(B, A, device=self.device)
         if jammer_idx.numel() > 0 and self.n_radars > 0:
-            rel_jr_all = self.radar_pos[:, None, :, :] - self.agent_pos[:, self.n_strikers:, None, :]
-            dist_jr = torch.linalg.norm(rel_jr_all, dim=-1)           # [B, nj, R]
-            jammer_alive_f = alive[:, self.n_strikers:].float()        # [B, nj]
+            # Reuse dist_jr computed in section 6 (or compute if jammer approach was skipped)
+            if 'dist_jr' not in dir():
+                rel_jr_all = self.radar_pos[:, None, :, :] - self.agent_pos[:, self.n_strikers:, None, :]
+                dist_jr = torch.linalg.norm(rel_jr_all, dim=-1)
+            jammer_alive_f = alive[:, self.n_strikers:].float()
 
-            # Progress toward nearest radar (potential-based: prev_nearest - curr_nearest)
-            dist_jr_min_curr, _ = dist_jr.min(dim=-1)                  # [B, nj]
-            dist_jr_min_prev, _ = self._jammer_prev_dist.min(dim=-1)   # [B, nj]
-            progress_j = dist_jr_min_prev - dist_jr_min_curr           # positive = moved closer
-            jammer_prog = float(rp.jammer_progress_scale) * progress_j * jammer_alive_f
-            reward[:, self.n_strikers:] += jammer_prog
-            jammer_progress_full[:, self.n_strikers:] = jammer_prog
+            if float(rp.jammer_progress_scale) > 0:
+                dist_jr_min_curr, _ = dist_jr.min(dim=-1)
+                dist_jr_min_prev, _ = self._jammer_prev_dist.min(dim=-1)
+                progress_j = dist_jr_min_prev - dist_jr_min_curr
+                jammer_prog = float(rp.jammer_progress_scale) * progress_j * jammer_alive_f
+                reward[:, self.n_strikers:] += jammer_prog
+                jammer_progress_full[:, self.n_strikers:] = jammer_prog
 
-            # Active-jamming bonus (on top of progress)
-            jam_bonus = float(rp.jammer_jam_bonus) * jam_active.float() * jammer_alive_f
-            reward[:, self.n_strikers:] += jam_bonus
-            jammer_jam_bonus_full[:, self.n_strikers:] = jam_bonus
+            if float(rp.jammer_jam_bonus) > 0:
+                jam_bonus = float(rp.jammer_jam_bonus) * jam_active.float() * jammer_alive_f
+                reward[:, self.n_strikers:] += jam_bonus
+                jammer_jam_bonus_full[:, self.n_strikers:] = jam_bonus
 
-            # Update stored distances for next step
             self._jammer_prev_dist = dist_jr.detach()
 
-        # 6. Striker progress toward best alive target (potential-based)
-        #    Positive when a striker moves closer to any alive target; can be negative.
-        #    Zero when all targets are already destroyed.
         striker_progress_full = torch.zeros(B, A, device=self.device)
         if striker_idx.numel() > 0 and self.n_targets > 0:
-            rel_st_all = self.target_pos[:, None, :, :] - self.agent_pos[:, :self.n_strikers, None, :]
-            dist_st    = torch.linalg.norm(rel_st_all, dim=-1)         # [B, ns, T]
+            # Reuse dist_st computed in section 5 (or compute if striker approach was skipped)
+            if 'dist_st' not in dir():
+                rel_st_all = self.target_pos[:, None, :, :] - self.agent_pos[:, :self.n_strikers, None, :]
+                dist_st = torch.linalg.norm(rel_st_all, dim=-1)
 
-            mask_t    = self.target_alive[:, None, :].expand(-1, self.n_strikers, -1)  # [B, ns, T]
-            any_alive = mask_t.any(dim=-1)                              # [B, ns]
+            if float(rp.striker_progress_scale) > 0:
+                mask_t_p  = self.target_alive[:, None, :].expand(-1, self.n_strikers, -1)
+                any_alive_p = mask_t_p.any(dim=-1)
+                progress  = self._striker_prev_dist - dist_st
+                progress  = torch.where(mask_t_p, progress, torch.full_like(progress, -1e6))
+                progress_max, _ = progress.max(dim=-1)
+                progress_max = torch.where(any_alive_p, progress_max.clamp(min=-max_dist),
+                                           torch.zeros_like(progress_max))
+                striker_alive_f_p = alive[:, :self.n_strikers].float()
+                striker_contrib = float(rp.striker_progress_scale) * progress_max * striker_alive_f_p
+                reward[:, :self.n_strikers] += striker_contrib
+                striker_progress_full[:, :self.n_strikers] = striker_contrib
 
-            # Progress per target: positive = moved closer
-            progress = self._striker_prev_dist - dist_st               # [B, ns, T]
-            # Replace dead-target entries with -inf so max() ignores them
-            progress = torch.where(mask_t, progress,
-                                   torch.full_like(progress, -1e6))
-            # Best progress across all alive targets
-            progress_max, _ = progress.max(dim=-1)                      # [B, ns]
-            # If all targets dead, give no progress reward
-            progress_max = torch.where(any_alive,
-                                       progress_max.clamp(min=-max_dist),
-                                       torch.zeros_like(progress_max))
-
-            striker_alive_f = alive[:, :self.n_strikers].float()
-            striker_contrib = float(rp.striker_progress_scale) * progress_max * striker_alive_f
-            reward[:, :self.n_strikers] += striker_contrib
-            striker_progress_full[:, :self.n_strikers] = striker_contrib
-
-            # Update stored distances for next step
             self._striker_prev_dist = dist_st.detach()
 
-        # 7. Formation cohesion (reward for staying close to nearest alive ally)
+        # ------------------------------------------------------------------
+        # 8. Formation cohesion (reward for staying close to nearest alive ally)
+        # ------------------------------------------------------------------
         formation_full = torch.zeros(B, A, device=self.device)
         if A > 1 and rp.formation_scale > 0:
-            # Pairwise inter-agent distances: [B, A, A]
             d_pairs = torch.linalg.norm(
                 self.agent_pos[:, :, None, :] - self.agent_pos[:, None, :, :], dim=-1
             )
             eye_aa = torch.eye(A, device=self.device, dtype=torch.bool).unsqueeze(0)
             d_pairs = torch.where(eye_aa, torch.full_like(d_pairs, float('inf')), d_pairs)
-            # Mask out dead allies so they don't count
             dead_ally = ~self.agent_alive[:, None, :].expand(B, A, A)
             d_pairs = torch.where(dead_ally, torch.full_like(d_pairs, float('inf')), d_pairs)
-            d_nearest = d_pairs.min(dim=-1).values                      # [B, A]
+            d_nearest = d_pairs.min(dim=-1).values
             form_rew = float(rp.formation_scale) * (
                 1.0 - d_nearest / float(rp.formation_ref_dist)
             ).clamp(min=0.0) * alive_float
             reward += form_rew
             formation_full = form_rew
 
-        # 8. Agent destruction penalty (applied to agents killed by radar this step)
-        death_pen = killed.float() * float(rp.agent_destroyed)          # [B, A]
-        reward += death_pen
+        # ------------------------------------------------------------------
+        # 9. Agent destruction penalty  (team_spirit blends team ↔ individual)
+        # ------------------------------------------------------------------
+        death_pen_full = torch.zeros(B, A, device=self.device)
+        n_killed_agents = killed.float().sum(dim=-1)                      # [B]
+        if float(rp.agent_destroyed) != 0.0 and killed.any():
+            # Team component: shared among alive agents
+            team_death = (n_killed_agents * float(rp.agent_destroyed) / n_alive)  # [B]
+            team_death_comp = team_death.unsqueeze(-1) * alive_float              # [B, A]
+            # Individual component: only the killed agent
+            indiv_death_comp = killed.float() * float(rp.agent_destroyed)         # [B, A]
+            death_pen = ts * team_death_comp + (1.0 - ts) * indiv_death_comp
+            reward += death_pen
+            death_pen_full = death_pen
 
-        # Store per-component reward breakdown (team-mean per step) for diagnostics
-        # Each is [B, A] averaged to scalar per batch element
+        # Store per-component reward breakdown for diagnostics  (each [B, A])
         self.last_reward_components = {
-            "target_destroyed":   (team_kill.unsqueeze(-1) * alive_float).detach(),   # [B, A]
-            "border_penalty":     border_pen.detach(),                                # [B, A]
-            "timestep_penalty":   (float(rp.timestep_penalty) * alive_float).detach(),# [B, A]
-            "radar_avoidance":    radar_pen.detach(),                                 # [B, A]
-            "striker_progress":   striker_progress_full.detach(),                      # [B, A]
-            "jammer_progress":    jammer_progress_full.detach(),                       # [B, A]
-            "jammer_jam_bonus":   jammer_jam_bonus_full.detach(),                      # [B, A]
-            "formation":          formation_full.detach(),                             # [B, A]
-            "agent_destroyed":    death_pen.detach(),                                 # [B, A]
+            "target_destroyed":   target_destroyed_full.detach(),
+            "border_penalty":     border_pen.detach(),
+            "timestep_penalty":   timestep_rew.detach(),
+            "radar_avoidance":    radar_pen.detach(),
+            "striker_approach":   striker_approach_full.detach(),
+            "jammer_approach":    jammer_approach_full.detach(),
+            "striker_progress":   striker_progress_full.detach(),
+            "jammer_progress":    jammer_progress_full.detach(),
+            "jammer_jam_bonus":   jammer_jam_bonus_full.detach(),
+            "formation":          formation_full.detach(),
+            "agent_destroyed":    death_pen_full.detach(),
         }
 
         reward = reward.unsqueeze(-1).contiguous()  # [B, A, 1]
@@ -621,7 +737,36 @@ class StrikeEA2DEnv(EnvBase):
         next_td.set("terminated", terminated.to(torch.bool))
         next_td.set(self._obs_key, self._build_local_obs())
         next_td.set("state",       self._build_global_state())
+
+        # Track completed episode stats in Python list (immune to auto-reset)
+        if done.any():
+            for b in range(B):
+                if done[b, 0].item():
+                    tgt_frac = float((~self.target_alive[b]).float().mean().item())
+                    surv_frac = float(self.agent_alive[b].float().mean().item())
+                    self._completed_episodes.append({
+                        "mission_complete": bool(all_targets_done[b, 0].item()),
+                        "targets_frac": tgt_frac,
+                        "survival_frac": surv_frac,
+                        "duration": int(self.step_count[b, 0].item()),
+                    })
+
         return next_td
+
+    # ------------------------------------------------------------------
+    # Episode statistics (for training-time logging)
+    # ------------------------------------------------------------------
+
+    def pop_episode_stats(self) -> list:
+        """Return and clear accumulated completed-episode statistics.
+
+        Each entry is a dict with keys:
+          mission_complete (bool), targets_frac (float),
+          survival_frac (float), duration (int).
+        """
+        stats = self._completed_episodes
+        self._completed_episodes = []
+        return stats
 
     # ------------------------------------------------------------------
     # Observation / state builders

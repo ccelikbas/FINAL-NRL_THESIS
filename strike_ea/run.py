@@ -13,7 +13,7 @@ python run.py --n_env_layouts 1     # Train on a single fixed radar layout
 python run.py --n_env_layouts 50    # Train on 50 distinct radar layouts
 
 # TEST / VISUALIZE A SAVED POLICY (no training)
-.\.venv\Scripts\python.exe .\strike_ea\run.py --test --policy_path .\saved_policies\default\2026-03-09_15-18-35.pt
+.\.venv\Scripts\python.exe .\strike_ea\run.py --test --policy_path .\saved_policies\default\2026-03-10_09-38-28.pt
 python run.py --test --preset default  # Test random (untrained) policy
 
 # LIST saved policies
@@ -156,8 +156,12 @@ def load_actor(actor, load_path: str):
 # Run modes
 # ─────────────────────────────────────────────────────────────────────────────
 
-def run_single(env_cfg, train_cfg, net_cfg, *, label="run", animate=True, save_dir=None, save_policy=None, eval_episodes=0):
+def run_single(env_cfg, train_cfg, net_cfg, *, label="run", animate=True, save_dir=None, save_policy=None, eval_episodes=None):
     """Train, save policy, evaluate, and optionally visualize a test rollout."""
+    # CLI arg overrides config value; fall back to train_cfg.eval_episodes
+    if eval_episodes is None:
+        eval_episodes = getattr(train_cfg, 'eval_episodes', 0)
+
     print(f"\n{'='*60}\n  Training: {label}\n{'='*60}")
     base_env, actor, critic, logs = train_mappo(train_cfg, env_cfg, net_cfg)
     plot_training(logs, save_dir=save_dir)
@@ -245,7 +249,7 @@ def parse_args():
     p.add_argument("--save_policy",   default=None, help="Explicit policy save path (default: auto-timestamped)")
     p.add_argument("--policy_dir",    default="saved_policies", help="Directory for auto-saved policies (default: saved_policies)")
     p.add_argument("--no_save_policy", action="store_true", help="Disable automatic policy saving")
-    p.add_argument("--eval_episodes",  type=int, default=100, help="Number of test episodes for post-training evaluation (0 to skip)")
+    p.add_argument("--eval_episodes",  type=int, default=None, help="Number of test episodes for post-training evaluation (0 to skip; default: from TrainConfig.eval_episodes)")
 
     # Training overrides
     p.add_argument("--n_iters",        type=int,   default=None)

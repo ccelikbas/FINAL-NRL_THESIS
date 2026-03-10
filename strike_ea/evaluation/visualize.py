@@ -77,6 +77,36 @@ def plot_training(logs: Dict[str, List[float]], save_dir: Optional[str] = None):
         ax5.set_title("Per-Agent Policy Entropy"); ax5.legend(); ax5.grid(True)
         figs.append((fig5, "per_agent_entropy.png"))
 
+    # --- 6. Mission outcome metrics (completion, survival, duration) ---
+    mission_keys = ["completion_rate", "survival_rate", "mean_duration"]
+    if any(k in logs and len(logs[k]) > 0 for k in mission_keys):
+        fig6, axes6 = plt.subplots(1, 3, figsize=(15, 4), squeeze=False)
+
+        # Completion rate
+        if "completion_rate" in logs and len(logs["completion_rate"]) > 0:
+            ax = axes6[0, 0]
+            ax.plot(logs["completion_rate"], color="green")
+            ax.set_xlabel("Iteration"); ax.set_ylabel("Rate")
+            ax.set_title("Task Completion Rate"); ax.set_ylim(-0.05, 1.05); ax.grid(True)
+
+        # Survival rate
+        if "survival_rate" in logs and len(logs["survival_rate"]) > 0:
+            ax = axes6[0, 1]
+            ax.plot(logs["survival_rate"], color="steelblue")
+            ax.set_xlabel("Iteration"); ax.set_ylabel("Rate")
+            ax.set_title("Platform Survival Rate"); ax.set_ylim(-0.05, 1.05); ax.grid(True)
+
+        # Mean duration
+        if "mean_duration" in logs and len(logs["mean_duration"]) > 0:
+            ax = axes6[0, 2]
+            ax.plot(logs["mean_duration"], color="darkorange")
+            ax.set_xlabel("Iteration"); ax.set_ylabel("Steps")
+            ax.set_title("Mean Episode Duration"); ax.grid(True)
+
+        fig6.suptitle("Mission Outcome Metrics", fontsize=14, y=1.02)
+        fig6.tight_layout()
+        figs.append((fig6, "mission_metrics.png"))
+
     # --- Save all figures ---
     if save_dir:
         os.makedirs(save_dir, exist_ok=True)
@@ -123,32 +153,37 @@ def plot_evaluation_rewards(
     x = np.arange(max_step)
 
     component_names = [
-        "target_destroyed", "striker_progress", "jammer_progress",
+        "target_destroyed", "striker_approach", "jammer_approach",
+        "striker_progress", "jammer_progress",
         "jammer_jam_bonus", "formation",
         "timestep_penalty", "border_penalty", "radar_avoidance",
         "agent_destroyed",
     ]
     colors = {
-        "target_destroyed": "#2ca02c",   # green  – positive sparse
-        "striker_progress":  "#1f77b4",   # blue   – positive dense
-        "jammer_progress":   "#17becf",   # cyan   – positive dense
-        "jammer_jam_bonus":  "#aec7e8",   # light blue – positive dense
-        "formation":         "#8c564b",   # brown  – positive dense
-        "timestep_penalty":  "#ff7f0e",   # orange – negative dense
-        "border_penalty":    "#d62728",   # red    – negative dense
-        "radar_avoidance":   "#9467bd",   # purple – negative dense
-        "agent_destroyed":   "#e377c2",   # pink   – negative sparse
+        "target_destroyed":  "#2ca02c",   # green  – positive sparse
+        "striker_approach":   "#1f77b4",   # blue   – positive dense
+        "jammer_approach":    "#17becf",   # cyan   – positive dense
+        "striker_progress":   "#aec7e8",   # light blue – positive dense (legacy)
+        "jammer_progress":    "#7fcdbb",   # light teal – positive dense (legacy)
+        "jammer_jam_bonus":   "#bcbd22",   # olive  – positive dense (legacy)
+        "formation":          "#8c564b",   # brown  – positive dense
+        "timestep_penalty":   "#ff7f0e",   # orange – negative dense
+        "border_penalty":     "#d62728",   # red    – negative dense
+        "radar_avoidance":    "#9467bd",   # purple – negative dense
+        "agent_destroyed":    "#e377c2",   # pink   – negative sparse
     }
     labels = {
-        "target_destroyed": "Target destroyed",
-        "striker_progress":  "Striker progress",
-        "jammer_progress":   "Jammer progress",
-        "jammer_jam_bonus":  "Jammer jam bonus",
-        "formation":         "Formation cohesion",
-        "timestep_penalty":  "Timestep penalty",
-        "border_penalty":    "Border penalty",
-        "radar_avoidance":   "Radar avoidance",
-        "agent_destroyed":   "Agent destroyed",
+        "target_destroyed":  "Target destroyed",
+        "striker_approach":   "Striker approach",
+        "jammer_approach":    "Jammer approach",
+        "striker_progress":   "Striker progress (pot.)",
+        "jammer_progress":    "Jammer progress (pot.)",
+        "jammer_jam_bonus":   "Jammer jam bonus",
+        "formation":          "Formation cohesion",
+        "timestep_penalty":   "Timestep penalty",
+        "border_penalty":     "Border penalty",
+        "radar_avoidance":    "Radar avoidance",
+        "agent_destroyed":    "Agent destroyed",
     }
 
     # Gather arrays

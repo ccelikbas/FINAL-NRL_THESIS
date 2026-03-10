@@ -65,6 +65,7 @@ def train_mappo(
         reward_config = env_cfg.reward_config,
         min_turn_radius = env_cfg.min_turn_radius,
         n_env_layouts = env_cfg.n_env_layouts,
+        target_spawn_angle_range = env_cfg.target_spawn_angle_range,
     )
 
     env = TransformedEnv(
@@ -106,6 +107,7 @@ def train_mappo(
         "episode_reward_mean": [],
         "loss_policy": [], "loss_value": [],
         "entropy": [], "approx_kl": [], "clip_fraction": [], "advantage_std": [],
+        "completion_rate": [], "survival_rate": [], "mean_duration": [],
     }
     # Per-agent log keys
     n_agents = base_env.n_agents
@@ -217,6 +219,20 @@ def train_mappo(
         logs["clip_fraction"].append(clip_frac_acc / div)
         logs["advantage_std"].append(adv_std)
 
+        # --- Mission outcome metrics (from completed episodes stored on env) ---
+        ep_stats = base_env.pop_episode_stats()
+        if ep_stats:
+            completion_rate = sum(s["mission_complete"] for s in ep_stats) / len(ep_stats)
+            survival_rate   = sum(s["survival_frac"]    for s in ep_stats) / len(ep_stats)
+            mean_duration   = sum(s["duration"]         for s in ep_stats) / len(ep_stats)
+        else:
+            completion_rate = float("nan")
+            survival_rate   = float("nan")
+            mean_duration   = float("nan")
+        logs["completion_rate"].append(completion_rate)
+        logs["survival_rate"].append(survival_rate)
+        logs["mean_duration"].append(mean_duration)
+
         # --- Per-agent reward logging ---
         try:
             # Reward lives at ("next", "agents", "reward") in collector data
@@ -260,6 +276,9 @@ def train_mappo(
             print(
                 f"Iter {it+1:4d}/{train_cfg.n_iters} | "
                 f"ep_rew {ep_rew_mean: .3f} | "
+                f"compl {completion_rate:.2f} | "
+                f"surv {survival_rate:.2f} | "
+                f"dur {mean_duration:.0f} | "
                 f"pol_loss {logs['loss_policy'][-1]:.4f} | "
                 f"val_loss {logs['loss_value'][-1]:.4f} | "
                 f"entropy {logs['entropy'][-1]:.4f} | "

@@ -135,6 +135,15 @@ class EnvConfig:
     # Boundary penalty zone: 50 km from edge. Keeps agents in play area
     # Prevents agents from fleeing to margins to avoid radar
 
+    # ─── Target Spawn Control ─────────────────────────────────────────────
+    target_spawn_angle_range: Tuple[float, float] = (0.0, 360.0)
+    # Angular range (degrees, clockwise from "east" / +x axis) within which
+    # targets are spawned around their assigned radar.
+    # (0, 360) = full circle (default, legacy behaviour).
+    # (180, 360) = bottom half only (angles from south-west to south-east),
+    #   which keeps targets away from the top border.
+    # The range wraps: (350, 10) means from 350° through 0° to 10°.
+
     # ─── Environment Layout Control ──────────────────────────────────────────
     n_env_layouts: int = 0
     # Number of pre-generated environment layouts (radar positions).
@@ -146,9 +155,12 @@ class EnvConfig:
     reward_config: RewardConfig = field(default_factory=RewardConfig)
     # Reward weights. Carefully tuned for MAPPO convergence:
     # - target_destroyed:      sparse team objective (cooperation)
-    # - striker_progress_scale: potential-based approach toward best target
-    # - jammer_progress_scale:  potential-based approach toward nearest radar
-    # - jammer_jam_bonus:       per-step bonus for actively jamming
+    # - team_spirit:            blends team vs individual reward distribution
+    # - striker_approach:       piecewise lin-exp reward toward targets
+    # - jammer_approach:        piecewise lin-exp reward toward radars
+    # - striker/jammer_nearest_only: reward nearest entity only or all
+    # - striker/jammer_progress_scale: (legacy potential-based, 0 = off)
+    # - jammer_jam_bonus:       (legacy per-step jamming bonus, 0 = off)
     # - formation_scale:        cohesion reward for staying close as a pair
     # - border_penalty, radar_avoidance, timestep_penalty: constraints
 
@@ -186,14 +198,14 @@ class TrainConfig:
     # Higher = better sample efficiency but higher memory cost
     # Rule of thumb: 20-32 steps per environment per iteration
     
-    n_iters: int = 60
+    n_iters: int = 10
     # Number of collect→update cycles. Each cycle collects frames_per_batch transitions
     # Higher = longer training, potential for better convergence
 
     # ─── PPO Clipping & Advantage Estimation ───────────────────────────────
     # PPO Objective: min( rt * Ât, clip(rt, 1-ε, 1+ε) * Ât )
     # where rt = π_new(a|s) / π_old(a|s), Ât = advantage estimate
-    num_epochs: int = 6
+    num_epochs: int = 5
     # Number of repeat passes over collected data before next rollout
     # Higher = more gradient updates per sample (better convergence, higher risk of overfitting)
     
@@ -247,7 +259,12 @@ class TrainConfig:
     
     log_every: int = 5
     # Print training stats every N iterations (useful for monitoring convergence)
-    
+
+    eval_episodes: int = 10
+    # Number of test-rollout episodes to run after training completes.
+    # Results include task completion rate, survival rate, mean reward, and per-step
+    # reward component breakdowns.  Set to 0 to skip post-training evaluation.
+
     device: torch.device = field(
         default_factory=lambda: torch.device("cuda" if torch.cuda.is_available() else "cpu")
     )
@@ -294,7 +311,7 @@ def get_preset(name: str) -> Tuple[EnvConfig, TrainConfig, NetworkConfig]:
             NetworkConfig(),
         ),
         "strong_jam": lambda: (
-            EnvConfig(reward_config=RewardConfig(jammer_jam_bonus=0.3, jammer_progress_scale=8.0)),
+            EnvConfig(reward_config=RewardConfig(jammer_approach_w_lin=0.5, jammer_approach_w_exp=1.0)),
             TrainConfig(),
             NetworkConfig(),
         ),

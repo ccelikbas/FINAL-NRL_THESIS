@@ -62,6 +62,7 @@ class TestRunner:
             reward_config = env_cfg.reward_config,
             min_turn_radius = env_cfg.min_turn_radius,
             n_env_layouts = getattr(env_cfg, 'n_env_layouts', 0),
+            target_spawn_angle_range = getattr(env_cfg, 'target_spawn_angle_range', (0.0, 360.0)),
         )
 
     @torch.no_grad()
@@ -154,7 +155,8 @@ class PolicyEvaluator:
         # Per-step component accumulators: component_name → [max_steps] running sum
         component_names = [
             "target_destroyed", "border_penalty", "timestep_penalty",
-            "radar_avoidance", "striker_progress", "jammer_progress",
+            "radar_avoidance", "striker_approach", "jammer_approach",
+            "striker_progress", "jammer_progress",
             "jammer_jam_bonus", "formation", "agent_destroyed",
         ]
         step_component_sums = {name: np.zeros(self.max_steps) for name in component_names}
@@ -190,6 +192,7 @@ class PolicyEvaluator:
                 reward_config=self.env_cfg.reward_config,
                 min_turn_radius=self.env_cfg.min_turn_radius,
                 n_env_layouts=getattr(self.env_cfg, 'n_env_layouts', 0),
+                target_spawn_angle_range=getattr(self.env_cfg, 'target_spawn_angle_range', (0.0, 360.0)),
             )
 
             td = env.reset()
