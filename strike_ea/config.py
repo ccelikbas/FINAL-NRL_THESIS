@@ -57,7 +57,7 @@ class EnvConfig:
     # Multi-agent team structure affects network architecture and training stability
     n_strikers: int = 1  # Agents with kinetic (offensive) capability; share policy parameters
     n_jammers: int = 1   # Agents with electronic (defensive) capability; share policy parameters
-    n_targets: int = 1   # Objectives to destroy (define episode success criteria)
+    n_targets: int = 3   # Objectives to destroy (define episode success criteria)
     n_radars: int = 1    # Environmental threats (create intrinsic difficulty)
 
     # ─── World / Dynamics ──────────────────────────────────────────────────
@@ -201,25 +201,25 @@ class TrainConfig:
     #   This means each iteration collects exactly one full episode per environment.
     # OVERRIDE: set an explicit int to control collection size manually.
     
-    n_iters: int = 100
+    n_iters: int = 150
     # Number of collect→update cycles. Each cycle collects frames_per_batch transitions
     # Higher = longer training, potential for better convergence
 
     # ─── PPO Clipping & Advantage Estimation ───────────────────────────────
     # PPO Objective: min( rt * Ât, clip(rt, 1-ε, 1+ε) * Ât )
     # where rt = π_new(a|s) / π_old(a|s), Ât = advantage estimate
-    num_epochs: int = 6
+    num_epochs: int = 3
     # Number of repeat passes over collected data before next rollout
-    # Higher = more gradient updates per sample (better convergence, higher risk of overfitting)
+    # 5 epochs × 12 minibatches = 60 gradient steps per iteration
     
     minibatch_size: int = 1_024
     # Minibatch size for gradient descent within each epoch
     # Smaller = more noisy gradients but faster updates; Larger = fewer updates per epoch
     
-    clip_eps: float = 0.1
+    clip_eps: float = 0.2
     # PPO clipping range ε: prevents policy from changing too rapidly
     # clip_eps=0.2 means policy probability ratio clamped to [0.8, 1.2]
-    # Smaller ε = more conservative updates; Larger ε = more aggressive exploration
+    # Standard value; was 0.1 which was too conservative for fast convergence
     
     gamma: float = 0.99
     # Discount factor for returns: R_t = r_t + γ r_{t+1} + γ² r_{t+2} + ...
@@ -231,10 +231,10 @@ class TrainConfig:
     # Advantage = λ * TD_error + λ² * TD_error_t+1 + ... (blend of n-step returns)
     # Higher λ → higher bias, lower variance; Lower λ → lower bias, higher variance
     
-    entropy_coef: float = 0.01
+    entropy_coef: float = 0.02
     # Coefficient for entropy bonus in loss: loss_total = loss_policy + loss_value - entropy_coef * entropy
-    # Encourages exploration (prevents premature convergence to deterministic policy)
-    # Increase if agent gets stuck in local optima; Decrease if exploring too randomly
+    # Higher entropy bonus encourages broader exploration of the action space,
+    # critical for discrete 7×7 actions with double-integrator dynamics
 
     # ─── Optimization (Gradient Step Control) ───────────────────────────────
     lr: float = 1e-4
@@ -248,8 +248,7 @@ class TrainConfig:
 
     critic_lr: float = 1e-4
     # Critic (value function) learning rate. Higher = faster value fitting.
-    # Typical range: 1e-4 to 1e-3.
-    # The critic benefits from faster convergence to accurate value estimates.
+    # Increased from 1e-4 to help critic converge faster → better advantages.
     
     max_grad_norm: float = 1
     # Gradient clipping: if ||∇loss|| > max_grad_norm, rescale to this norm

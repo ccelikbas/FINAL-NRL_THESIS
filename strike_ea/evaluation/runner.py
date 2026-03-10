@@ -7,6 +7,16 @@ from typing import Dict, List
 import torch
 from torchrl.modules import ProbabilisticActor
 
+try:
+    from torchrl.envs.utils import set_exploration_type, ExplorationType
+    _EXPLORATION_API = "new"
+except ImportError:
+    try:
+        from tensordict.nn import set_interaction_type, InteractionType
+        _EXPLORATION_API = "interaction"
+    except ImportError:
+        _EXPLORATION_API = None
+
 from strike_ea.env import StrikeEA2DEnv
 from strike_ea.config import EnvConfig
 
@@ -70,24 +80,26 @@ class TestRunner:
         td     = self.env.reset()
         frames = [self._snapshot()]
 
-        for _ in range(self.env.max_steps):
-            td   = self.policy(td)
-            td   = self.env.step(td)
-            frames.append(self._snapshot())
+        ctx = PolicyEvaluator._deterministic_context()
+        with ctx:
+            for _ in range(self.env.max_steps):
+                td   = self.policy(td)
+                td   = self.env.step(td)
+                frames.append(self._snapshot())
 
-            done_flag = False
-            try:
-                done_flag = bool(td.get(("next", "done")).item())
-            except Exception:
+                done_flag = False
                 try:
-                    done_flag = bool(td.get("done").item())
+                    done_flag = bool(td.get(("next", "done")).item())
                 except Exception:
-                    pass
+                    try:
+                        done_flag = bool(td.get("done").item())
+                    except Exception:
+                        pass
 
-            if done_flag:
-                break
+                if done_flag:
+                    break
 
-            td = td.get("next")
+                td = td.get("next")
 
         return frames
 
@@ -140,10 +152,14 @@ class PolicyEvaluator:
         sub-dict mapping component names to lists of length max_steps, where each
         entry is the average (over all agents and episodes) reward from that
         component at that timestep.
+
+        Reward metrics now include both per-agent mean (comparable to training
+        logs) and total team reward for completeness.
         """
         import numpy as np
 
-        all_rewards: List[float] = []
+        all_rewards: List[float] = []           # total team reward per episode
+        all_rewards_per_agent: List[float] = []  # per-agent mean reward per episode
         targets_destroyed_frac: List[float] = []
         agents_alive_frac: List[float] = []
         durations: List[int] = []
@@ -196,51 +212,64 @@ class PolicyEvaluator:
             )
 
             td = env.reset()
-            cumulative_reward = 0.0
+            cumulative_reward = 0.0       # total team reward
+            per_agent_rewards = None      # [A] running sum per agent
             steps = 0
 
-            for t in range(self.max_steps):
-                td = self.actor(td)
-                td = env.step(td)
-                steps += 1
+            # Use deterministic (mode/greedy) actions for evaluation
+            ctx = self._deterministic_context()
+            with ctx:
+                for t in range(self.max_steps):
+                    td = self.actor(td)
+                    td = env.step(td)
+                    steps += 1
 
-                # Accumulate per-step team reward
-                try:
-                    rew = td.get(("next", env.group, "reward"))  # [1, A, 1]
-                    step_reward = float(rew.sum().item())
-                    cumulative_reward += step_reward
-                    step_total_sums[t] += step_reward
-                except Exception:
-                    pass
-
-                # Read per-component breakdown from env
-                if hasattr(env, 'last_reward_components'):
-                    for name in component_names:
-                        comp = env.last_reward_components.get(name)
-                        if comp is not None:
-                            # Sum over agents, take batch element 0
-                            step_component_sums[name][t] += float(comp[0].sum().item())
-
-                step_counts[t] += 1
-
-                done_flag = False
-                try:
-                    done_flag = bool(td.get(("next", "done")).item())
-                except Exception:
+                    # Accumulate per-step team reward
                     try:
-                        done_flag = bool(td.get("done").item())
+                        rew = td.get(("next", env.group, "reward"))  # [1, A, 1]
+                        rew_flat = rew.squeeze(0).squeeze(-1)        # [A]
+                        step_reward = float(rew.sum().item())
+                        cumulative_reward += step_reward
+                        if per_agent_rewards is None:
+                            per_agent_rewards = rew_flat.clone()
+                        else:
+                            per_agent_rewards += rew_flat
+                        step_total_sums[t] += step_reward
                     except Exception:
                         pass
 
-                if done_flag:
-                    break
-                td = td.get("next")
+                    # Read per-component breakdown from env
+                    if hasattr(env, 'last_reward_components'):
+                        for name in component_names:
+                            comp = env.last_reward_components.get(name)
+                            if comp is not None:
+                                # Sum over agents, take batch element 0
+                                step_component_sums[name][t] += float(comp[0].sum().item())
+
+                    step_counts[t] += 1
+
+                    done_flag = False
+                    try:
+                        done_flag = bool(td.get(("next", "done")).item())
+                    except Exception:
+                        try:
+                            done_flag = bool(td.get("done").item())
+                        except Exception:
+                            pass
+
+                    if done_flag:
+                        break
+                    td = td.get("next")
 
             # End-of-episode stats
             targets_killed = int((~env.target_alive[0]).sum().item())
             agents_surviving = int(env.agent_alive[0].sum().item())
 
             all_rewards.append(cumulative_reward)
+            if per_agent_rewards is not None:
+                all_rewards_per_agent.append(float(per_agent_rewards.mean().item()))
+            else:
+                all_rewards_per_agent.append(0.0)
             targets_destroyed_frac.append(targets_killed / max(n_targets, 1))
             agents_alive_frac.append(agents_surviving / max(n_agents, 1))
             durations.append(steps)
@@ -253,6 +282,7 @@ class PolicyEvaluator:
             "n_episodes":             n_episodes,
             "mean_reward":            statistics.mean(all_rewards),
             "std_reward":             statistics.pstdev(all_rewards),
+            "mean_reward_per_agent":  statistics.mean(all_rewards_per_agent),
             "task_completion_rate":   full_completions / n_episodes,
             "mean_targets_destroyed": statistics.mean(targets_destroyed_frac),
             "platform_survival_rate": statistics.mean(agents_alive_frac),
@@ -273,12 +303,31 @@ class PolicyEvaluator:
         return results
 
     @staticmethod
+    def _deterministic_context():
+        """Return a context manager for deterministic (greedy/mode) action selection.
+
+        Handles different TorchRL API versions:
+        - Newer: set_exploration_type(ExplorationType.DETERMINISTIC)
+        - Older: set_interaction_type(InteractionType.DETERMINISTIC)
+        - Fallback: no-op context (stochastic sampling continues)
+        """
+        import contextlib
+        if _EXPLORATION_API == "new":
+            return set_exploration_type(ExplorationType.DETERMINISTIC)
+        elif _EXPLORATION_API == "interaction":
+            return set_interaction_type(InteractionType.DETERMINISTIC)
+        else:
+            return contextlib.nullcontext()
+
+    @staticmethod
     def print_report(results: Dict[str, float]):
         """Pretty-print evaluation results to console."""
         print(f"\n{'='*60}")
         print(f"  Policy Evaluation Report  ({int(results['n_episodes'])} episodes)")
+        print(f"  (deterministic action selection)")
         print(f"{'='*60}")
-        print(f"  Mean Episode Reward ....... {results['mean_reward']:>10.2f}  (std {results['std_reward']:.2f})")
+        print(f"  Mean Ep Reward (team sum)   {results['mean_reward']:>10.2f}  (std {results['std_reward']:.2f})")
+        print(f"  Mean Ep Reward (per-agent)  {results['mean_reward_per_agent']:>10.2f}  ← comparable to training ep_rew")
         print(f"  Task Completion Rate ...... {results['task_completion_rate']*100:>10.1f}%  (all targets destroyed)")
         print(f"  Mean Targets Destroyed .... {results['mean_targets_destroyed']*100:>10.1f}%")
         print(f"  Platform Survival Rate .... {results['platform_survival_rate']*100:>10.1f}%  (agents alive at end)")

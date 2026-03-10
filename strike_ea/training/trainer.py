@@ -108,6 +108,7 @@ def train_mappo(
         "loss_policy": [], "loss_value": [],
         "entropy": [], "approx_kl": [], "clip_fraction": [], "advantage_std": [],
         "completion_rate": [], "survival_rate": [], "mean_duration": [],
+        "mean_targets_frac": [],
     }
     # Per-agent log keys
     n_agents = base_env.n_agents
@@ -115,6 +116,20 @@ def train_mappo(
         role = "striker" if ai < base_env.n_strikers else "jammer"
         logs[f"reward_agent_{ai}_{role}"] = []
         logs[f"entropy_agent_{ai}_{role}"] = []
+
+    # --- Verify env identity: ensure Collector uses the same base_env ---
+    _collector_env = getattr(collector, 'env', None)
+    if _collector_env is not None:
+        _inner = getattr(_collector_env, 'base_env', _collector_env)
+        if _inner is base_env:
+            print("[diag] Collector env identity: OK (same base_env object)")
+        else:
+            print(f"[diag] WARNING: Collector env is a DIFFERENT object! "
+                  f"id(base_env)={id(base_env)}, id(collector_inner)={id(_inner)}")
+            print("         pop_episode_stats() will NOT receive data from the Collector.")
+            print("         Falling back to alternative metrics from tensordict.")
+    else:
+        print("[diag] WARNING: Cannot access collector.env — unknown Collector API")
 
     for it, td in enumerate(collector):
         td = td.to(device)
@@ -222,16 +237,32 @@ def train_mappo(
         # --- Mission outcome metrics (from completed episodes stored on env) ---
         ep_stats = base_env.pop_episode_stats()
         if ep_stats:
-            completion_rate = sum(s["mission_complete"] for s in ep_stats) / len(ep_stats)
-            survival_rate   = sum(s["survival_frac"]    for s in ep_stats) / len(ep_stats)
-            mean_duration   = sum(s["duration"]         for s in ep_stats) / len(ep_stats)
+            completion_rate  = sum(s["mission_complete"] for s in ep_stats) / len(ep_stats)
+            survival_rate    = sum(s["survival_frac"]    for s in ep_stats) / len(ep_stats)
+            mean_duration    = sum(s["duration"]         for s in ep_stats) / len(ep_stats)
+            mean_targets_frac = sum(s["targets_frac"]    for s in ep_stats) / len(ep_stats)
         else:
-            completion_rate = float("nan")
-            survival_rate   = float("nan")
-            mean_duration   = float("nan")
+            completion_rate   = float("nan")
+            survival_rate     = float("nan")
+            mean_duration     = float("nan")
+            mean_targets_frac = float("nan")
+
+        # Diagnostic: on first iteration, print stats details to verify mechanism
+        if it == 0:
+            print(f"[diag] pop_episode_stats returned {len(ep_stats)} entries "
+                  f"(expected ~{train_cfg.num_envs})")
+            if ep_stats:
+                sample = ep_stats[:3]
+                for i, s in enumerate(sample):
+                    print(f"  ep[{i}]: complete={s['mission_complete']}, "
+                          f"tgt_frac={s['targets_frac']:.2f}, "
+                          f"surv={s['survival_frac']:.2f}, "
+                          f"dur={s['duration']}")
+
         logs["completion_rate"].append(completion_rate)
         logs["survival_rate"].append(survival_rate)
         logs["mean_duration"].append(mean_duration)
+        logs["mean_targets_frac"].append(mean_targets_frac)
 
         # --- Per-agent reward logging ---
         try:
@@ -276,6 +307,7 @@ def train_mappo(
             print(
                 f"Iter {it+1:4d}/{train_cfg.n_iters} | "
                 f"ep_rew {ep_rew_mean: .3f} | "
+                f"tgt_frac {mean_targets_frac:.2f} | "
                 f"compl {completion_rate:.2f} | "
                 f"surv {survival_rate:.2f} | "
                 f"dur {mean_duration:.0f} | "

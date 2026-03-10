@@ -77,10 +77,10 @@ def plot_training(logs: Dict[str, List[float]], save_dir: Optional[str] = None):
         ax5.set_title("Per-Agent Policy Entropy"); ax5.legend(); ax5.grid(True)
         figs.append((fig5, "per_agent_entropy.png"))
 
-    # --- 6. Mission outcome metrics (completion, survival, duration) ---
-    mission_keys = ["completion_rate", "survival_rate", "mean_duration"]
+    # --- 6. Mission outcome metrics (completion, survival, duration, tgt_frac) ---
+    mission_keys = ["completion_rate", "survival_rate", "mean_duration", "mean_targets_frac"]
     if any(k in logs and len(logs[k]) > 0 for k in mission_keys):
-        fig6, axes6 = plt.subplots(1, 3, figsize=(15, 4), squeeze=False)
+        fig6, axes6 = plt.subplots(1, 4, figsize=(20, 4), squeeze=False)
 
         # Completion rate
         if "completion_rate" in logs and len(logs["completion_rate"]) > 0:
@@ -89,16 +89,23 @@ def plot_training(logs: Dict[str, List[float]], save_dir: Optional[str] = None):
             ax.set_xlabel("Iteration"); ax.set_ylabel("Rate")
             ax.set_title("Task Completion Rate"); ax.set_ylim(-0.05, 1.05); ax.grid(True)
 
+        # Mean targets destroyed fraction
+        if "mean_targets_frac" in logs and len(logs["mean_targets_frac"]) > 0:
+            ax = axes6[0, 1]
+            ax.plot(logs["mean_targets_frac"], color="limegreen")
+            ax.set_xlabel("Iteration"); ax.set_ylabel("Fraction")
+            ax.set_title("Mean Targets Destroyed %"); ax.set_ylim(-0.05, 1.05); ax.grid(True)
+
         # Survival rate
         if "survival_rate" in logs and len(logs["survival_rate"]) > 0:
-            ax = axes6[0, 1]
+            ax = axes6[0, 2]
             ax.plot(logs["survival_rate"], color="steelblue")
             ax.set_xlabel("Iteration"); ax.set_ylabel("Rate")
             ax.set_title("Platform Survival Rate"); ax.set_ylim(-0.05, 1.05); ax.grid(True)
 
         # Mean duration
         if "mean_duration" in logs and len(logs["mean_duration"]) > 0:
-            ax = axes6[0, 2]
+            ax = axes6[0, 3]
             ax.plot(logs["mean_duration"], color="darkorange")
             ax.set_xlabel("Iteration"); ax.set_ylabel("Steps")
             ax.set_title("Mean Episode Duration"); ax.grid(True)
