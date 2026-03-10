@@ -136,7 +136,7 @@ class EnvConfig:
     # Prevents agents from fleeing to margins to avoid radar
 
     # ─── Target Spawn Control ─────────────────────────────────────────────
-    target_spawn_angle_range: Tuple[float, float] = (180, 270)
+    target_spawn_angle_range: Tuple[float, float] = (270, 360)
     # Angular range (degrees, clockwise from "east" / +x axis) within which
     # targets are spawned around their assigned radar.
     # (0, 360) = full circle (default, legacy behaviour).
@@ -173,30 +173,33 @@ class EnvConfig:
 class TrainConfig:
     """
     Training algorithm, optimization, and data collection parameters for MAPPO.
-    
-    ┌─ EPISODE CALCULATION ─────────────────────────────────────────────────┐
-    │ Total episodes ≈ (frames_per_batch × n_iters) / max_steps            │
-    │ With current values: (8,192 × 100) / 160 ≈ 5,120 episodes            │
-    │ Episodes per iteration: frames_per_batch / max_steps ≈ 51 episodes   │
-    └───────────────────────────────────────────────────────────────────────┘
+
+    ┌─ EPISODE CALCULATION ──────────────────────────────────────────────────┐
+    │ frames_per_batch is AUTO-DERIVED: num_envs × max_steps                │
+    │   → each iteration collects exactly one full episode per environment  │
+    │ Total episodes ≈ num_envs × n_iters                                   │
+    │ Change max_steps or num_envs → frames_per_batch updates automatically │
+    │ Override by passing an explicit int to frames_per_batch               │
+    └────────────────────────────────────────────────────────────────────────┘
     """
 
     # ─── Rollout / Environment ──────────────────────────────────────────────
     # MAPPO collects transitions from multiple parallel environments for sample efficiency
     num_envs: int = 256
     # [Frames per batch / num_envs] = steps collected from each environment per iteration
-    # (8,192 / 256 = 32 steps per env per iteration)
+    # (frames_per_batch / 256 = max_steps steps per env per iteration)
     
-    max_steps: int = 200
-    # Maximum steps per episode (real-world: 160 min × 60 sec/step = 9,600 seconds ≈ 2.7 hours)
+    max_steps: int = 100
+    # Maximum steps per episode (100 steps × 1 min/step = 100 minutes per episode)
     # Episodes can terminate early if all targets destroyed or all agents dead
 
     # ─── Data Collection (Off-policy → On-policy conversion) ────────────────
     # MAPPO uses on-policy learning: collect rollout data, then discard after update
-    frames_per_batch: int = 51_200 # 51_200 = 200 steps per env * 256 envs
-    # Total transitions collected across all num_envs before one policy update
-    # Higher = better sample efficiency but higher memory cost
-    # Rule of thumb: 20-32 steps per environment per iteration
+    frames_per_batch: Optional[int] = None
+    # Total transitions collected across all num_envs before one policy update.
+    # DEFAULT: None → auto-set to num_envs × max_steps in __post_init__.
+    #   This means each iteration collects exactly one full episode per environment.
+    # OVERRIDE: set an explicit int to control collection size manually.
     
     n_iters: int = 50
     # Number of collect→update cycles. Each cycle collects frames_per_batch transitions
@@ -270,6 +273,14 @@ class TrainConfig:
     )
     # Device for training: "cuda" (GPU) for speed, "cpu" for debugging
 
+    def __post_init__(self):
+        # Auto-derive frames_per_batch so changing max_steps or num_envs is enough.
+        if self.frames_per_batch is None:
+            self.frames_per_batch = int(self.num_envs * self.max_steps)
+        # Ensure integer types (guards against accidental float literals like 200/4)
+        self.max_steps         = int(self.max_steps)
+        self.frames_per_batch  = int(self.frames_per_batch)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # NETWORK CONFIGURATION
@@ -302,7 +313,7 @@ def get_preset(name: str) -> Tuple[EnvConfig, TrainConfig, NetworkConfig]:
         ),
         "fast": lambda: (
             EnvConfig(),
-            TrainConfig(n_iters=20, num_envs=64, frames_per_batch=2048),
+            TrainConfig(n_iters=20, num_envs=64),
             NetworkConfig(hidden=128),
         ),
         "high_kill": lambda: (
