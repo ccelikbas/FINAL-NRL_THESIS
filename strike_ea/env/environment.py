@@ -623,7 +623,7 @@ class StrikeEA2DEnv(EnvBase):
             jammer_approach_full[:, self.n_strikers:] = jammer_app
 
         # ------------------------------------------------------------------
-        # 7. Potential-based progress  (legacy, deactivated by default)
+        # 7. Potential-based progress  
         # ------------------------------------------------------------------
         jammer_progress_full  = torch.zeros(B, A, device=self.device)
         jammer_jam_bonus_full = torch.zeros(B, A, device=self.device)
@@ -672,23 +672,43 @@ class StrikeEA2DEnv(EnvBase):
             self._striker_prev_dist = dist_st.detach()
 
         # ------------------------------------------------------------------
-        # 8. Formation cohesion (reward for staying close to nearest alive ally)
+        # 8. Formation cohesion (striker ↔ jammer cross-role proximity reward)
+        #    Each striker is rewarded for being near the nearest alive jammer,
+        #    and vice versa.  Same-role proximity is NOT rewarded.
         # ------------------------------------------------------------------
         formation_full = torch.zeros(B, A, device=self.device)
-        if A > 1 and rp.formation_scale > 0:
-            d_pairs = torch.linalg.norm(
-                self.agent_pos[:, :, None, :] - self.agent_pos[:, None, :, :], dim=-1
-            )
-            eye_aa = torch.eye(A, device=self.device, dtype=torch.bool).unsqueeze(0)
-            d_pairs = torch.where(eye_aa, torch.full_like(d_pairs, float('inf')), d_pairs)
-            dead_ally = ~self.agent_alive[:, None, :].expand(B, A, A)
-            d_pairs = torch.where(dead_ally, torch.full_like(d_pairs, float('inf')), d_pairs)
-            d_nearest = d_pairs.min(dim=-1).values
-            form_rew = float(rp.formation_scale) * (
-                1.0 - d_nearest / float(rp.formation_ref_dist)
-            ).clamp(min=0.0) * alive_float
-            reward += form_rew
-            formation_full = form_rew
+        ns, nj = self.n_strikers, self.n_jammers
+
+        if ns > 0 and nj > 0:
+            striker_pos = self.agent_pos[:, :ns, :]   # [B, ns, 2]
+            jammer_pos  = self.agent_pos[:, ns:, :]   # [B, nj, 2]
+            # Raw pairwise distances: d_sj[b, s, j] = dist(striker_s, jammer_j)
+            d_sj = torch.linalg.norm(
+                striker_pos[:, :, None, :] - jammer_pos[:, None, :, :], dim=-1
+            )  # [B, ns, nj]
+
+            # --- Striker formation: reward each live striker near nearest live jammer ---
+            if float(rp.striker_formation_scale) > 0:
+                # Mask dead jammers so they are never selected as "nearest"
+                dead_j = ~self.agent_alive[:, ns:].unsqueeze(1).expand(B, ns, nj)  # [B, ns, nj]
+                d_near_j = d_sj.masked_fill(dead_j, float('inf')).min(dim=-1).values  # [B, ns]
+                striker_form = float(rp.striker_formation_scale) * (
+                    1.0 - d_near_j / float(rp.striker_formation_ref_dist)
+                ).clamp(min=0.0) * alive[:, :ns].float()
+                reward[:, :ns]        += striker_form
+                formation_full[:, :ns] = striker_form
+
+            # --- Jammer formation: reward each live jammer near nearest live striker ---
+            if float(rp.jammer_formation_scale) > 0:
+                # Transpose to [B, nj, ns] then mask dead strikers
+                d_js   = d_sj.transpose(1, 2)                                          # [B, nj, ns]
+                dead_s = ~self.agent_alive[:, :ns].unsqueeze(1).expand(B, nj, ns)      # [B, nj, ns]
+                d_near_s = d_js.masked_fill(dead_s, float('inf')).min(dim=-1).values   # [B, nj]
+                jammer_form = float(rp.jammer_formation_scale) * (
+                    1.0 - d_near_s / float(rp.jammer_formation_ref_dist)
+                ).clamp(min=0.0) * alive[:, ns:].float()
+                reward[:, ns:]        += jammer_form
+                formation_full[:, ns:] = jammer_form
 
         # ------------------------------------------------------------------
         # 9. Agent destruction penalty  (team_spirit blends team ↔ individual)

@@ -31,21 +31,21 @@ class RewardConfig:
     """
 
     # ─── SPARSE TEAM REWARDS ─────────────────────────────────────────────────
-    target_destroyed: float = 50
+    target_destroyed: float = 20
     # Reward when a target is killed.
     # Distribution controlled by team_spirit parameter (see below).
 
-    timestep_penalty: float = -0.05
+    timestep_penalty: float = -0.01
     # Per-step cost per alive agent. Kept low relative to approach reward
     # so the per-step signal is clearly positive when approaching.
     # Over 50 steps × 2 agents = −5 total (10% of kill reward).
 
-    agent_destroyed: float = -50
+    agent_destroyed: float = -10
     # Penalty applied when an agent is killed by a radar.
     # Distribution controlled by team_spirit parameter (see below).
 
     # ─── TEAM vs INDIVIDUAL REWARD DISTRIBUTION ─────────────────────────────
-    team_spirit: float = 0.5
+    team_spirit: float = 0
     # Controls how team rewards (target_destroyed, agent_destroyed) are
     # distributed among agents:
     #   1.0 = fully shared equally across all alive agents (cooperative)
@@ -62,7 +62,7 @@ class RewardConfig:
     border_w_lin:  float = 0.1   # gentle early-warning ramp (50 km → 30 km from edge)
     border_w_exp:  float = 0.3
     border_d_knee: float = 0.03   # 30 km from edge → exponential kicks in
-    border_alpha:  float = 2
+    border_alpha:  float = 1
 
     # ─── RADAR ZONE AVOIDANCE  (piecewise lin-exp penalty, ALL agents) ───────
     # d = distance from *effective* radar zone boundary (adapts when jammed).
@@ -79,11 +79,11 @@ class RewardConfig:
     # from ANY starting position. w_lin=0.5 ensures the linear-region reward
     # exceeds the timestep penalty even at mid-map distances:
     #   f(0.5) = 0.5 × (1.0−0.5)/(1.0−0.15) = 0.29 > 0.05 ✓
-    striker_approach_w_lin:  float = 0.5
-    striker_approach_w_exp:  float = 0.5    # strong pull into engage range
-    striker_approach_d_max:  float = 1.0    # spans FULL map width (was 0.5)
-    striker_approach_d_knee: float = 0.15   # exponential onset near engage range (0.10)
-    striker_approach_alpha:  float = 2.0
+    striker_approach_w_lin:  float = 0
+    striker_approach_w_exp:  float = 0    # strong pull into engage range
+    striker_approach_d_max:  float = 0    # spans FULL map width (was 0.5)
+    striker_approach_d_knee: float = 0   # exponential onset near engage range (0.10)
+    striker_approach_alpha:  float = 0
     striker_nearest_only:    bool  = True
     # True  = reward based only on distance to nearest alive target
     # False = reward = mean over all alive targets (encourages approaching all)
@@ -92,11 +92,11 @@ class RewardConfig:
     # Positive reward that increases as jammer gets closer to radars.
     # Matched to striker approach scale so both agents have equally strong
     # gradients pulling them toward their respective objectives.
-    jammer_approach_w_lin:  float = 0.5    # matched to striker
-    jammer_approach_w_exp:  float = 0.3    # moderate exponential near jam range
-    jammer_approach_d_max:  float = 1.0    # spans full map (was 0.5)
-    jammer_approach_d_knee: float = 0.25   # exponential onset inside jam_radius (0.35)
-    jammer_approach_alpha:  float = 2.0
+    jammer_approach_w_lin:  float = 0    # matched to striker
+    jammer_approach_w_exp:  float = 0    # moderate exponential near jam range
+    jammer_approach_d_max:  float = 0    # spans full map (was 0.5)
+    jammer_approach_d_knee: float = 0    # exponential onset inside jam_radius (0.35)
+    jammer_approach_alpha:  float = 0
     jammer_nearest_only:    bool  = True
     # True  = reward based only on distance to nearest radar
     # False = reward = mean over all radars (encourages approaching all)
@@ -107,20 +107,26 @@ class RewardConfig:
     # a clear "you moved in the right direction" signal that helps the policy
     # gradient identify which actions reduce distance (especially important
     # with double-integrator heading dynamics).
-    striker_progress_scale: float = 5.0
-    jammer_progress_scale:  float = 5.0
+    striker_progress_scale: float = 10
+    jammer_progress_scale:  float = 10
 
     # ─── JAMMER ACTIVE-JAMMING BONUS  (deactivated by default) ───────────────
     # Per-step bonus when a jammer is within jam_radius of ≥ 1 radar.
-    jammer_jam_bonus: float = 0.0   # Deactivated
+    jammer_jam_bonus: float = 0   # Deactivated
 
-    # ─── FORMATION COHESION  (proximity to nearest alive ally) ───────────────
-    # Reward = scale × max(0, 1 − d_nearest_ally / ref_dist) per alive agent.
-    # Encourages striker and jammer to move as a pair toward the objective area.
-    # Gradient = 0.3 / 0.25 = 1.2 per unit — comparable to approach linear
-    # gradient (0.5/0.85 ≈ 0.59/unit), so agents feel a real pull toward each other.
-    formation_scale:    float = 0.3
-    formation_ref_dist: float = 0.25  # 250 km reference distance
+    # ─── FORMATION COHESION  (striker ↔ jammer cross-role proximity) ──────────
+    # Each striker is rewarded for being close to the nearest *alive jammer*,
+    # and each jammer for being close to the nearest *alive striker*.
+    # Same-role proximity (striker↔striker, jammer↔jammer) is NOT rewarded.
+    # Works for any ns × nj configuration (1+1, 1+2, 2+2, …).
+    #
+    # Reward = scale × max(0, 1 − d_nearest_cross_role / ref_dist)
+    # Set scale to 0.0 to disable for that role independently.
+    striker_formation_scale:    float = 0.   # reward to each striker for being near a jammer
+    striker_formation_ref_dist: float = 0    # distance (map units) beyond which reward = 0
+
+    jammer_formation_scale:     float = 0   # reward to each jammer for being near a striker
+    jammer_formation_ref_dist:  float = 0    # distance (map units) beyond which reward = 0
 
 
 
@@ -200,9 +206,13 @@ def plot_reward_functions(reward_config: RewardConfig, distance_range: Tuple[flo
         alpha=reward_config.border_alpha,
     )
 
-    # Formation proximity reward (linear decay, not lin-exp)
-    form_rew = reward_config.formation_scale * (
-        1.0 - d / reward_config.formation_ref_dist
+    # Formation proximity reward — striker side (linear decay, cross-role)
+    striker_form = reward_config.striker_formation_scale * (
+        1.0 - d / reward_config.striker_formation_ref_dist
+    ).clamp(min=0.0)
+    # Formation proximity reward — jammer side (linear decay, cross-role)
+    jammer_form = reward_config.jammer_formation_scale * (
+        1.0 - d / reward_config.jammer_formation_ref_dist
     ).clamp(min=0.0)
 
     plt.figure(figsize=(12, 7))
@@ -210,7 +220,8 @@ def plot_reward_functions(reward_config: RewardConfig, distance_range: Tuple[flo
     plt.plot(d.numpy(), jammer_app.numpy(), label="Jammer Approach", color="#17becf", linewidth=2)
     plt.plot(d.numpy(), radar.numpy(), label="Radar Avoidance", color="#9467bd", linewidth=2)
     plt.plot(d.numpy(), border.numpy(), label="Border Avoidance", color="#d62728", linewidth=2)
-    plt.plot(d.numpy(), form_rew.numpy(), label="Formation Cohesion", color="#8c564b", linewidth=2)
+    plt.plot(d.numpy(), striker_form.numpy(), label="Striker Formation (↔ jammer)", color="#8c564b", linewidth=2)
+    plt.plot(d.numpy(), jammer_form.numpy(),  label="Jammer Formation (↔ striker)",  color="#bcbd22", linewidth=2, linestyle="--")
     plt.axhline(0, color="gray", lw=0.5)
     plt.xlabel("Distance")
     plt.ylabel("Reward / Penalty")

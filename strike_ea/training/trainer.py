@@ -235,34 +235,34 @@ def train_mappo(
         logs["advantage_std"].append(adv_std)
 
         # --- Mission outcome metrics (from completed episodes stored on env) ---
-        ep_stats = base_env.pop_episode_stats()
-        if ep_stats:
-            completion_rate  = sum(s["mission_complete"] for s in ep_stats) / len(ep_stats)
-            survival_rate    = sum(s["survival_frac"]    for s in ep_stats) / len(ep_stats)
-            mean_duration    = sum(s["duration"]         for s in ep_stats) / len(ep_stats)
-            mean_targets_frac = sum(s["targets_frac"]    for s in ep_stats) / len(ep_stats)
-        else:
-            completion_rate   = float("nan")
-            survival_rate     = float("nan")
-            mean_duration     = float("nan")
-            mean_targets_frac = float("nan")
+        # ep_stats = base_env.pop_episode_stats()
+        # if ep_stats:
+        #     completion_rate  = sum(s["mission_complete"] for s in ep_stats) / len(ep_stats)
+        #     survival_rate    = sum(s["survival_frac"]    for s in ep_stats) / len(ep_stats)
+        #     mean_duration    = sum(s["duration"]         for s in ep_stats) / len(ep_stats)
+        #     mean_targets_frac = sum(s["targets_frac"]    for s in ep_stats) / len(ep_stats)
+        # else:
+        #     completion_rate   = float("nan")
+        #     survival_rate     = float("nan")
+        #     mean_duration     = float("nan")
+        #     mean_targets_frac = float("nan")
 
         # Diagnostic: on first iteration, print stats details to verify mechanism
-        if it == 0:
-            print(f"[diag] pop_episode_stats returned {len(ep_stats)} entries "
-                  f"(expected ~{train_cfg.num_envs})")
-            if ep_stats:
-                sample = ep_stats[:3]
-                for i, s in enumerate(sample):
-                    print(f"  ep[{i}]: complete={s['mission_complete']}, "
-                          f"tgt_frac={s['targets_frac']:.2f}, "
-                          f"surv={s['survival_frac']:.2f}, "
-                          f"dur={s['duration']}")
+        # if it == 0:
+        #     print(f"[diag] pop_episode_stats returned {len(ep_stats)} entries "
+        #           f"(expected ~{train_cfg.num_envs})")
+        #     if ep_stats:
+        #         sample = ep_stats[:3]
+        #         for i, s in enumerate(sample):
+        #             print(f"  ep[{i}]: complete={s['mission_complete']}, "
+        #                   f"tgt_frac={s['targets_frac']:.2f}, "
+        #                   f"surv={s['survival_frac']:.2f}, "
+        #                   f"dur={s['duration']}")
 
-        logs["completion_rate"].append(completion_rate)
-        logs["survival_rate"].append(survival_rate)
-        logs["mean_duration"].append(mean_duration)
-        logs["mean_targets_frac"].append(mean_targets_frac)
+        # logs["completion_rate"].append(completion_rate)
+        # logs["survival_rate"].append(survival_rate)
+        # logs["mean_duration"].append(mean_duration)
+        # logs["mean_targets_frac"].append(mean_targets_frac)
 
         # --- Per-agent reward logging ---
         try:
@@ -307,10 +307,10 @@ def train_mappo(
             print(
                 f"Iter {it+1:4d}/{train_cfg.n_iters} | "
                 f"ep_rew {ep_rew_mean: .3f} | "
-                f"tgt_frac {mean_targets_frac:.2f} | "
-                f"compl {completion_rate:.2f} | "
-                f"surv {survival_rate:.2f} | "
-                f"dur {mean_duration:.0f} | "
+                # f"tgt_frac {mean_targets_frac:.2f} | "
+                # f"compl {completion_rate:.2f} | "
+                # f"surv {survival_rate:.2f} | "
+                # f"dur {mean_duration:.0f} | "
                 f"pol_loss {logs['loss_policy'][-1]:.4f} | "
                 f"val_loss {logs['loss_value'][-1]:.4f} | "
                 f"entropy {logs['entropy'][-1]:.4f} | "

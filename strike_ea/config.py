@@ -57,7 +57,7 @@ class EnvConfig:
     # Multi-agent team structure affects network architecture and training stability
     n_strikers: int = 1  # Agents with kinetic (offensive) capability; share policy parameters
     n_jammers: int = 1   # Agents with electronic (defensive) capability; share policy parameters
-    n_targets: int = 3   # Objectives to destroy (define episode success criteria)
+    n_targets: int = 1   # Objectives to destroy (define episode success criteria)
     n_radars: int = 1    # Environmental threats (create intrinsic difficulty)
 
     # ─── World / Dynamics ──────────────────────────────────────────────────
@@ -161,7 +161,7 @@ class EnvConfig:
     # - striker/jammer_nearest_only: reward nearest entity only or all
     # - striker/jammer_progress_scale: (legacy potential-based, 0 = off)
     # - jammer_jam_bonus:       (legacy per-step jamming bonus, 0 = off)
-    # - formation_scale:        cohesion reward for staying close as a pair
+    # - striker/jammer_formation_scale: cross-role cohesion (striker↔jammer only)
     # - border_penalty, radar_avoidance, timestep_penalty: constraints
 
 
@@ -201,7 +201,7 @@ class TrainConfig:
     #   This means each iteration collects exactly one full episode per environment.
     # OVERRIDE: set an explicit int to control collection size manually.
     
-    n_iters: int = 150
+    n_iters: int = 100
     # Number of collect→update cycles. Each cycle collects frames_per_batch transitions
     # Higher = longer training, potential for better convergence
 
@@ -262,7 +262,7 @@ class TrainConfig:
     log_every: int = 10
     # Print training stats every N iterations (useful for monitoring convergence)
 
-    eval_episodes: int = 10
+    eval_episodes: int = 100
     # Number of test-rollout episodes to run after training completes.
     # Results include task completion rate, survival rate, mean reward, and per-step
     # reward component breakdowns.  Set to 0 to skip post-training evaluation.
