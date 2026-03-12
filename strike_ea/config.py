@@ -56,7 +56,7 @@ class EnvConfig:
     # ─── Team Composition ────────────────────────────────────────────────────
     # Multi-agent team structure affects network architecture and training stability
     n_strikers: int = 1  # Agents with kinetic (offensive) capability; share policy parameters
-    n_jammers: int = 1   # Agents with electronic (defensive) capability; share policy parameters
+    n_jammers: int = 0   # Agents with electronic (defensive) capability; share policy parameters
     n_targets: int = 1   # Objectives to destroy (define episode success criteria)
     n_radars: int = 1    # Environmental threats (create intrinsic difficulty)
 

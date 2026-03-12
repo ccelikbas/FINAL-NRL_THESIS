@@ -10,7 +10,7 @@ from tensordict import TensorDict
 from torchrl.collectors import Collector
 from torchrl.objectives import ClipPPOLoss
 
-from strike_ea.env import StrikeEA2DEnv
+from .environment import StrikeEA2DEnv
 
 
 # ------------------------------------------------------------------
