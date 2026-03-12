@@ -21,12 +21,13 @@ def plot_training(logs: Dict[str, List[float]], save_dir: Optional[str] = None):
 
     figs = []
 
-    # --- 1. Episode reward ---
+    # --- 1. Episode reward (team total) ---
     fig1, ax1 = plt.subplots()
-    ax1.plot(logs["episode_reward_mean"])
-    ax1.set_xlabel("Iteration"); ax1.set_ylabel("Mean episode reward")
-    ax1.set_title("Training: Episode reward mean"); ax1.grid(True)
-    figs.append((fig1, "episode_reward_mean.png"))
+    rew_key = "mean_episode_total_reward" if "mean_episode_total_reward" in logs else "episode_reward_mean"
+    ax1.plot(logs[rew_key])
+    ax1.set_xlabel("Iteration"); ax1.set_ylabel("Mean episode total reward")
+    ax1.set_title("Training: Mean Episode Total Reward"); ax1.grid(True)
+    figs.append((fig1, "mean_episode_total_reward.png"))
 
     # --- 2. Policy / value loss ---
     fig2, ax2 = plt.subplots()
@@ -37,45 +38,28 @@ def plot_training(logs: Dict[str, List[float]], save_dir: Optional[str] = None):
     ax2.set_title("Training: Loss curves"); ax2.legend(); ax2.grid(True)
     figs.append((fig2, "loss_curves.png"))
 
-    # --- 3. PPO diagnostic panel (entropy, approx_kl, clip_fraction, adv_std) ---
-    diag_keys = [
-        ("entropy",        "Entropy",        "Policy entropy"),
-        ("approx_kl",      "Approx KL",      "Approximate KL divergence"),
-        ("clip_fraction",  "Clip fraction",   "PPO clip fraction"),
-        ("advantage_std",  "Advantage Std",   "Advantage standard deviation"),
+    # --- 3. Per-role PPO diagnostics (striker vs jammer) ---
+    role_diag = [
+        ("entropy_striker",   "entropy_jammer",   "Entropy",   "Policy Entropy"),
+        ("approx_kl_striker", "approx_kl_jammer", "Approx KL", "Approximate KL"),
+        ("clip_frac_striker", "clip_frac_jammer", "Clip Frac",  "PPO Clip Fraction"),
+        ("adv_std_striker",   "adv_std_jammer",   "Std",        "Advantage Std"),
     ]
-    present = [(k, ylabel, title) for k, ylabel, title in diag_keys if k in logs and len(logs[k]) > 0]
-    if present:
-        n = len(present)
+    present_diags = [(s, j, yl, t) for s, j, yl, t in role_diag
+                     if s in logs and len(logs[s]) > 0]
+    if present_diags:
+        n = len(present_diags)
         fig3, axes = plt.subplots(1, n, figsize=(5 * n, 4), squeeze=False)
-        for idx, (k, ylabel, title) in enumerate(present):
+        for idx, (s_key, j_key, ylabel, title) in enumerate(present_diags):
             ax = axes[0, idx]
-            ax.plot(logs[k], color=f"C{idx + 2}")
+            ax.plot(logs[s_key], label="Striker", color="C0")
+            if j_key in logs and len(logs[j_key]) > 0:
+                ax.plot(logs[j_key], label="Jammer", color="C1")
             ax.set_xlabel("Iteration"); ax.set_ylabel(ylabel)
-            ax.set_title(title); ax.grid(True)
-        fig3.suptitle("PPO Diagnostics", fontsize=14, y=1.02)
+            ax.set_title(title); ax.legend(); ax.grid(True)
+        fig3.suptitle("Per-Role PPO Diagnostics", fontsize=14, y=1.02)
         fig3.tight_layout()
         figs.append((fig3, "ppo_diagnostics.png"))
-
-    # --- 4. Per-agent reward (if tracked) ---
-    agent_rew_keys = [k for k in logs if k.startswith("reward_agent_")]
-    if agent_rew_keys:
-        fig4, ax4 = plt.subplots(figsize=(8, 5))
-        for k in sorted(agent_rew_keys):
-            ax4.plot(logs[k], label=k.replace("reward_", ""))
-        ax4.set_xlabel("Iteration"); ax4.set_ylabel("Mean per-agent reward")
-        ax4.set_title("Per-Agent Reward"); ax4.legend(); ax4.grid(True)
-        figs.append((fig4, "per_agent_reward.png"))
-
-    # --- 5. Per-agent entropy (if tracked) ---
-    agent_ent_keys = [k for k in logs if k.startswith("entropy_agent_")]
-    if agent_ent_keys:
-        fig5, ax5 = plt.subplots(figsize=(8, 5))
-        for k in sorted(agent_ent_keys):
-            ax5.plot(logs[k], label=k.replace("entropy_", ""))
-        ax5.set_xlabel("Iteration"); ax5.set_ylabel("Policy entropy")
-        ax5.set_title("Per-Agent Policy Entropy"); ax5.legend(); ax5.grid(True)
-        figs.append((fig5, "per_agent_entropy.png"))
 
     # --- 6. Mission outcome metrics (completion, survival, duration, tgt_frac) ---
     mission_keys = ["completion_rate", "survival_rate", "mean_duration", "mean_targets_frac"]

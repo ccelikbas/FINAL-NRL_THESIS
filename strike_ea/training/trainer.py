@@ -104,18 +104,20 @@ def train_mappo(
     critic_optimizer = optim.Adam(critic_params, lr=critic_lr)
 
     logs: Dict[str, List[float]] = {
-        "episode_reward_mean": [],
+        "mean_episode_total_reward": [],
         "loss_policy": [], "loss_value": [],
-        "entropy": [], "approx_kl": [], "clip_fraction": [], "advantage_std": [],
+        "entropy": [],
+        # Per-role diagnostics
+        "entropy_striker": [], "entropy_jammer": [],
+        "adv_std_striker": [], "adv_std_jammer": [],
+        "approx_kl_striker": [], "approx_kl_jammer": [],
+        "clip_frac_striker": [], "clip_frac_jammer": [],
+        # Mission metrics
         "completion_rate": [], "survival_rate": [], "mean_duration": [],
         "mean_targets_frac": [],
     }
-    # Per-agent log keys
     n_agents = base_env.n_agents
-    for ai in range(n_agents):
-        role = "striker" if ai < base_env.n_strikers else "jammer"
-        logs[f"reward_agent_{ai}_{role}"] = []
-        logs[f"entropy_agent_{ai}_{role}"] = []
+    ns = base_env.n_strikers
 
     # --- Verify env identity: ensure Collector uses the same base_env ---
     _collector_env = getattr(collector, 'env', None)
@@ -152,16 +154,26 @@ def train_mappo(
         n_samples = data.batch_size[0] if len(data.batch_size) else data.numel()
 
         pol_acc = val_acc = 0.0
-        entropy_acc = kl_acc = clip_frac_acc = 0.0
+        entropy_acc = 0.0
+        ent_s_acc = ent_j_acc = 0.0
+        kl_s_acc = kl_j_acc = 0.0
+        cf_s_acc = cf_j_acc = 0.0
         n_updates = 0
 
-        # Advantage std from the full batch (before per-minibatch normalisation)
+        # Advantage std per role (from full batch, before per-minibatch normalisation)
         try:
             adv_key = (base_env.group, "advantage")
             adv_vals = data.get(adv_key) if adv_key in data.keys(True) else data.get("advantage")
-            adv_std = float(adv_vals.std().item()) if adv_vals is not None else float("nan")
+            if adv_vals is not None and adv_vals.dim() >= 2:
+                adv_sq = adv_vals.squeeze(-1) if adv_vals.dim() == 3 else adv_vals
+                adv_std_s = float(adv_sq[:, :ns].std().item())
+                adv_std_j = float(adv_sq[:, ns:].std().item())
+            elif adv_vals is not None:
+                adv_std_s = adv_std_j = float(adv_vals.std().item())
+            else:
+                adv_std_s = adv_std_j = float("nan")
         except Exception:
-            adv_std = float("nan")
+            adv_std_s = adv_std_j = float("nan")
 
         for _ in range(train_cfg.num_epochs):
             perm = torch.randperm(n_samples, device=device)
@@ -191,17 +203,47 @@ def train_mappo(
                 pol_acc   += float(loss_policy.item())
                 val_acc   += float(loss_value.item())
 
-                # --- Extra diagnostic metrics ---
+                # --- Joint entropy from loss module ---
                 try:
-                    entropy_acc  += float(loss_vals.get("entropy").mean().item())
+                    entropy_acc += float(loss_vals.get("entropy").mean().item())
                 except Exception:
                     pass
+
+                # --- Per-role entropy (from sample log_prob in sub-batch) ---
                 try:
-                    kl_acc       += float(loss_vals.get("kl_approx").mean().item())
+                    lp = sub.get((base_env.group, "sample_log_prob"))
+                    if lp is not None:
+                        if lp.dim() > 2:
+                            lp = lp.sum(dim=-1)  # [mb, A]
+                        ent_s_acc += float(-lp[:, :ns].mean().item())
+                        ent_j_acc += float(-lp[:, ns:].mean().item())
                 except Exception:
                     pass
+
+                # --- Per-role KL and clip fraction ---
                 try:
-                    clip_frac_acc += float(loss_vals.get("clip_fraction").mean().item())
+                    kl_val = loss_vals.get("kl_approx")
+                    if kl_val is not None:
+                        if kl_val.dim() >= 2:
+                            kl_sq = kl_val.squeeze(-1) if kl_val.dim() == 3 else kl_val
+                            kl_s_acc += float(kl_sq[:, :ns].mean().item())
+                            kl_j_acc += float(kl_sq[:, ns:].mean().item())
+                        else:
+                            v = float(kl_val.mean().item())
+                            kl_s_acc += v; kl_j_acc += v
+                except Exception:
+                    pass
+
+                try:
+                    cf_val = loss_vals.get("clip_fraction")
+                    if cf_val is not None:
+                        if cf_val.dim() >= 2:
+                            cf_sq = cf_val.squeeze(-1) if cf_val.dim() == 3 else cf_val
+                            cf_s_acc += float(cf_sq[:, :ns].mean().item())
+                            cf_j_acc += float(cf_sq[:, ns:].mean().item())
+                        else:
+                            v = float(cf_val.mean().item())
+                            cf_s_acc += v; cf_j_acc += v
                 except Exception:
                     pass
 
@@ -212,111 +254,70 @@ def train_mappo(
         except Exception:
             pass
 
-        # episode reward logging (filter NaN values for accurate averaging)
+        # Team episode total reward: sum per-agent rewards, mean over episodes
         try:
             done_mask = td.get(("next", base_env.group, "done"))
             ep_rew    = td.get(("next", base_env.group, "episode_reward"))[done_mask]
         except Exception:
             ep_rew = torch.tensor([], device=device)
 
-        # Use nanmean to skip NaN values; if no completed episodes, will be NaN
-        if ep_rew.numel() > 0:
-            ep_rew_mean = float(torch.nanmean(ep_rew).item())
+        if ep_rew.numel() > 0 and ep_rew.numel() % n_agents == 0:
+            ep_rew_by_ep = ep_rew.view(-1, n_agents)     # [N_ep, A]
+            team_totals  = ep_rew_by_ep.sum(dim=-1)       # [N_ep]
+            ep_total_mean = float(torch.nanmean(team_totals).item())
+        elif ep_rew.numel() > 0:
+            ep_total_mean = float(torch.nanmean(ep_rew).item()) * n_agents
         else:
-            ep_rew_mean = float("nan")
+            ep_total_mean = float("nan")
         div = max(1, n_updates)
 
-        logs["episode_reward_mean"].append(ep_rew_mean)
+        logs["mean_episode_total_reward"].append(ep_total_mean)
         logs["loss_policy"].append(pol_acc / div)
         logs["loss_value"].append(val_acc / div)
         logs["entropy"].append(entropy_acc / div)
-        logs["approx_kl"].append(kl_acc / div)
-        logs["clip_fraction"].append(clip_frac_acc / div)
-        logs["advantage_std"].append(adv_std)
+        logs["entropy_striker"].append(ent_s_acc / div)
+        logs["entropy_jammer"].append(ent_j_acc / div)
+        logs["adv_std_striker"].append(adv_std_s)
+        logs["adv_std_jammer"].append(adv_std_j)
+        logs["approx_kl_striker"].append(kl_s_acc / div)
+        logs["approx_kl_jammer"].append(kl_j_acc / div)
+        logs["clip_frac_striker"].append(cf_s_acc / div)
+        logs["clip_frac_jammer"].append(cf_j_acc / div)
 
         # --- Mission outcome metrics (from completed episodes stored on env) ---
-        # ep_stats = base_env.pop_episode_stats()
-        # if ep_stats:
-        #     completion_rate  = sum(s["mission_complete"] for s in ep_stats) / len(ep_stats)
-        #     survival_rate    = sum(s["survival_frac"]    for s in ep_stats) / len(ep_stats)
-        #     mean_duration    = sum(s["duration"]         for s in ep_stats) / len(ep_stats)
-        #     mean_targets_frac = sum(s["targets_frac"]    for s in ep_stats) / len(ep_stats)
-        # else:
-        #     completion_rate   = float("nan")
-        #     survival_rate     = float("nan")
-        #     mean_duration     = float("nan")
-        #     mean_targets_frac = float("nan")
+        ep_stats = base_env.pop_episode_stats()
+        if ep_stats:
+            completion_rate   = sum(s["mission_complete"] for s in ep_stats) / len(ep_stats)
+            survival_rate     = sum(s["survival_frac"]    for s in ep_stats) / len(ep_stats)
+            mean_duration     = sum(s["duration"]         for s in ep_stats) / len(ep_stats)
+            mean_targets_frac = sum(s["targets_frac"]     for s in ep_stats) / len(ep_stats)
+        else:
+            completion_rate   = float("nan")
+            survival_rate     = float("nan")
+            mean_duration     = float("nan")
+            mean_targets_frac = float("nan")
 
-        # Diagnostic: on first iteration, print stats details to verify mechanism
-        # if it == 0:
-        #     print(f"[diag] pop_episode_stats returned {len(ep_stats)} entries "
-        #           f"(expected ~{train_cfg.num_envs})")
-        #     if ep_stats:
-        #         sample = ep_stats[:3]
-        #         for i, s in enumerate(sample):
-        #             print(f"  ep[{i}]: complete={s['mission_complete']}, "
-        #                   f"tgt_frac={s['targets_frac']:.2f}, "
-        #                   f"surv={s['survival_frac']:.2f}, "
-        #                   f"dur={s['duration']}")
-
-        # logs["completion_rate"].append(completion_rate)
-        # logs["survival_rate"].append(survival_rate)
-        # logs["mean_duration"].append(mean_duration)
-        # logs["mean_targets_frac"].append(mean_targets_frac)
-
-        # --- Per-agent reward logging ---
-        try:
-            # Reward lives at ("next", "agents", "reward") in collector data
-            next_reward_key = ("next",) + base_env._reward_key
-            agent_rewards = data.get(next_reward_key)  # [N, A, 1]
-            if agent_rewards is not None:
-                agent_rewards = agent_rewards.squeeze(-1)    # [N, A]
-                for ai in range(n_agents):
-                    role = "striker" if ai < base_env.n_strikers else "jammer"
-                    logs[f"reward_agent_{ai}_{role}"].append(float(agent_rewards[:, ai].mean().item()))
-            else:
-                for ai in range(n_agents):
-                    role = "striker" if ai < base_env.n_strikers else "jammer"
-                    logs[f"reward_agent_{ai}_{role}"].append(float("nan"))
-        except Exception:
-            for ai in range(n_agents):
-                role = "striker" if ai < base_env.n_strikers else "jammer"
-                logs[f"reward_agent_{ai}_{role}"].append(float("nan"))
-
-        # --- Per-agent policy entropy logging ---
-        try:
-            log_probs = data.get((base_env.group, "sample_log_prob"))  # [N, A] or [N, A, act_dim]
-            if log_probs is not None:
-                # Entropy ≈ -mean(log_prob) per agent
-                if log_probs.dim() > 2:
-                    log_probs = log_probs.sum(dim=-1)  # sum over action dims
-                for ai in range(n_agents):
-                    role = "striker" if ai < base_env.n_strikers else "jammer"
-                    ent_approx = -float(log_probs[:, ai].mean().item())
-                    logs[f"entropy_agent_{ai}_{role}"].append(ent_approx)
-            else:
-                for ai in range(n_agents):
-                    role = "striker" if ai < base_env.n_strikers else "jammer"
-                    logs[f"entropy_agent_{ai}_{role}"].append(float("nan"))
-        except Exception:
-            for ai in range(n_agents):
-                role = "striker" if ai < base_env.n_strikers else "jammer"
-                logs[f"entropy_agent_{ai}_{role}"].append(float("nan"))
+        logs["completion_rate"].append(completion_rate)
+        logs["survival_rate"].append(survival_rate)
+        logs["mean_duration"].append(mean_duration)
+        logs["mean_targets_frac"].append(mean_targets_frac)
 
         if train_cfg.log_every and (it + 1) % train_cfg.log_every == 0:
             print(
                 f"Iter {it+1:4d}/{train_cfg.n_iters} | "
-                f"ep_rew {ep_rew_mean: .3f} | "
-                # f"tgt_frac {mean_targets_frac:.2f} | "
-                # f"compl {completion_rate:.2f} | "
-                # f"surv {survival_rate:.2f} | "
-                # f"dur {mean_duration:.0f} | "
+                f"ep_return_total {ep_total_mean: .3f} | "
+                f"tgt_frac {mean_targets_frac:.2f} | "
+                f"compl {completion_rate:.2f} | "
                 f"pol_loss {logs['loss_policy'][-1]:.4f} | "
                 f"val_loss {logs['loss_value'][-1]:.4f} | "
-                f"entropy {logs['entropy'][-1]:.4f} | "
-                f"approx_kl {logs['approx_kl'][-1]:.4f} | "
-                f"clip_frac {logs['clip_fraction'][-1]:.4f} | "
-                f"adv_std {logs['advantage_std'][-1]:.4f}"
+                f"ent_s {logs['entropy_striker'][-1]:.4f} | "
+                f"ent_j {logs['entropy_jammer'][-1]:.4f} | "
+                f"kl_s {logs['approx_kl_striker'][-1]:.4f} | "
+                f"kl_j {logs['approx_kl_jammer'][-1]:.4f} | "
+                f"clip_s {logs['clip_frac_striker'][-1]:.4f} | "
+                f"clip_j {logs['clip_frac_jammer'][-1]:.4f} | "
+                f"adv_s {logs['adv_std_striker'][-1]:.4f} | "
+                f"adv_j {logs['adv_std_jammer'][-1]:.4f}"
             )
 
         if it + 1 >= train_cfg.n_iters:

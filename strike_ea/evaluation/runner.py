@@ -279,15 +279,14 @@ class PolicyEvaluator:
         # Aggregate scalar stats
         import statistics
         results = {
-            "n_episodes":             n_episodes,
-            "mean_reward":            statistics.mean(all_rewards),
-            "std_reward":             statistics.pstdev(all_rewards),
-            "mean_reward_per_agent":  statistics.mean(all_rewards_per_agent),
-            "task_completion_rate":   full_completions / n_episodes,
-            "mean_targets_destroyed": statistics.mean(targets_destroyed_frac),
-            "platform_survival_rate": statistics.mean(agents_alive_frac),
-            "mean_duration":          statistics.mean(durations),
-            "std_duration":           statistics.pstdev(durations),
+            "n_episodes":                n_episodes,
+            "mean_episode_total_reward": statistics.mean(all_rewards),
+            "std_reward":                statistics.pstdev(all_rewards),
+            "task_completion_rate":      full_completions / n_episodes,
+            "mean_targets_destroyed":    statistics.mean(targets_destroyed_frac),
+            "platform_survival_rate":    statistics.mean(agents_alive_frac),
+            "mean_duration":             statistics.mean(durations),
+            "std_duration":              statistics.pstdev(durations),
         }
 
         # Average per-step reward components (only steps that had data)
@@ -326,8 +325,7 @@ class PolicyEvaluator:
         print(f"  Policy Evaluation Report  ({int(results['n_episodes'])} episodes)")
         print(f"  (deterministic action selection)")
         print(f"{'='*60}")
-        print(f"  Mean Ep Reward (team sum)   {results['mean_reward']:>10.2f}  (std {results['std_reward']:.2f})")
-        print(f"  Mean Ep Reward (per-agent)  {results['mean_reward_per_agent']:>10.2f}  ← comparable to training ep_rew")
+        print(f"  Mean Episode Total Reward   {results['mean_episode_total_reward']:>10.2f}  (std {results['std_reward']:.2f})")
         print(f"  Task Completion Rate ...... {results['task_completion_rate']*100:>10.1f}%  (all targets destroyed)")
         print(f"  Mean Targets Destroyed .... {results['mean_targets_destroyed']*100:>10.1f}%")
         print(f"  Platform Survival Rate .... {results['platform_survival_rate']*100:>10.1f}%  (agents alive at end)")
