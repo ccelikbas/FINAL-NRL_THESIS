@@ -13,7 +13,7 @@ python run.py --n_env_layouts 1     # Train on a single fixed radar layout
 python run.py --n_env_layouts 50    # Train on 50 distinct radar layouts
 
 # TEST / VISUALIZE A SAVED POLICY (no training)
-.\.venv\Scripts\python.exe .\strike_ea\run.py --test --policy_path .\saved_policies\default\2026-03-10_16-01-52.pt
+.\.venv\Scripts\python.exe .\strike_ea\run.py --test --policy_path .\saved_policies\default\2026-03-12_09-03-55.pt
 python run.py --test --preset default  # Test random (untrained) policy
 
 # LIST saved policies
@@ -164,7 +164,7 @@ def run_single(env_cfg, train_cfg, net_cfg, *, label="run", animate=True, save_d
 
     print(f"\n{'='*60}\n  Training: {label}\n{'='*60}")
     base_env, actor, critic, logs = train_mappo(train_cfg, env_cfg, net_cfg)
-    plot_training(logs, save_dir=save_dir)
+    # plot_training(logs, save_dir=save_dir)
 
     if save_policy:
         save_actor(actor, save_policy, env_cfg=env_cfg, net_cfg=net_cfg, preset_name=label)
@@ -179,12 +179,18 @@ def run_single(env_cfg, train_cfg, net_cfg, *, label="run", animate=True, save_d
         PolicyEvaluator.print_report(results)
         plot_evaluation_rewards(results, save_dir=save_dir)
 
+    plot_training(logs, save_dir=save_dir)
+
+    # --- Visualize trained policy ---
     if animate:
         print(f"\n{'='*60}\n  Visualizing trained policy\n{'='*60}")
-        tester = TestRunner(actor, device=train_cfg.device, max_steps=train_cfg.max_steps, seed=999, env_cfg=env_cfg)
-        frames = tester.rollout()
-        animate_rollout(frames, tester.env)
-        print(f"Test rollout: {len(frames)} steps")
+
+        for _ in range(3):
+            tester = TestRunner(actor, device=train_cfg.device, max_steps=train_cfg.max_steps, seed=999, env_cfg=env_cfg)
+            frames = tester.rollout()
+            animate_rollout(frames, tester.env)
+            print(f"Test rollout: {len(frames)} steps")
+    
     return logs
 
 

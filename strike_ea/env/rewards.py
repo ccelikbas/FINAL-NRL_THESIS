@@ -31,16 +31,16 @@ class RewardConfig:
     """
 
     # ─── SPARSE TEAM REWARDS ─────────────────────────────────────────────────
-    target_destroyed: float = 20
+    target_destroyed: float = 50
     # Reward when a target is killed.
     # Distribution controlled by team_spirit parameter (see below).
 
-    timestep_penalty: float = -0.01
+    timestep_penalty: float = -0.1
     # Per-step cost per alive agent. Kept low relative to approach reward
     # so the per-step signal is clearly positive when approaching.
     # Over 50 steps × 2 agents = −5 total (10% of kill reward).
 
-    agent_destroyed: float = -10
+    agent_destroyed: float = -50
     # Penalty applied when an agent is killed by a radar.
     # Distribution controlled by team_spirit parameter (see below).
 
@@ -62,7 +62,7 @@ class RewardConfig:
     border_w_lin:  float = 0.1   # gentle early-warning ramp (50 km → 30 km from edge)
     border_w_exp:  float = 0.3
     border_d_knee: float = 0.03   # 30 km from edge → exponential kicks in
-    border_alpha:  float = 1
+    border_alpha:  float = 2
 
     # ─── RADAR ZONE AVOIDANCE  (piecewise lin-exp penalty, ALL agents) ───────
     # d = distance from *effective* radar zone boundary (adapts when jammed).
@@ -108,7 +108,7 @@ class RewardConfig:
     # gradient identify which actions reduce distance (especially important
     # with double-integrator heading dynamics).
     striker_progress_scale: float = 10
-    jammer_progress_scale:  float = 10
+    jammer_progress_scale:  float = 0
 
     # ─── JAMMER ACTIVE-JAMMING BONUS  (deactivated by default) ───────────────
     # Per-step bonus when a jammer is within jam_radius of ≥ 1 radar.
