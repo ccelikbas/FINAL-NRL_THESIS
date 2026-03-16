@@ -327,63 +327,120 @@ class StrikeEA2DEnv(EnvBase):
     # Reset / Step
     # ------------------------------------------------------------------
 
+    def _extract_reset_mask(self, tensordict: Optional[TensorDict]) -> torch.Tensor:
+        """Return boolean reset mask [B] from TorchRL reset tensordict.
+
+        If no reset indicator is found, resets all environments.
+        """
+        if tensordict is None:
+            return torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
+
+        candidate_keys = [
+            "_reset",
+            (self.group, "_reset"),
+            ("next", "_reset"),
+            ("next", self.group, "_reset"),
+        ]
+
+        reset_mask = None
+        for key in candidate_keys:
+            try:
+                value = tensordict.get(key)
+                if value is not None:
+                    reset_mask = value
+                    break
+            except Exception:
+                continue
+
+        if reset_mask is None:
+            return torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
+
+        reset_mask = reset_mask.to(self.device)
+        if reset_mask.dtype is not torch.bool:
+            reset_mask = reset_mask.bool()
+        if reset_mask.ndim > 1 and reset_mask.shape[-1] == 1:
+            reset_mask = reset_mask.squeeze(-1)
+        reset_mask = reset_mask.reshape(-1)
+
+        if reset_mask.numel() == 1:
+            if bool(reset_mask.item()):
+                return torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
+            return torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+
+        if reset_mask.numel() != self.num_envs:
+            return torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
+
+        return reset_mask
+
     def _reset(self, tensordict: Optional[TensorDict] = None, **kwargs) -> TensorDict:
         B, A, T, R = self.num_envs, self.n_agents, self.n_targets, self.n_radars
 
-        # --- Agents spawn at bottom middle of map, facing north ---
-        center_x = (self.low + self.high) / 2.0
-        bottom_y = self.low + 0.05  # 50 km from bottom edge
-        spacing = 0.02  # 20 km between agents
-        self.agent_pos = torch.zeros(B, A, 2, device=self.device)
-        for a in range(A):
-            offset_x = (a - (A - 1) / 2.0) * spacing
-            self.agent_pos[:, a, 0] = center_x + offset_x
-            self.agent_pos[:, a, 1] = bottom_y
-        self.agent_heading = torch.full((B, A), math.pi / 2.0, device=self.device)  # Face north
+        reset_mask = self._extract_reset_mask(tensordict)
+        reset_idx = reset_mask.nonzero(as_tuple=False).squeeze(-1)
+        n_reset = int(reset_idx.numel())
 
-        # Initialize at minimum speed (aircraft can't hover)
-        self.agent_speed = torch.zeros(B, A, device=self.device)
-        self.agent_speed[:, :self.n_strikers] = self.striker.v_min
-        self.agent_speed[:, self.n_strikers:] = self.jammer.v_min
-        self.agent_heading_rate = torch.zeros(B, A, device=self.device)
-        self.agent_alive = torch.ones(B, A, dtype=torch.bool, device=self.device)
+        if n_reset > 0:
+            # --- Agents spawn at bottom middle of map, facing north ---
+            center_x = (self.low + self.high) / 2.0
+            bottom_y = self.low + 0.05  # 50 km from bottom edge
+            spacing = 0.02  # 20 km between agents
 
-        # --- Radars: top half of map, not too close to borders ---
-        if self._layouts is not None:
-            # Use pre-generated deterministic layouts (cycle through them)
-            for b in range(B):
-                layout_idx = b % len(self._layouts)
-                self.radar_pos[b] = self._layouts[layout_idx].to(self.device)
-        else:
-            # Fully random radar positions in top half with margin
-            margin = 0.1  # 100 km from borders
-            self.radar_pos[..., 0] = (self.low + margin
-                + (self.high - self.low - 2 * margin)
-                * torch.rand(B, R, device=self.device, generator=self._rng))
-            self.radar_pos[..., 1] = (0.5
-                + (self.high - 0.5 - margin)
-                * torch.rand(B, R, device=self.device, generator=self._rng))
+            agent_pos_reset = torch.zeros(n_reset, A, 2, device=self.device)
+            for a in range(A):
+                offset_x = (a - (A - 1) / 2.0) * spacing
+                agent_pos_reset[:, a, 0] = center_x + offset_x
+                agent_pos_reset[:, a, 1] = bottom_y
+            self.agent_pos[reset_idx] = agent_pos_reset
 
-        # Spawn targets relative to radars (strategic zone logic)
-        self.target_pos = self._spawn_targets_in_valid_zones(B, T, R, self.radar_pos)
-        self.target_alive = torch.ones(B, T, dtype=torch.bool, device=self.device)
-        self.radar_eff_range = torch.full((B, R), self.radar_range, device=self.device)
-        self.step_count.zero_()
-        self._episode_team_reward.zero_()
+            self.agent_heading[reset_idx] = math.pi / 2.0  # Face north
 
-        # Initialise previous distances for striker progress reward
-        if self.n_strikers > 0 and self.n_targets > 0:
-            rel_st_init = self.target_pos[:, None, :, :] - self.agent_pos[:, :self.n_strikers, None, :]
-            self._striker_prev_dist = torch.linalg.norm(rel_st_init, dim=-1)  # [B, ns, T]
-        else:
-            self._striker_prev_dist = torch.zeros(B, self.n_strikers, T, device=self.device)
+            # Initialize at minimum speed (aircraft can't hover)
+            speed_reset = torch.zeros(n_reset, A, device=self.device)
+            speed_reset[:, :self.n_strikers] = self.striker.v_min
+            speed_reset[:, self.n_strikers:] = self.jammer.v_min
+            self.agent_speed[reset_idx] = speed_reset
+            self.agent_heading_rate[reset_idx] = 0.0
+            self.agent_alive[reset_idx] = True
 
-        # Initialise previous distances for jammer progress reward
-        if self.n_jammers > 0 and self.n_radars > 0:
-            rel_jr_init = self.radar_pos[:, None, :, :] - self.agent_pos[:, self.n_strikers:, None, :]
-            self._jammer_prev_dist = torch.linalg.norm(rel_jr_init, dim=-1)  # [B, nj, R]
-        else:
-            self._jammer_prev_dist = torch.zeros(B, self.n_jammers, R, device=self.device)
+            # --- Radars: top half of map, not too close to borders ---
+            radar_pos_reset = torch.zeros(n_reset, R, 2, device=self.device)
+            if self._layouts is not None:
+                # Use pre-generated deterministic layouts (cycle through them)
+                for i, env_i in enumerate(reset_idx.tolist()):
+                    layout_idx = env_i % len(self._layouts)
+                    radar_pos_reset[i] = self._layouts[layout_idx].to(self.device)
+            else:
+                # Fully random radar positions in top half with margin
+                margin = 0.1  # 100 km from borders
+                radar_pos_reset[..., 0] = (self.low + margin
+                    + (self.high - self.low - 2 * margin)
+                    * torch.rand(n_reset, R, device=self.device, generator=self._rng))
+                radar_pos_reset[..., 1] = (0.5
+                    + (self.high - 0.5 - margin)
+                    * torch.rand(n_reset, R, device=self.device, generator=self._rng))
+            self.radar_pos[reset_idx] = radar_pos_reset
+
+            # Spawn targets relative to radars (strategic zone logic)
+            target_pos_reset = self._spawn_targets_in_valid_zones(n_reset, T, R, radar_pos_reset)
+            self.target_pos[reset_idx] = target_pos_reset
+            self.target_alive[reset_idx] = True
+            self.radar_eff_range[reset_idx] = self.radar_range
+            self.step_count[reset_idx] = 0
+            self._episode_team_reward[reset_idx] = 0.0
+
+            # Initialise previous distances for striker progress reward
+            if self.n_strikers > 0 and self.n_targets > 0:
+                rel_st_init = self.target_pos[reset_idx, None, :, :] - self.agent_pos[reset_idx, :self.n_strikers, None, :]
+                self._striker_prev_dist[reset_idx] = torch.linalg.norm(rel_st_init, dim=-1)  # [n_reset, ns, T]
+            else:
+                self._striker_prev_dist[reset_idx] = 0.0
+
+            # Initialise previous distances for jammer progress reward
+            if self.n_jammers > 0 and self.n_radars > 0:
+                rel_jr_init = self.radar_pos[reset_idx, None, :, :] - self.agent_pos[reset_idx, self.n_strikers:, None, :]
+                self._jammer_prev_dist[reset_idx] = torch.linalg.norm(rel_jr_init, dim=-1)  # [n_reset, nj, R]
+            else:
+                self._jammer_prev_dist[reset_idx] = 0.0
 
         td = TensorDict({}, batch_size=[B], device=self.device)
         td.set(self._obs_key, self._build_local_obs())
