@@ -31,11 +31,11 @@ class RewardConfig:
     """
 
     # ─── SPARSE TEAM REWARDS ─────────────────────────────────────────────────
-    target_destroyed: float = 1
+    target_destroyed: float = 3
     # Reward when a target is killed.
     # Distribution controlled by team_spirit parameter (see below).
 
-    timestep_penalty: float = 0
+    timestep_penalty: float = -0.05
     # Per-step cost per alive agent. Kept low relative to approach reward
     # so the per-step signal is clearly positive when approaching.
     # Over 50 steps × 2 agents = −5 total (10% of kill reward).
@@ -79,9 +79,9 @@ class RewardConfig:
     # from ANY starting position. w_lin=0.5 ensures the linear-region reward
     # exceeds the timestep penalty even at mid-map distances:
     #   f(0.5) = 0.5 × (1.0−0.5)/(1.0−0.15) = 0.29 > 0.05 ✓
-    striker_approach_w_lin:  float = 0
+    striker_approach_w_lin:  float = 0.1
     striker_approach_w_exp:  float = 0    # strong pull into engage range
-    striker_approach_d_max:  float = 0    # spans FULL map width (was 0.5)
+    striker_approach_d_max:  float = 1    # spans FULL map width (was 0.5)
     striker_approach_d_knee: float = 0   # exponential onset near engage range (0.10)
     striker_approach_alpha:  float = 0
     striker_nearest_only:    bool  = True
