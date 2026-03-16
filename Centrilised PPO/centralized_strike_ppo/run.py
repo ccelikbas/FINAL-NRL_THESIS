@@ -115,6 +115,7 @@ def main() -> None:
     print(f"\nSaved checkpoint to: {save_path}")
     if logs["eval_mean_episode_total_reward"]:
         print("Last metrics:")
+        print(f"  train_mean_episode_total_reward = {logs['train_mean_episode_total_reward'][-1]:.4f}")
         print(f"  eval_mean_episode_total_reward = {logs['eval_mean_episode_total_reward'][-1]:.4f}")
         print(f"  eval_task_completion_rate      = {logs['eval_task_completion_rate'][-1]:.4f}")
         print(f"  eval_survival_rate             = {logs['eval_survival_rate'][-1]:.4f}")

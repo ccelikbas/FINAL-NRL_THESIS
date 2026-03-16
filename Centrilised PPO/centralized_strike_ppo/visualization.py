@@ -35,9 +35,11 @@ def _deterministic_context():
 def plot_training(logs: Dict[str, List[float]]) -> None:
     fig, axes = plt.subplots(1, 3, figsize=(15, 4))
 
+    if "train_mean_episode_total_reward" in logs:
+        axes[0].plot(logs["train_mean_episode_total_reward"], label="train_ep_return_total")
     if "eval_mean_episode_total_reward" in logs:
         axes[0].plot(logs["eval_mean_episode_total_reward"], label="eval_ep_return_total")
-    axes[0].set_title("Mission Evaluation")
+    axes[0].set_title("Episode Return")
     axes[0].set_xlabel("Iteration")
     axes[0].legend()
     axes[0].grid(True)

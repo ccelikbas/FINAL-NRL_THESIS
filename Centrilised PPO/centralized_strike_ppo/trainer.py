@@ -198,6 +198,7 @@ def train_centralized_ppo(
     critic_optim = optim.Adam(critic.parameters(), lr=ppo_cfg.critic_lr)
 
     logs: Dict[str, List[float]] = {
+        "train_mean_episode_total_reward": [],
         "loss_policy": [],
         "loss_value": [],
         "entropy": [],
@@ -294,8 +295,20 @@ def train_centralized_ppo(
             print("policy weight update failed (continuing)")
             pass
 
+        # Training rollout mission return (not evaluation):
+        # mean over completed episodes in this iteration,
+        # where episode reward is the team-sum across all agents.
+        train_ep_stats = base_env.pop_episode_stats()
+        if train_ep_stats:
+            train_mean_episode_total_reward = (
+                sum(s["episode_total_reward"] for s in train_ep_stats) / len(train_ep_stats)
+            )
+        else:
+            train_mean_episode_total_reward = float("nan")
+
         # Algorithm-performance logs (training optimization statistics)
         div = max(1, n_updates)
+        logs["train_mean_episode_total_reward"].append(train_mean_episode_total_reward)
         logs["loss_policy"].append(pol_acc / div)
         logs["loss_value"].append(val_acc / div)
         logs["entropy"].append(ent_acc / div)
@@ -319,6 +332,7 @@ def train_centralized_ppo(
         if do_eval:
             print(
                 f"Iter {it + 1:4d}/{ppo_cfg.n_iters} | "
+                f"train_ep_return_total {logs['train_mean_episode_total_reward'][-1]: .3f} | "
                 f"eval_ep_return_total {logs['eval_mean_episode_total_reward'][-1]: .3f} | "
                 f"eval_completion {logs['eval_task_completion_rate'][-1]:.2f} | "
                 f"eval_survival {logs['eval_survival_rate'][-1]:.2f} | "
