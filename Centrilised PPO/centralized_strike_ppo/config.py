@@ -56,7 +56,7 @@ class EnvConfig:
 @dataclass
 class PPOConfig:
     num_envs: int = 256
-    n_iters: int = 300
+    n_iters: int = 100
     frames_per_batch: Optional[int] = None
     num_epochs: int = 6
     minibatch_size: int = 2048
@@ -67,7 +67,7 @@ class PPOConfig:
     entropy_coef: float = 1e-3
 
     actor_lr: float = 3e-4
-    critic_lr: float = 3e-4
+    critic_lr: float = 1e-3
     max_grad_norm: float = 1.0
 
     seed: int = 0

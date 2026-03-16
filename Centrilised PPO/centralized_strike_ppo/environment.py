@@ -743,7 +743,7 @@ class StrikeEA2DEnv(EnvBase):
             "formation":          formation_full.detach(),
             "agent_destroyed":    death_pen_full.detach(),
         }
-
+        
         reward = reward.unsqueeze(-1).contiguous()  # [B, A, 1]
 
         # Accumulate team-total reward per env for episode-level logging
