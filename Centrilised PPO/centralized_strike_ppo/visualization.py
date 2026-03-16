@@ -33,31 +33,41 @@ def _deterministic_context():
 
 
 def plot_training(logs: Dict[str, List[float]]) -> None:
+    def _plot_valid(ax, series: List[float], label: str):
+        y = np.asarray(series, dtype=float)
+        if y.size == 0:
+            return
+        x = np.arange(1, y.size + 1)
+        valid = np.isfinite(y)
+        if not np.any(valid):
+            return
+        ax.plot(x[valid], y[valid], marker="o", markersize=3, label=label)
+
     fig, axes = plt.subplots(2, 3, figsize=(18, 8))
 
     # --- Training plots ---
     if "train_mean_episode_total_reward" in logs:
-        axes[0, 0].plot(logs["train_mean_episode_total_reward"], label="train_ep_return_total")
+        _plot_valid(axes[0, 0], logs["train_mean_episode_total_reward"], "train_ep_return_total")
     axes[0, 0].set_title("Training Episode Reward")
     axes[0, 0].set_xlabel("Iteration")
     axes[0, 0].legend()
     axes[0, 0].grid(True)
 
     if "loss_policy" in logs:
-        axes[0, 1].plot(logs["loss_policy"], label="policy_loss")
+        _plot_valid(axes[0, 1], logs["loss_policy"], "policy_loss")
     if "loss_value" in logs:
-        axes[0, 1].plot(logs["loss_value"], label="value_loss")
+        _plot_valid(axes[0, 1], logs["loss_value"], "value_loss")
     axes[0, 1].set_title("Policy & Value Loss")
     axes[0, 1].set_xlabel("Iteration")
     axes[0, 1].legend()
     axes[0, 1].grid(True)
 
     if "entropy" in logs:
-        axes[0, 2].plot(logs["entropy"], label="entropy")
+        _plot_valid(axes[0, 2], logs["entropy"], "entropy")
     if "approx_kl" in logs:
-        axes[0, 2].plot(logs["approx_kl"], label="kl_divergence")
+        _plot_valid(axes[0, 2], logs["approx_kl"], "kl_divergence")
     if "clip_ratio" in logs:
-        axes[0, 2].plot(logs["clip_ratio"], label="clip_ratio")
+        _plot_valid(axes[0, 2], logs["clip_ratio"], "clip_ratio")
     axes[0, 2].set_title("Entropy, KL, Clip Ratio")
     axes[0, 2].set_xlabel("Iteration")
     axes[0, 2].legend()
@@ -65,23 +75,23 @@ def plot_training(logs: Dict[str, List[float]]) -> None:
 
     # --- Evaluation plots ---
     if "eval_mean_episode_total_reward" in logs:
-        axes[1, 0].plot(logs["eval_mean_episode_total_reward"], label="eval_ep_return_total")
+        _plot_valid(axes[1, 0], logs["eval_mean_episode_total_reward"], "eval_ep_return_total")
     axes[1, 0].set_title("Eval Episode Return")
     axes[1, 0].set_xlabel("Iteration")
     axes[1, 0].legend()
     axes[1, 0].grid(True)
 
     if "eval_survival_rate" in logs:
-        axes[1, 1].plot(logs["eval_survival_rate"], label="eval_survival_ratio")
+        _plot_valid(axes[1, 1], logs["eval_survival_rate"], "eval_survival_ratio")
     if "eval_task_completion_rate" in logs:
-        axes[1, 1].plot(logs["eval_task_completion_rate"], label="eval_completion_ratio")
+        _plot_valid(axes[1, 1], logs["eval_task_completion_rate"], "eval_completion_ratio")
     axes[1, 1].set_title("Eval Survival & Completion")
     axes[1, 1].set_xlabel("Iteration")
     axes[1, 1].legend()
     axes[1, 1].grid(True)
 
     if "eval_mean_duration" in logs:
-        axes[1, 2].plot(logs["eval_mean_duration"], label="eval_mission_duration")
+        _plot_valid(axes[1, 2], logs["eval_mean_duration"], "eval_mission_duration")
     axes[1, 2].set_title("Eval Mission Duration")
     axes[1, 2].set_xlabel("Iteration")
     axes[1, 2].legend()
