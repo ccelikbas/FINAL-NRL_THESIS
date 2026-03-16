@@ -306,7 +306,7 @@ def train_centralized_ppo(
         else:
             train_mean_episode_total_reward = float("nan")
 
-        # Algorithm-performance logs (training optimization statistics)
+        # Algorithm-performance logs (during training, not evaluation). Averaged over all updates in this iteration.
         div = max(1, n_updates)
         logs["train_mean_episode_total_reward"].append(train_mean_episode_total_reward)
         logs["loss_policy"].append(pol_acc / div)
@@ -315,9 +315,10 @@ def train_centralized_ppo(
         logs["approx_kl"].append(kl_acc / div)
         logs["clip_ratio"].append(clip_acc / div)
 
-        # Mission-level evaluation logs (current policy, deterministic rollout)
+        # Mission-level evaluation logs: separate from training itterations
         do_eval = bool(ppo_cfg.log_every) and ((it + 1) % ppo_cfg.log_every == 0)
         if do_eval:
+            # Run several episodes using current policy (deterministic) in a separate evaluation environment and log mission level metrics
             eval_metrics = evaluate_current_policy(actor, env_cfg, ppo_cfg)
             logs["eval_mean_episode_total_reward"].append(eval_metrics["eval_mean_episode_total_reward"])
             logs["eval_survival_rate"].append(eval_metrics["eval_survival_rate"])
@@ -329,6 +330,7 @@ def train_centralized_ppo(
             logs["eval_mean_duration"].append(float("nan"))
             logs["eval_task_completion_rate"].append(float("nan"))
 
+        # Print logs for this iteration
         if do_eval:
             print(
                 f"Iter {it + 1:4d}/{ppo_cfg.n_iters} | "
