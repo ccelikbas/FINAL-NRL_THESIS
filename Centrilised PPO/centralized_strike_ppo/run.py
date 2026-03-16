@@ -120,7 +120,8 @@ def main() -> None:
         print(f"  eval_task_completion_rate      = {logs['eval_task_completion_rate'][-1]:.4f}")
         print(f"  eval_survival_rate             = {logs['eval_survival_rate'][-1]:.4f}")
         print(f"  eval_mean_duration             = {logs['eval_mean_duration'][-1]:.4f}")
-        print(f"  clip_ratio                = {logs['clip_ratio'][-1]:.4f}")
+        print(f"  clip_ratio                     = {logs['clip_ratio'][-1]:.4f}")
+        print(f"  explained_variance             = {logs['explained_variance'][-1]:.4f}")
 
     if not args.no_plot:
         try:

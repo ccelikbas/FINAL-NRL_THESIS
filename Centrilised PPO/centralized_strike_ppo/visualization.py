@@ -68,7 +68,9 @@ def plot_training(logs: Dict[str, List[float]]) -> None:
         _plot_valid(axes[0, 2], logs["approx_kl"], "kl_divergence")
     if "clip_ratio" in logs:
         _plot_valid(axes[0, 2], logs["clip_ratio"], "clip_ratio")
-    axes[0, 2].set_title("Entropy, KL, Clip Ratio")
+    if "explained_variance" in logs:
+        _plot_valid(axes[0, 2], logs["explained_variance"], "explained_variance")
+    axes[0, 2].set_title("Entropy, KL, Clip, EV")
     axes[0, 2].set_xlabel("Iteration")
     axes[0, 2].legend()
     axes[0, 2].grid(True)

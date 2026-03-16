@@ -76,6 +76,25 @@ def _safe_check(env) -> None:
         print(f"check_env_specs warning (continuing): {type(exc).__name__}: {exc}")
 
 
+def _compute_explained_variance(returns: torch.Tensor, predictions: torch.Tensor) -> float:
+    """EV = 1 - Var(returns - predictions) / Var(returns)."""
+    r = returns.detach().reshape(-1)
+    v = predictions.detach().reshape(-1)
+    finite = torch.isfinite(r) & torch.isfinite(v)
+    if not bool(finite.any()):
+        return float("nan")
+
+    r = r[finite]
+    v = v[finite]
+    var_r = torch.var(r, unbiased=False)
+    if float(var_r.item()) <= 1e-12:
+        return float("nan")
+
+    var_err = torch.var(r - v, unbiased=False)
+    ev = 1.0 - (var_err / var_r)
+    return float(ev.item())
+
+
 @torch.no_grad()
 def evaluate_current_policy(
     actor,
@@ -120,30 +139,30 @@ def evaluate_current_policy(
     ep_duration: List[float] = []
     ep_completion: List[float] = []
 
-    with _deterministic_context():
-        for _ in range(max(1, int(n_eval_episodes))):
-            td = eval_env.reset()
+    # with _deterministic_context():
+    for _ in range(max(1, int(n_eval_episodes))):
+        td = eval_env.reset()
 
-            for _step in range(env_cfg.max_steps):
-                td = actor(td)
-                td_next = eval_env.step(td)
-                done = bool(td_next.get("done")[0, 0].item())
-                if done:
-                    break
-                td = td_next.get("next")
+        for _step in range(env_cfg.max_steps):
+            td = actor(td)
+            td_next = eval_env.step(td)
+            done = bool(td_next.get("done")[0, 0].item())
+            if done:
+                break
+            td = td_next.get("next")
 
-            stats = eval_env.pop_episode_stats()
-            if stats:
-                s = stats[-1]
-                ep_total_rewards.append(float(s.get("episode_total_reward", float("nan"))))
-                ep_survival.append(float(s.get("survival_frac", float("nan"))))
-                ep_duration.append(float(s.get("duration", float("nan"))))
-                ep_completion.append(1.0 if bool(s.get("mission_complete", False)) else 0.0)
-            else:
-                ep_total_rewards.append(float("nan"))
-                ep_survival.append(float("nan"))
-                ep_duration.append(float("nan"))
-                ep_completion.append(float("nan"))
+        stats = eval_env.pop_episode_stats()
+        if stats:
+            s = stats[-1]
+            ep_total_rewards.append(float(s.get("episode_total_reward", float("nan"))))
+            ep_survival.append(float(s.get("survival_frac", float("nan"))))
+            ep_duration.append(float(s.get("duration", float("nan"))))
+            ep_completion.append(1.0 if bool(s.get("mission_complete", False)) else 0.0)
+        else:
+            ep_total_rewards.append(float("nan"))
+            ep_survival.append(float("nan"))
+            ep_duration.append(float("nan"))
+            ep_completion.append(float("nan"))
 
     return {
         "eval_mean_episode_total_reward": float(sum(ep_total_rewards) / len(ep_total_rewards)),
@@ -201,6 +220,7 @@ def train_centralized_ppo(
         "train_mean_episode_total_reward": [],
         "loss_policy": [],
         "loss_value": [],
+        "explained_variance": [],
         "entropy": [],
         "approx_kl": [],
         "clip_ratio": [],
@@ -296,8 +316,7 @@ def train_centralized_ppo(
             pass
 
         # Training rollout mission return (not evaluation):
-        # mean over completed episodes in this iteration,
-        # where episode reward is the team-sum across all agents.
+        # mean over completed episodes in this iteration, where episode reward is the team-sum across all agents.
         train_ep_stats = base_env.pop_episode_stats()
         if train_ep_stats:
             train_mean_episode_total_reward = (
@@ -308,9 +327,19 @@ def train_centralized_ppo(
 
         # Algorithm-performance logs (during training, not evaluation). Averaged over all updates in this iteration.
         div = max(1, n_updates)
+
+        try:
+            explained_variance = _compute_explained_variance(
+                td.get("value_target"),
+                td.get((base_env.group, "state_value")),
+            )
+        except Exception:
+            explained_variance = float("nan")
+
         logs["train_mean_episode_total_reward"].append(train_mean_episode_total_reward)
         logs["loss_policy"].append(pol_acc / div)
         logs["loss_value"].append(val_acc / div)
+        logs["explained_variance"].append(explained_variance)
         logs["entropy"].append(ent_acc / div)
         logs["approx_kl"].append(kl_acc / div)
         logs["clip_ratio"].append(clip_acc / div)
@@ -342,6 +371,7 @@ def train_centralized_ppo(
                 f"clip_ratio {logs['clip_ratio'][-1]:.4f} | "
                 f"policy {logs['loss_policy'][-1]:.4f} | "
                 f"value {logs['loss_value'][-1]:.4f} | "
+                f"ev {logs['explained_variance'][-1]:.4f} | "
                 f"entropy {logs['entropy'][-1]:.4f}"
             )
 
