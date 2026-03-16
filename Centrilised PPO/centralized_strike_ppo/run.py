@@ -116,9 +116,8 @@ def main() -> None:
     if logs["mean_episode_total_reward"]:
         print("Last metrics:")
         print(f"  mean_episode_total_reward = {logs['mean_episode_total_reward'][-1]:.4f}")
-        print(f"  completion_rate           = {logs['completion_rate'][-1]:.4f}")
         print(f"  survival_rate             = {logs['survival_rate'][-1]:.4f}")
-        print(f"  mean_targets_frac         = {logs['mean_targets_frac'][-1]:.4f}")
+        print(f"  clip_ratio                = {logs['clip_ratio'][-1]:.4f}")
 
     if not args.no_plot:
         try:

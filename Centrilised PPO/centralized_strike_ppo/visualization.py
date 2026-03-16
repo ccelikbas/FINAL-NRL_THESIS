@@ -50,13 +50,11 @@ def plot_training(logs: Dict[str, List[float]]) -> None:
     axes[1].legend()
     axes[1].grid(True)
 
-    if "completion_rate" in logs:
-        axes[2].plot(logs["completion_rate"], label="completion")
     if "survival_rate" in logs:
         axes[2].plot(logs["survival_rate"], label="survival")
-    if "mean_targets_frac" in logs:
-        axes[2].plot(logs["mean_targets_frac"], label="targets")
-    axes[2].set_title("Mission Metrics")
+    if "clip_ratio" in logs:
+        axes[2].plot(logs["clip_ratio"], label="clip_ratio")
+    axes[2].set_title("Diagnostics")
     axes[2].set_xlabel("Iteration")
     axes[2].legend()
     axes[2].grid(True)

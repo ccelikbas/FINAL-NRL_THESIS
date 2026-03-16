@@ -31,16 +31,16 @@ class RewardConfig:
     """
 
     # ─── SPARSE TEAM REWARDS ─────────────────────────────────────────────────
-    target_destroyed: float = 10
+    target_destroyed: float = 1
     # Reward when a target is killed.
     # Distribution controlled by team_spirit parameter (see below).
 
-    timestep_penalty: float = -0.1
+    timestep_penalty: float = 0
     # Per-step cost per alive agent. Kept low relative to approach reward
     # so the per-step signal is clearly positive when approaching.
     # Over 50 steps × 2 agents = −5 total (10% of kill reward).
 
-    agent_destroyed: float = -10
+    agent_destroyed: float = 0
     # Penalty applied when an agent is killed by a radar.
     # Distribution controlled by team_spirit parameter (see below).
 
@@ -59,10 +59,10 @@ class RewardConfig:
 
     # ─── BORDER AVOIDANCE  (piecewise lin-exp penalty, per alive agent) ──────
     # d = distance from nearest map edge.  d_max = border_thresh (EnvConfig).
-    border_w_lin:  float = 0.1   # gentle early-warning ramp (50 km → 30 km from edge)
-    border_w_exp:  float = 0.3
-    border_d_knee: float = 0.03   # 30 km from edge → exponential kicks in
-    border_alpha:  float = 2
+    border_w_lin:  float = 0   # gentle early-warning ramp (50 km → 30 km from edge)
+    border_w_exp:  float = 0
+    border_d_knee: float = 0   # 30 km from edge → exponential kicks in
+    border_alpha:  float = 0
 
     # ─── RADAR ZONE AVOIDANCE  (piecewise lin-exp penalty, ALL agents) ───────
     # d = distance from *effective* radar zone boundary (adapts when jammed).

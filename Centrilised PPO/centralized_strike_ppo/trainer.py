@@ -101,11 +101,9 @@ def train_centralized_ppo(
         "loss_value": [],
         "entropy": [],
         "approx_kl": [],
-        "clip_fraction": [],
-        "completion_rate": [],
+        "clip_ratio": [],
         "survival_rate": [],
         "mean_duration": [],
-        "mean_targets_frac": [],
     }
 
     n_agents = base_env.n_agents
@@ -176,19 +174,15 @@ def train_centralized_ppo(
         except Exception:
             pass
 
-        try:
-            done_mask = td.get(("next", base_env.group, "done"))
-            ep_rew = td.get(("next", base_env.group, "episode_reward"))[done_mask]
-        except Exception:
-            ep_rew = torch.tensor([], device=device)
-
-        if ep_rew.numel() > 0 and ep_rew.numel() % n_agents == 0:
-            team_totals = ep_rew.view(-1, n_agents).sum(dim=-1)
-            ep_total_mean = float(torch.nanmean(team_totals).item())
-        elif ep_rew.numel() > 0:
-            ep_total_mean = float(torch.nanmean(ep_rew).item()) * n_agents
+        ep_stats = base_env.pop_episode_stats()
+        if ep_stats:
+            ep_total_mean = sum(s["episode_total_reward"] for s in ep_stats) / len(ep_stats)
+            survival_rate = sum(s["survival_frac"] for s in ep_stats) / len(ep_stats)
+            mean_duration = sum(s["duration"] for s in ep_stats) / len(ep_stats)
         else:
             ep_total_mean = float("nan")
+            survival_rate = float("nan")
+            mean_duration = float("nan")
 
         div = max(1, n_updates)
         logs["mean_episode_total_reward"].append(ep_total_mean)
@@ -196,32 +190,16 @@ def train_centralized_ppo(
         logs["loss_value"].append(val_acc / div)
         logs["entropy"].append(ent_acc / div)
         logs["approx_kl"].append(kl_acc / div)
-        logs["clip_fraction"].append(clip_acc / div)
-
-        ep_stats = base_env.pop_episode_stats()
-        if ep_stats:
-            completion_rate = sum(s["mission_complete"] for s in ep_stats) / len(ep_stats)
-            survival_rate = sum(s["survival_frac"] for s in ep_stats) / len(ep_stats)
-            mean_duration = sum(s["duration"] for s in ep_stats) / len(ep_stats)
-            mean_targets_frac = sum(s["targets_frac"] for s in ep_stats) / len(ep_stats)
-        else:
-            completion_rate = float("nan")
-            survival_rate = float("nan")
-            mean_duration = float("nan")
-            mean_targets_frac = float("nan")
-
-        logs["completion_rate"].append(completion_rate)
+        logs["clip_ratio"].append(clip_acc / div)
         logs["survival_rate"].append(survival_rate)
         logs["mean_duration"].append(mean_duration)
-        logs["mean_targets_frac"].append(mean_targets_frac)
 
         if ppo_cfg.log_every and (it + 1) % ppo_cfg.log_every == 0:
             print(
                 f"Iter {it + 1:4d}/{ppo_cfg.n_iters} | "
                 f"ep_return_total {ep_total_mean: .3f} | "
-                f"targets {mean_targets_frac:.2f} | "
-                f"complete {completion_rate:.2f} | "
                 f"survival {survival_rate:.2f} | "
+                f"clip_ratio {logs['clip_ratio'][-1]:.4f} | "
                 f"policy {logs['loss_policy'][-1]:.4f} | "
                 f"value {logs['loss_value'][-1]:.4f} | "
                 f"entropy {logs['entropy'][-1]:.4f}"

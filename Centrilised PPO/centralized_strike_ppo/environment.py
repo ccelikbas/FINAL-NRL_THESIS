@@ -168,6 +168,8 @@ class StrikeEA2DEnv(EnvBase):
         self._striker_prev_dist = torch.zeros(B, n_strikers, n_targets, device=self._device)
         # Previous jammer→radar distances for progress reward (potential-based shaping)
         self._jammer_prev_dist = torch.zeros(B, n_jammers, n_radars, device=self._device)
+        # Running team-total reward per env for current episode (sum over agents)
+        self._episode_team_reward = torch.zeros(B, device=self.device)
 
         # Episode outcome tracking (bypasses tensordict auto-reset overwrite)
         self._completed_episodes: list = []
@@ -367,6 +369,7 @@ class StrikeEA2DEnv(EnvBase):
         self.target_alive = torch.ones(B, T, dtype=torch.bool, device=self.device)
         self.radar_eff_range = torch.full((B, R), self.radar_range, device=self.device)
         self.step_count.zero_()
+        self._episode_team_reward.zero_()
 
         # Initialise previous distances for striker progress reward
         if self.n_strikers > 0 and self.n_targets > 0:
@@ -743,6 +746,10 @@ class StrikeEA2DEnv(EnvBase):
 
         reward = reward.unsqueeze(-1).contiguous()  # [B, A, 1]
 
+        # Accumulate team-total reward per env for episode-level logging
+        step_team_reward = reward.squeeze(-1).sum(dim=-1)  # [B]
+        self._episode_team_reward += step_team_reward
+
         # ---- done flags ----
         self.step_count += 1
         all_targets_done = (~self.target_alive).all(dim=-1, keepdim=True)
@@ -770,7 +777,11 @@ class StrikeEA2DEnv(EnvBase):
                         "targets_frac": tgt_frac,
                         "survival_frac": surv_frac,
                         "duration": int(self.step_count[b, 0].item()),
+                        "episode_total_reward": float(self._episode_team_reward[b].item()),
                     })
+
+            # Avoid duplicate logging if terminal envs are stepped again before reset
+            self._episode_team_reward[done.squeeze(-1)] = 0.0
 
         return next_td
 
@@ -783,7 +794,8 @@ class StrikeEA2DEnv(EnvBase):
 
         Each entry is a dict with keys:
           mission_complete (bool), targets_frac (float),
-          survival_frac (float), duration (int).
+                    survival_frac (float), duration (int),
+                    episode_total_reward (float).
         """
         stats = self._completed_episodes
         self._completed_episodes = []

@@ -56,7 +56,7 @@ class EnvConfig:
 @dataclass
 class PPOConfig:
     num_envs: int = 128
-    n_iters: int = 30
+    n_iters: int = 150
     frames_per_batch: Optional[int] = None
     num_epochs: int = 4
     minibatch_size: int = 2048
