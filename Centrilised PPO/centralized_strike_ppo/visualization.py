@@ -35,10 +35,11 @@ def _deterministic_context():
 def plot_training(logs: Dict[str, List[float]]) -> None:
     fig, axes = plt.subplots(1, 3, figsize=(15, 4))
 
-    if "mean_episode_total_reward" in logs:
-        axes[0].plot(logs["mean_episode_total_reward"])
-    axes[0].set_title("Episode Total Reward")
+    if "eval_mean_episode_total_reward" in logs:
+        axes[0].plot(logs["eval_mean_episode_total_reward"], label="eval_ep_return_total")
+    axes[0].set_title("Mission Evaluation")
     axes[0].set_xlabel("Iteration")
+    axes[0].legend()
     axes[0].grid(True)
 
     if "loss_policy" in logs:
@@ -50,11 +51,15 @@ def plot_training(logs: Dict[str, List[float]]) -> None:
     axes[1].legend()
     axes[1].grid(True)
 
-    if "survival_rate" in logs:
-        axes[2].plot(logs["survival_rate"], label="survival")
+    if "eval_survival_rate" in logs:
+        axes[2].plot(logs["eval_survival_rate"], label="eval_survival")
+    if "eval_task_completion_rate" in logs:
+        axes[2].plot(logs["eval_task_completion_rate"], label="eval_completion")
+    if "eval_mean_duration" in logs:
+        axes[2].plot(logs["eval_mean_duration"], label="eval_duration")
     if "clip_ratio" in logs:
         axes[2].plot(logs["clip_ratio"], label="clip_ratio")
-    axes[2].set_title("Diagnostics")
+    axes[2].set_title("Eval + Diagnostics")
     axes[2].set_xlabel("Iteration")
     axes[2].legend()
     axes[2].grid(True)

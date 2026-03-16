@@ -113,10 +113,12 @@ def main() -> None:
         save_path,
     )
     print(f"\nSaved checkpoint to: {save_path}")
-    if logs["mean_episode_total_reward"]:
+    if logs["eval_mean_episode_total_reward"]:
         print("Last metrics:")
-        print(f"  mean_episode_total_reward = {logs['mean_episode_total_reward'][-1]:.4f}")
-        print(f"  survival_rate             = {logs['survival_rate'][-1]:.4f}")
+        print(f"  eval_mean_episode_total_reward = {logs['eval_mean_episode_total_reward'][-1]:.4f}")
+        print(f"  eval_task_completion_rate      = {logs['eval_task_completion_rate'][-1]:.4f}")
+        print(f"  eval_survival_rate             = {logs['eval_survival_rate'][-1]:.4f}")
+        print(f"  eval_mean_duration             = {logs['eval_mean_duration'][-1]:.4f}")
         print(f"  clip_ratio                = {logs['clip_ratio'][-1]:.4f}")
 
     if not args.no_plot:
