@@ -100,7 +100,7 @@ def evaluate_current_policy(
     actor,
     env_cfg: EnvConfig,
     ppo_cfg: PPOConfig,
-    n_eval_episodes: int = 10,
+    n_eval_episodes: int = 100,
 ) -> Dict[str, float]:
     eval_env = StrikeEA2DEnv(
         num_envs=1,
@@ -146,14 +146,16 @@ def evaluate_current_policy(
         for _step in range(env_cfg.max_steps):
             td = actor(td)
             td_next = eval_env.step(td)
-            done = bool(td_next.get("done")[0, 0].item())
+            done = bool(td_next.get(("next", "done"))[0, 0].item())
             if done:
                 break
             td = td_next.get("next")
 
         stats = eval_env.pop_episode_stats()
         if stats:
-            s = stats[-1]
+            if len(stats) > 1:
+                print(f"WARNING evaluate_current_policy: multiple episodes ({len(stats)}) detected in one eval pass; using first entry")
+            s = stats[0]
             ep_total_rewards.append(float(s.get("episode_total_reward", float("nan"))))
             ep_survival.append(float(s.get("survival_frac", float("nan"))))
             ep_duration.append(float(s.get("duration", float("nan"))))

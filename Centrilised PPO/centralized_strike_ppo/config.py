@@ -71,7 +71,7 @@ class PPOConfig:
     max_grad_norm: float = 1.0
 
     seed: int = 0
-    log_every: int = 10
+    log_every: int = 5
     device: torch.device = field(default_factory=lambda: torch.device("cuda" if torch.cuda.is_available() else "cpu"))
 
     def __post_init__(self):
