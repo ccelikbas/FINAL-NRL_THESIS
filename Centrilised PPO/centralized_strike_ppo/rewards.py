@@ -31,7 +31,7 @@ class RewardConfig:
     """
 
     # ─── SPARSE TEAM REWARDS ─────────────────────────────────────────────────
-    target_destroyed: float = 50
+    target_destroyed: float = 10
     # Reward when a target is killed.
     # Distribution controlled by team_spirit parameter (see below).
 
@@ -40,7 +40,7 @@ class RewardConfig:
     # so the per-step signal is clearly positive when approaching.
     # Over 50 steps × 2 agents = −5 total (10% of kill reward).
 
-    agent_destroyed: float = -50
+    agent_destroyed: float = -10
     # Penalty applied when an agent is killed by a radar.
     # Distribution controlled by team_spirit parameter (see below).
 
@@ -107,7 +107,7 @@ class RewardConfig:
     # a clear "you moved in the right direction" signal that helps the policy
     # gradient identify which actions reduce distance (especially important
     # with double-integrator heading dynamics).
-    striker_progress_scale: float = 10
+    striker_progress_scale: float = 0
     jammer_progress_scale:  float = 0
 
     # ─── JAMMER ACTIVE-JAMMING BONUS  (deactivated by default) ───────────────

@@ -201,7 +201,7 @@ class TrainConfig:
     #   This means each iteration collects exactly one full episode per environment.
     # OVERRIDE: set an explicit int to control collection size manually.
     
-    n_iters: int = 150
+    n_iters: int = 30
     # Number of collect→update cycles. Each cycle collects frames_per_batch transitions
     # Higher = longer training, potential for better convergence
 

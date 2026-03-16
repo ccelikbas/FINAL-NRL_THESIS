@@ -201,11 +201,11 @@ class StrikeEA2DEnv(EnvBase):
 
     def _compute_obs_dim(self) -> int:
         # Ego-centric relative observations:
-        #   own state:     [speed, heading, heading_rate]                           = 3
+        #   own state:     [x, y, speed, heading, heading_rate, t_norm]             = 6
         #   other agents:  [dist, rel_angle, heading, role] per agent               = (n_agents-1)*4
         #   radars:        [dist, rel_angle, jammed] per radar                      = n_radars*3
         #   targets:       [dist, rel_angle, alive] per target                      = n_targets*3
-        return 3 + (self.n_agents - 1) * 4 + self.n_radars * 3 + self.n_targets * 3
+        return 6 + (self.n_agents - 1) * 4 + self.n_radars * 3 + self.n_targets * 3
 
     def _compute_state_dim(self) -> int:
         A, T, R = self.n_agents, self.n_targets, self.n_radars
@@ -213,7 +213,8 @@ class StrikeEA2DEnv(EnvBase):
         #   Per agent:  (x, y, v, ψ, ω, role, alive)     = 7 × A
         #   Per target: (x, y, alive)                      = 3 × T
         #   Per radar:  (x, y, active, detection_radius)   = 4 × R
-        return 7 * A + 3 * T + 4 * R
+        #   Global:     (t_norm)                           = 1
+        return 7 * A + 3 * T + 4 * R + 1
 
     def _spawn_targets_in_valid_zones(self, B: int, T: int, R: int, radar_pos: torch.Tensor) -> torch.Tensor:
         """
@@ -799,8 +800,9 @@ class StrikeEA2DEnv(EnvBase):
           Per agent i:  (x, y, v, ψ, ω, role, alive)      × A   (7A)
           Per target k: (x, y, alive)                       × T   (3T)
           Per radar r:  (x, y, active, detection_radius)    × R   (4R)
+                    Global:       (t_norm)                                  (1)
 
-        Total dim = 7A + 3T + 4R
+                Total dim = 7A + 3T + 4R + 1
         """
         B    = self.num_envs
         A, T, R = self.n_agents, self.n_targets, self.n_radars
@@ -831,7 +833,10 @@ class StrikeEA2DEnv(EnvBase):
         rdr_feat      = torch.cat([rdr_pos_norm, rdr_active, rdr_range_n], dim=-1) # [B,R,4]
         rdr_flat      = rdr_feat.reshape(B, -1)                                    # [B, 4R]
 
-        return torch.cat([agent_flat, tgt_flat, rdr_flat], dim=-1)
+        # --- Global normalised time feature: t / max_steps ---
+        time_norm = (self.step_count.float() / float(self.max_steps)).clamp(0.0, 1.0)  # [B,1]
+
+        return torch.cat([agent_flat, tgt_flat, rdr_flat, time_norm], dim=-1)
 
     # ------------------------------------------------------------------
     # Ego-centric helpers
@@ -895,20 +900,24 @@ class StrikeEA2DEnv(EnvBase):
         """Ego-centric relative observation per agent.
 
         Layout (per agent):
-          own:     [speed, heading, heading_rate]                        (3)
+          own:     [x, y, speed, heading, heading_rate, t_norm]          (6)
           agents:  [dist, rel_angle, heading, role] × (A-1)             (4 per other agent; zeroed if outside R_obs or dead)
           radars:  [dist, rel_angle, jammed] × R                        (3 per radar; jammed flag zeroed if outside R_obs)
           targets: [dist, rel_angle, alive] × T                         (3 per target; alive flag zeroed if outside R_obs)
-        Total obs_dim = 3 + 4*(A-1) + 3*R + 3*T
+          Total obs_dim = 6 + 4*(A-1) + 3*R + 3*T
         """
         B, A, T, R = self.num_envs, self.n_agents, self.n_targets, self.n_radars
         max_dist = math.hypot(self.high - self.low, self.high - self.low)  # for normalisation
+        world_range = self.high - self.low
 
         # --- Own kinematic state ---
+        pos_norm     = (self.agent_pos - self.low) / world_range                 # [B,A,2] in [0,1]
         speed_norm   = (self.agent_speed / self.v_max).unsqueeze(-1)            # [B,A,1] in ~[0,1]
         heading_norm = (self.agent_heading / math.pi).unsqueeze(-1)             # [B,A,1] in ~[0,2]
         hrate_norm   = (self.agent_heading_rate / self.dpsi_max).unsqueeze(-1)  # [B,A,1] in ~[-1,1]
-        own = torch.cat([speed_norm, heading_norm, hrate_norm], dim=-1)         # [B,A,3]
+        time_norm    = (self.step_count.float() / float(self.max_steps)).clamp(0.0, 1.0)  # [B,1]
+        time_exp     = time_norm.unsqueeze(1).expand(B, A, 1)                    # [B,A,1]
+        own = torch.cat([pos_norm, speed_norm, heading_norm, hrate_norm, time_exp], dim=-1)  # [B,A,6]
 
         # --- Agent role vector (static): strikers = 1, jammers = 0 ---
         role = torch.zeros(A, device=self.device)

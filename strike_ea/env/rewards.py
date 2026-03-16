@@ -59,10 +59,10 @@ class RewardConfig:
 
     # ─── BORDER AVOIDANCE  (piecewise lin-exp penalty, per alive agent) ──────
     # d = distance from nearest map edge.  d_max = border_thresh (EnvConfig).
-    border_w_lin:  float = 0   # gentle early-warning ramp (50 km → 30 km from edge)
-    border_w_exp:  float = 0
-    border_d_knee: float = 0   # 30 km from edge → exponential kicks in
-    border_alpha:  float = 0
+    border_w_lin:  float = 0.1   # gentle early-warning ramp (50 km → 30 km from edge)
+    border_w_exp:  float = 1
+    border_d_knee: float = 0.05   # 30 km from edge → exponential kicks in
+    border_alpha:  float = 2
 
     # ─── RADAR ZONE AVOIDANCE  (piecewise lin-exp penalty, ALL agents) ───────
     # d = distance from *effective* radar zone boundary (adapts when jammed).
@@ -79,11 +79,11 @@ class RewardConfig:
     # from ANY starting position. w_lin=0.5 ensures the linear-region reward
     # exceeds the timestep penalty even at mid-map distances:
     #   f(0.5) = 0.5 × (1.0−0.5)/(1.0−0.15) = 0.29 > 0.05 ✓
-    striker_approach_w_lin:  float = 0
-    striker_approach_w_exp:  float = 0    # strong pull into engage range
-    striker_approach_d_max:  float = 0    # spans FULL map width (was 0.5)
-    striker_approach_d_knee: float = 0   # exponential onset near engage range (0.10)
-    striker_approach_alpha:  float = 0
+    striker_approach_w_lin:  float = 0.5
+    striker_approach_w_exp:  float = 1    # strong pull into engage range
+    striker_approach_d_max:  float = 1    # spans FULL map width (was 0.5)
+    striker_approach_d_knee: float = 0.3   # exponential onset near engage range (0.10)
+    striker_approach_alpha:  float = 1
     striker_nearest_only:    bool  = True
     # True  = reward based only on distance to nearest alive target
     # False = reward = mean over all alive targets (encourages approaching all)
@@ -107,7 +107,7 @@ class RewardConfig:
     # a clear "you moved in the right direction" signal that helps the policy
     # gradient identify which actions reduce distance (especially important
     # with double-integrator heading dynamics).
-    striker_progress_scale: float = 10
+    striker_progress_scale: float = 0
     jammer_progress_scale:  float = 0
 
     # ─── JAMMER ACTIVE-JAMMING BONUS  (deactivated by default) ───────────────

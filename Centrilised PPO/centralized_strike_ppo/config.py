@@ -13,7 +13,7 @@ from .rewards import RewardConfig
 class EnvConfig:
     # Team composition
     n_strikers: int = 1
-    n_jammers: int = 1
+    n_jammers: int = 0
     n_targets: int = 1
     n_radars: int = 1
 
@@ -56,7 +56,7 @@ class EnvConfig:
 @dataclass
 class PPOConfig:
     num_envs: int = 128
-    n_iters: int = 100
+    n_iters: int = 30
     frames_per_batch: Optional[int] = None
     num_epochs: int = 4
     minibatch_size: int = 2048
