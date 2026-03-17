@@ -12,17 +12,17 @@ from .rewards import RewardConfig
 @dataclass
 class EnvConfig:
     # Team composition
-    n_strikers: int = 1
+    n_strikers: int = 2
     n_jammers: int = 0
-    n_targets: int = 1
-    n_radars: int = 1
+    n_targets: int = 2
+    n_radars: int = 2
 
     # World / episode
     world_bounds: Tuple[float, float] = (0.0, 1.0)
     dt: float = 1.0
-    max_steps: int = 50
+    max_steps: int = 60
     n_env_layouts: int = 0
-    target_spawn_angle_range: Tuple[float, float] = (270, 360)
+    target_spawn_angle_range: Tuple[float, float] = (0, 360)
 
     # Kinematics
     v_max: float = 0.02
@@ -56,7 +56,7 @@ class EnvConfig:
 @dataclass
 class PPOConfig:
     num_envs: int = 256
-    n_iters: int = 40
+    n_iters: int = 120
     frames_per_batch: Optional[int] = None
     num_epochs: int = 6
     minibatch_size: int = 2048
@@ -64,14 +64,14 @@ class PPOConfig:
     gamma: float = 0.99
     lmbda: float = 0.95
     clip_eps: float = 0.2
-    entropy_coef: float = 1e-3
+    entropy_coef: float = 0 #1e-3
 
     actor_lr: float = 3e-4
     critic_lr: float = 1e-3
     max_grad_norm: float = 1.0
 
     seed: int = 0
-    log_every: int = 5
+    log_every: int = 10
     device: torch.device = field(default_factory=lambda: torch.device("cuda" if torch.cuda.is_available() else "cpu"))
 
     def __post_init__(self):
@@ -98,3 +98,4 @@ class ExperimentConfig:
         if self.ppo.frames_per_batch is None:
             self.ppo.frames_per_batch = int(self.ppo.num_envs * self.env.max_steps)
         return self
+

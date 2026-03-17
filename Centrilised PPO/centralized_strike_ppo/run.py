@@ -131,10 +131,11 @@ def main() -> None:
 
     if not args.no_animate:
         try:
-            tester = TestRunner(actor, env_cfg=cfg.env, device=cfg.ppo.device, seed=999)
-            frames = tester.rollout()
-            animate_rollout(frames, tester.env)
-            print(f"Visualized rollout with {len(frames)} frames")
+            for _ in range(5):
+                tester = TestRunner(actor, env_cfg=cfg.env, device=cfg.ppo.device, seed=999)
+                frames = tester.rollout()
+                animate_rollout(frames, tester.env)
+                print(f"Visualized rollout with {len(frames)} frames")
         except Exception as exc:
             print(f"animate_rollout warning (continuing): {type(exc).__name__}: {exc}")
 
