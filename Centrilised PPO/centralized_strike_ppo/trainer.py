@@ -132,7 +132,7 @@ def evaluate_current_policy(
         target_spawn_angle_range=env_cfg.target_spawn_angle_range,
         n_env_layouts=env_cfg.n_env_layouts,
     )
-
+    print("stating evaluation")
     actor.eval()
     ep_total_rewards: List[float] = []
     ep_survival: List[float] = []
@@ -165,7 +165,7 @@ def evaluate_current_policy(
             ep_survival.append(float("nan"))
             ep_duration.append(float("nan"))
             ep_completion.append(float("nan"))
-
+    print("ending evaluation")
     return {
         "eval_mean_episode_total_reward": float(sum(ep_total_rewards) / len(ep_total_rewards)),
         "eval_survival_rate": float(sum(ep_survival) / len(ep_survival)),
