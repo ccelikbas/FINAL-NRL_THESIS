@@ -40,12 +40,12 @@ class RewardConfig:
     # so the per-step signal is clearly positive when approaching.
     # Over 50 steps × 2 agents = −5 total (10% of kill reward).
 
-    agent_destroyed: float = 0
+    agent_destroyed: float = -1
     # Penalty applied when an agent is killed by a radar.
     # Distribution controlled by team_spirit parameter (see below).
 
     # ─── TEAM vs INDIVIDUAL REWARD DISTRIBUTION ─────────────────────────────
-    team_spirit: float = 0
+    team_spirit: float = 1
     # Controls how team rewards (target_destroyed, agent_destroyed) are
     # distributed among agents:
     #   1.0 = fully shared equally across all alive agents (cooperative)
@@ -92,9 +92,9 @@ class RewardConfig:
     # Positive reward that increases as jammer gets closer to radars.
     # Matched to striker approach scale so both agents have equally strong
     # gradients pulling them toward their respective objectives.
-    jammer_approach_w_lin:  float = 0    # matched to striker
+    jammer_approach_w_lin:  float = 0.1    # matched to striker
     jammer_approach_w_exp:  float = 0    # moderate exponential near jam range
-    jammer_approach_d_max:  float = 0    # spans full map (was 0.5)
+    jammer_approach_d_max:  float = 1    # spans full map (was 0.5)
     jammer_approach_d_knee: float = 0    # exponential onset inside jam_radius (0.35)
     jammer_approach_alpha:  float = 0
     jammer_nearest_only:    bool  = True

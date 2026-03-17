@@ -12,10 +12,10 @@ from .rewards import RewardConfig
 @dataclass
 class EnvConfig:
     # Team composition
-    n_strikers: int = 2
-    n_jammers: int = 0
-    n_targets: int = 2
-    n_radars: int = 2
+    n_strikers: int = 1
+    n_jammers: int = 1
+    n_targets: int = 1
+    n_radars: int = 1
 
     # World / episode
     world_bounds: Tuple[float, float] = (0.0, 1.0)
@@ -46,7 +46,7 @@ class EnvConfig:
 
     # Threats
     radar_range: float = 0.20
-    radar_kill_probability: float = 0.0
+    radar_kill_probability: float = 1
 
     # Rewards
     border_thresh: float = 0.05
@@ -56,7 +56,7 @@ class EnvConfig:
 @dataclass
 class PPOConfig:
     num_envs: int = 256
-    n_iters: int = 120
+    n_iters: int = 100
     frames_per_batch: Optional[int] = None
     num_epochs: int = 6
     minibatch_size: int = 2048
