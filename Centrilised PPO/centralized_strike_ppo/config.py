@@ -17,7 +17,7 @@ class EnvConfig:
     # Team composition
     n_strikers: int = 1
     n_jammers: int = 1
-    n_targets: int = 1
+    n_targets: int = 2
     n_radars: int = 1
 
     # World / episode
@@ -59,7 +59,7 @@ class EnvConfig:
 @dataclass
 class PPOConfig:
     num_envs: int = 256
-    n_iters: int = 150
+    n_iters: int = 200
     frames_per_batch: Optional[int] = None
     num_epochs: int = 10
     minibatch_size: int = 2048
