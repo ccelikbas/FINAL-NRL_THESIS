@@ -128,6 +128,13 @@ class RewardConfig:
     jammer_formation_scale:     float = 0   # reward to each jammer for being near a striker
     jammer_formation_ref_dist:  float = 0    # distance (map units) beyond which reward = 0
 
+    # ─── OPTIONAL PAPER-STYLE MISSION REWARD ────────────────────────────────
+    # R_mission = -Reward_fn(n_targets_alive, n_targets_initial)
+    #             +Reward_fn(n_agents_alive, n_agents_initial)
+    # Reward is distributed to all currently alive agents each timestep.
+    use_paper_mission_reward: bool = True
+    mission_reward_weight: float = 0.1
+
 
 
 

@@ -786,6 +786,29 @@ class StrikeEA2DEnv(EnvBase):
             reward += death_pen
             death_pen_full = death_pen
 
+        # ------------------------------------------------------------------
+        # 10. Optional paper-style mission reward (separate component)
+        # ------------------------------------------------------------------
+        mission_reward_full = torch.zeros(B, A, device=self.device)
+        if bool(rp.use_paper_mission_reward):
+            n_targets_alive = self.target_alive.float().sum(dim=-1)  # [B]
+            n_agents_alive = self.agent_alive.float().sum(dim=-1)    # [B]
+            n_targets_initial = int(self.n_targets)
+            n_agents_initial = int(self.n_agents)
+
+            def _paper_reward_fn(a: torch.Tensor, b: int) -> torch.Tensor:
+                if b <= 0:
+                    return torch.zeros_like(a)
+                b_f = float(b)
+                raw = (-torch.exp(-a / b_f) - math.exp(-1.0)) / (1.0 - math.exp(-1.0))
+                clipped = torch.maximum(raw, torch.full_like(raw, -10.0))
+                return torch.where(a < b_f, clipped, torch.zeros_like(clipped))
+
+            mission_scalar = -_paper_reward_fn(n_targets_alive, n_targets_initial) + _paper_reward_fn(n_agents_alive, n_agents_initial)
+            mission_contrib = float(rp.mission_reward_weight) * mission_scalar.unsqueeze(-1) * self.agent_alive.float()
+            reward += mission_contrib
+            mission_reward_full = mission_contrib
+
         # Store per-component reward breakdown for diagnostics  (each [B, A])
         self.last_reward_components = {
             "target_destroyed":   target_destroyed_full.detach(),
@@ -799,6 +822,7 @@ class StrikeEA2DEnv(EnvBase):
             "jammer_jam_bonus":   jammer_jam_bonus_full.detach(),
             "formation":          formation_full.detach(),
             "agent_destroyed":    death_pen_full.detach(),
+            "paper_mission":      mission_reward_full.detach(),
         }
         
         reward = reward.unsqueeze(-1).contiguous()  # [B, A, 1]
