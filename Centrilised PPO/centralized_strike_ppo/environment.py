@@ -809,6 +809,43 @@ class StrikeEA2DEnv(EnvBase):
             reward += mission_contrib
             mission_reward_full = mission_contrib
 
+        # ------------------------------------------------------------------
+        # 11. Same-role separation penalty (striker↔striker, jammer↔jammer)
+        # ------------------------------------------------------------------
+        separation_pen_full = torch.zeros(B, A, device=self.device)
+
+        if ns > 1 and float(rp.striker_separation_scale) != 0.0 and float(rp.striker_separation_thresh) > 0.0:
+            striker_pos = self.agent_pos[:, :ns, :]  # [B, ns, 2]
+            d_ss = torch.cdist(striker_pos, striker_pos)  # [B, ns, ns]
+            eye_ss = torch.eye(ns, dtype=torch.bool, device=self.device).unsqueeze(0)
+            striker_alive = self.agent_alive[:, :ns]
+            valid_ss = (
+                striker_alive.unsqueeze(-1)
+                & striker_alive.unsqueeze(-2)
+                & (~eye_ss)
+            )
+            pen_ss = -float(rp.striker_separation_scale) * (1.0 - d_ss / float(rp.striker_separation_thresh)).clamp(min=0.0)
+            pen_ss = torch.where(valid_ss, pen_ss, torch.zeros_like(pen_ss))
+            striker_sep = pen_ss.sum(dim=-1)  # [B, ns]
+            reward[:, :ns] += striker_sep
+            separation_pen_full[:, :ns] += striker_sep
+
+        if nj > 1 and float(rp.jammer_separation_scale) != 0.0 and float(rp.jammer_separation_thresh) > 0.0:
+            jammer_pos = self.agent_pos[:, ns:, :]  # [B, nj, 2]
+            d_jj = torch.cdist(jammer_pos, jammer_pos)  # [B, nj, nj]
+            eye_jj = torch.eye(nj, dtype=torch.bool, device=self.device).unsqueeze(0)
+            jammer_alive = self.agent_alive[:, ns:]
+            valid_jj = (
+                jammer_alive.unsqueeze(-1)
+                & jammer_alive.unsqueeze(-2)
+                & (~eye_jj)
+            )
+            pen_jj = -float(rp.jammer_separation_scale) * (1.0 - d_jj / float(rp.jammer_separation_thresh)).clamp(min=0.0)
+            pen_jj = torch.where(valid_jj, pen_jj, torch.zeros_like(pen_jj))
+            jammer_sep = pen_jj.sum(dim=-1)  # [B, nj]
+            reward[:, ns:] += jammer_sep
+            separation_pen_full[:, ns:] += jammer_sep
+
         # Store per-component reward breakdown for diagnostics  (each [B, A])
         self.last_reward_components = {
             "target_destroyed":   target_destroyed_full.detach(),
@@ -823,6 +860,7 @@ class StrikeEA2DEnv(EnvBase):
             "formation":          formation_full.detach(),
             "agent_destroyed":    death_pen_full.detach(),
             "paper_mission":      mission_reward_full.detach(),
+            "separation_penalty": separation_pen_full.detach(),
         }
         
         reward = reward.unsqueeze(-1).contiguous()  # [B, A, 1]

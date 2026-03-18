@@ -15,15 +15,15 @@ except ImportError:
 @dataclass
 class EnvConfig:
     # Team composition
-    n_strikers: int = 1
-    n_jammers: int = 1
+    n_strikers: int = 2
+    n_jammers: int = 2
     n_targets: int = 2
     n_radars: int = 2
 
     # World / episode
     world_bounds: Tuple[float, float] = (0.0, 1.0)
     dt: float = 1.0
-    max_steps: int = 150
+    max_steps: int = 100
     n_env_layouts: int = 0
     target_spawn_angle_range: Tuple[float, float] = (0, 360)
 
@@ -59,7 +59,7 @@ class EnvConfig:
 @dataclass
 class PPOConfig:
     num_envs: int = 512 #256
-    n_iters: int = 100
+    n_iters: int = 140
     frames_per_batch: Optional[int] = None
     num_epochs: int = 10
     minibatch_size: int = 2048
@@ -74,7 +74,7 @@ class PPOConfig:
     max_grad_norm: float = 1.0
 
     seed: int = 0
-    log_every: int = 10
+    log_every: int = 20
     device: torch.device = field(default_factory=lambda: torch.device("cuda" if torch.cuda.is_available() else "cpu"))
 
     def __post_init__(self):

@@ -31,7 +31,7 @@ class RewardConfig:
     """
 
     # ─── SPARSE TEAM REWARDS ─────────────────────────────────────────────────
-    target_destroyed: float = 1
+    target_destroyed: float = 1 # TODO: increase to 2-3
     # Reward when a target is killed.
     # Distribution controlled by team_spirit parameter (see below).
 
@@ -40,7 +40,7 @@ class RewardConfig:
     # so the per-step signal is clearly positive when approaching.
     # Over 50 steps × 2 agents = −5 total (10% of kill reward).
 
-    agent_destroyed: float = -1
+    agent_destroyed: float = -1 # TODO: increase to 2-3
     # Penalty applied when an agent is killed by a radar.
     # Distribution controlled by team_spirit parameter (see below).
 
@@ -67,9 +67,9 @@ class RewardConfig:
     # ─── RADAR ZONE AVOIDANCE  (piecewise lin-exp penalty, ALL agents) ───────
     # d = distance from *effective* radar zone boundary (adapts when jammed).
     # Agents inside the zone get killed and receive agent_destroyed instead.
-    radar_avoid_w_lin:  float = 0.05  # reduced so approach reward dominates
+    radar_avoid_w_lin:  float = 0  # reduced so approach reward dominates
     radar_avoid_w_exp:  float = 0
-    radar_avoid_d_max:  float = 0.3   # penalty starts 200 km outside zone edge
+    radar_avoid_d_max:  float = 0   # penalty starts 200 km outside zone edge
     radar_avoid_d_knee: float = 0   # 30 km from zone → exponential
     radar_avoid_alpha:  float = 0
 
@@ -81,7 +81,7 @@ class RewardConfig:
     #   f(0.5) = 0.5 × (1.0−0.5)/(1.0−0.15) = 0.29 > 0.05 ✓
     striker_approach_w_lin:  float = 0.1
     striker_approach_w_exp:  float = 0    # strong pull into engage range
-    striker_approach_d_max:  float = 0.7    # spans FULL map width (was 0.5)
+    striker_approach_d_max:  float = 1    # spans FULL map width (was 0.5)
     striker_approach_d_knee: float = 0   # exponential onset near engage range (0.10)
     striker_approach_alpha:  float = 0
     striker_nearest_only:    bool  = True
@@ -112,7 +112,7 @@ class RewardConfig:
 
     # ─── JAMMER ACTIVE-JAMMING BONUS  (deactivated by default) ───────────────
     # Per-step bonus when a jammer is within jam_radius of ≥ 1 radar.
-    jammer_jam_bonus: float = 0.05   # Deactivated
+    jammer_jam_bonus: float = 0   # Deactivated
 
     # ─── FORMATION COHESION  (striker ↔ jammer cross-role proximity) ──────────
     # Each striker is rewarded for being close to the nearest *alive jammer*,
@@ -122,11 +122,11 @@ class RewardConfig:
     #
     # Reward = scale × max(0, 1 − d_nearest_cross_role / ref_dist)
     # Set scale to 0.0 to disable for that role independently.
-    striker_formation_scale:    float = 0.   # reward to each striker for being near a jammer
+    striker_formation_scale:    float = 0   # reward to each striker for being near a jammer
     striker_formation_ref_dist: float = 0    # distance (map units) beyond which reward = 0
 
     jammer_formation_scale:     float = 0.1   # reward to each jammer for being near a striker
-    jammer_formation_ref_dist:  float = 0.5    # distance (map units) beyond which reward = 0
+    jammer_formation_ref_dist:  float = 1    # distance (map units) beyond which reward = 0
 
     # ─── OPTIONAL PAPER-STYLE MISSION REWARD ────────────────────────────────
     # R_mission = -Reward_fn(n_targets_alive, n_targets_initial)
@@ -134,6 +134,12 @@ class RewardConfig:
     # Reward is distributed to all currently alive agents each timestep.
     use_paper_mission_reward: bool = False
     mission_reward_weight: float = 0.02
+
+    # ─── SAME-ROLE SEPARATION PENALTY (optional shaping) ─────────────────────
+    striker_separation_scale: float = 0.05
+    striker_separation_thresh: float = 50.0
+    jammer_separation_scale: float = 0.05
+    jammer_separation_thresh: float = 50.0
 
 
 
