@@ -67,9 +67,9 @@ class RewardConfig:
     # ─── RADAR ZONE AVOIDANCE  (piecewise lin-exp penalty, ALL agents) ───────
     # d = distance from *effective* radar zone boundary (adapts when jammed).
     # Agents inside the zone get killed and receive agent_destroyed instead.
-    radar_avoid_w_lin:  float = 0  # reduced so approach reward dominates
+    radar_avoid_w_lin:  float = 0.05  # reduced so approach reward dominates
     radar_avoid_w_exp:  float = 0
-    radar_avoid_d_max:  float = 0   # penalty starts 200 km outside zone edge
+    radar_avoid_d_max:  float = 0.3   # penalty starts 200 km outside zone edge
     radar_avoid_d_knee: float = 0   # 30 km from zone → exponential
     radar_avoid_alpha:  float = 0
 
@@ -81,7 +81,7 @@ class RewardConfig:
     #   f(0.5) = 0.5 × (1.0−0.5)/(1.0−0.15) = 0.29 > 0.05 ✓
     striker_approach_w_lin:  float = 0.1
     striker_approach_w_exp:  float = 0    # strong pull into engage range
-    striker_approach_d_max:  float = 1    # spans FULL map width (was 0.5)
+    striker_approach_d_max:  float = 0.7    # spans FULL map width (was 0.5)
     striker_approach_d_knee: float = 0   # exponential onset near engage range (0.10)
     striker_approach_alpha:  float = 0
     striker_nearest_only:    bool  = True
@@ -92,12 +92,12 @@ class RewardConfig:
     # Positive reward that increases as jammer gets closer to radars.
     # Matched to striker approach scale so both agents have equally strong
     # gradients pulling them toward their respective objectives.
-    jammer_approach_w_lin:  float = 0.1    # matched to striker
+    jammer_approach_w_lin:  float = 0    # matched to striker
     jammer_approach_w_exp:  float = 0    # moderate exponential near jam range
-    jammer_approach_d_max:  float = 1    # spans full map (was 0.5)
+    jammer_approach_d_max:  float = 0    # spans full map (was 0.5)
     jammer_approach_d_knee: float = 0    # exponential onset inside jam_radius (0.35)
     jammer_approach_alpha:  float = 0
-    jammer_nearest_only:    bool  = True
+    jammer_nearest_only:    bool  = False
     # True  = reward based only on distance to nearest radar
     # False = reward = mean over all radars (encourages approaching all)
 
@@ -112,7 +112,7 @@ class RewardConfig:
 
     # ─── JAMMER ACTIVE-JAMMING BONUS  (deactivated by default) ───────────────
     # Per-step bonus when a jammer is within jam_radius of ≥ 1 radar.
-    jammer_jam_bonus: float = 0   # Deactivated
+    jammer_jam_bonus: float = 0.05   # Deactivated
 
     # ─── FORMATION COHESION  (striker ↔ jammer cross-role proximity) ──────────
     # Each striker is rewarded for being close to the nearest *alive jammer*,
@@ -125,15 +125,15 @@ class RewardConfig:
     striker_formation_scale:    float = 0.   # reward to each striker for being near a jammer
     striker_formation_ref_dist: float = 0    # distance (map units) beyond which reward = 0
 
-    jammer_formation_scale:     float = 0   # reward to each jammer for being near a striker
-    jammer_formation_ref_dist:  float = 0    # distance (map units) beyond which reward = 0
+    jammer_formation_scale:     float = 0.1   # reward to each jammer for being near a striker
+    jammer_formation_ref_dist:  float = 0.5    # distance (map units) beyond which reward = 0
 
     # ─── OPTIONAL PAPER-STYLE MISSION REWARD ────────────────────────────────
     # R_mission = -Reward_fn(n_targets_alive, n_targets_initial)
     #             +Reward_fn(n_agents_alive, n_agents_initial)
     # Reward is distributed to all currently alive agents each timestep.
-    use_paper_mission_reward: bool = True
-    mission_reward_weight: float = 0.1
+    use_paper_mission_reward: bool = False
+    mission_reward_weight: float = 0.02
 
 
 

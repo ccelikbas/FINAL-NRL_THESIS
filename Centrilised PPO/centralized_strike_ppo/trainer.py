@@ -16,6 +16,8 @@ from .environment import StrikeEA2DEnv
 from .models import make_actor, make_critic
 from .utils import call_gae, get_loss_component, make_collector, make_ppo_loss, prepare_done_keys
 
+from centralized_strike_ppo.visualization import TestRunner, animate_rollout, plot_training
+
 try:
     from torchrl.envs.utils import ExplorationType, set_exploration_type
     _EXPLORATION_API = "new"
@@ -166,6 +168,11 @@ def evaluate_current_policy(
             ep_duration.append(float("nan"))
             ep_completion.append(float("nan"))
     # print("ending evaluation")
+
+    # tester = TestRunner(actor, env_cfg=cfg.env, device=cfg.ppo.device, seed=999)
+    # frames = tester.rollout()
+    # animate_rollout(frames, tester.env)
+
     return {
         "eval_mean_episode_total_reward": float(sum(ep_total_rewards) / len(ep_total_rewards)),
         "eval_survival_rate": float(sum(ep_survival) / len(ep_survival)),
