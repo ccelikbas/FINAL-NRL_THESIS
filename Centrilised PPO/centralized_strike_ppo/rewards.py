@@ -383,7 +383,7 @@ if __name__ == "__main__":
     plot_jammer_and_striker_reward_landscapes(
         env_config=config.env,
         reward_config=config.env.reward_config,
-        distance_range=(0.0, 0.6),
+        distance_range=(0.0, 1),
     )
 
 '''
