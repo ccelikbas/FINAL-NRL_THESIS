@@ -78,6 +78,22 @@ def plot_training(logs: Dict[str, List[float]]) -> None:
     # --- Evaluation plots ---
     if "eval_mean_episode_total_reward" in logs:
         _plot_valid(axes[1, 0], logs["eval_mean_episode_total_reward"], "eval_ep_return_total")
+
+    # Plot per-component eval return lines only if they are non-zero somewhere.
+    for key in sorted(logs.keys()):
+        if not key.startswith("eval_component_"):
+            continue
+        y = np.asarray(logs[key], dtype=float)
+        if y.size == 0:
+            continue
+        valid = np.isfinite(y)
+        if not np.any(valid):
+            continue
+        if np.nanmax(np.abs(y[valid])) <= 1e-12:
+            continue
+        label = key.replace("eval_component_", "")
+        _plot_valid(axes[1, 0], logs[key], label)
+
     axes[1, 0].set_title("Eval Episode Return")
     axes[1, 0].set_xlabel("Iteration")
     axes[1, 0].legend()

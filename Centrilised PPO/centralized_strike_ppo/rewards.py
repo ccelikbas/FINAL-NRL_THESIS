@@ -31,16 +31,16 @@ class RewardConfig:
     """
 
     # ─── SPARSE TEAM REWARDS ─────────────────────────────────────────────────
-    target_destroyed: float = 1 # TODO: increase to 2-3
+    target_destroyed: float = 1 
     # Reward when a target is killed.
     # Distribution controlled by team_spirit parameter (see below).
 
-    timestep_penalty: float = -0.1
+    timestep_penalty: float = -0.08
     # Per-step cost per alive agent. Kept low relative to approach reward
     # so the per-step signal is clearly positive when approaching.
     # Over 50 steps × 2 agents = −5 total (10% of kill reward).
 
-    agent_destroyed: float = -1 # TODO: increase to 2-3
+    agent_destroyed: float = -1 
     # Penalty applied when an agent is killed by a radar.
     # Distribution controlled by team_spirit parameter (see below).
 
@@ -125,8 +125,8 @@ class RewardConfig:
     striker_formation_scale:    float = 0   # reward to each striker for being near a jammer
     striker_formation_ref_dist: float = 0    # distance (map units) beyond which reward = 0
 
-    jammer_formation_scale:     float = 0.1   # reward to each jammer for being near a striker
-    jammer_formation_ref_dist:  float = 1    # distance (map units) beyond which reward = 0
+    jammer_formation_scale:     float = 0.01   # reward to each jammer for being near a striker
+    jammer_formation_ref_dist:  float = 0.5    # distance (map units) beyond which reward = 0
 
     # ─── OPTIONAL PAPER-STYLE MISSION REWARD ────────────────────────────────
     # R_mission = -Reward_fn(n_targets_alive, n_targets_initial)
@@ -135,33 +135,36 @@ class RewardConfig:
     use_paper_mission_reward: bool = False
     mission_reward_weight: float = 0.02
 
-    # ─── SAME-ROLE SEPARATION PENALTY (optional shaping) ─────────────────────
-    striker_sep_d_max:  float = 0.0
+    # ─── SAME-ROLE SEPARATION PENALTY  (piecewise lin-exp penalty, per agent) ──────────
+    # d = distance from each agent to its nearest alive same-role teammate.
+    # Penalty = −f(d) where f is the piecewise lin-exp shaping function.
+    # Agents with no teammates (ns=1 or nj=1, or all same-role teammates dead) receive 0 penalty.
+    # Use this to discourage clustering among strikers (or jammers), promoting spatial diversity
+    # and reducing mutual interference. Set all parameters to 0.0 to disable.
+    # Typical d_max: 0.2–0.3 (map units, e.g., 2–3× typical agent spacing).
+    # Typical w_lin, w_exp: 0.01–0.05 (gentle penalty relative to approach rewards).
+    striker_sep_d_max:  float = 0.1
     striker_sep_d_knee: float = 0.0
-    striker_sep_w_lin:  float = 0.0
+    striker_sep_w_lin:  float = 0.01
     striker_sep_w_exp:  float = 0.0
     striker_sep_alpha:  float = 0.0
 
-    jammer_sep_d_max:  float = 0.0
+    jammer_sep_d_max:  float = 0.1
     jammer_sep_d_knee: float = 0.0
-    jammer_sep_w_lin:  float = 0.0
+    jammer_sep_w_lin:  float = 0.01
     jammer_sep_w_exp:  float = 0.0
     jammer_sep_alpha:  float = 0.0
 
 
 
 
+'''
+RUN: Visualisation of the piecewise linear-exponential shaping function using current paramters:
+'''
+from typing import Tuple
 import torch
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
 import numpy as np
-from typing import TYPE_CHECKING, Tuple
-
-if TYPE_CHECKING:
-    try:
-        from .config import EnvConfig
-    except ImportError:
-        from config import EnvConfig
 
 
 def _piecewise_lin_exp(d: torch.Tensor, d_max: float, d_knee: float,
@@ -176,114 +179,21 @@ def _piecewise_lin_exp(d: torch.Tensor, d_max: float, d_knee: float,
     return lin_val + exp_val
 
 
-def plot_jammer_and_striker_reward_landscapes(
-    env_config: "EnvConfig",
-    reward_config: RewardConfig,
-    distance_range: Tuple[float, float] = (0.0, 0.6),
-    n_points: int = 1000,
-):
+def plot_reward_functions(reward_config: RewardConfig, distance_range: Tuple[float, float]):
     """
-    Two-panel figure:
-      Left  – Jammer:  reward components vs distance to RADAR
-      Right – Striker: reward components vs distance to TARGET
+    Plot reward shaping functions for all visualisable distance-based components.
 
-    Vertical reference lines mark operational radii (jam range, engage range,
-    radar kill zone, jammed kill zone).
+    Shows the piecewise lin-exp curves for:
+      - Striker approach (positive, toward targets)
+      - Jammer approach  (positive, toward radars)
+      - Radar avoidance  (negative, from radar zone boundary)
+      - Border avoidance  (negative, from map edge)
+      - Formation cohesion (positive, toward nearest ally)
     """
-    d = torch.linspace(distance_range[0], distance_range[1], n_points)
+    d = torch.linspace(distance_range[0], distance_range[1], 1000)
 
-    # ── Key distances from EnvConfig ──
-    radar_kill_radius = env_config.radar_range                          # 0.20
-    jammed_kill_radius = env_config.radar_range * env_config.jammer_jam_effect  # 0.20 * 0.15 = 0.03
-    jam_radius = env_config.jammer_jam_radius                           # 0.35
-    engage_range = env_config.striker_engage_range                      # 0.10
-
-    fig, axes = plt.subplots(1, 2, figsize=(18, 7), sharey=False)
-
-    # =====================================================================
-    #  PANEL 1 — JAMMER (distance to radar)
-    # =====================================================================
-    ax = axes[0]
-
-    # 1a. Jammer approach reward (positive, increases as d→0)
-    jammer_approach = _piecewise_lin_exp(
-        d,
-        d_max=reward_config.jammer_approach_d_max,
-        d_knee=reward_config.jammer_approach_d_knee,
-        w_lin=reward_config.jammer_approach_w_lin,
-        w_exp=reward_config.jammer_approach_w_exp,
-        alpha=reward_config.jammer_approach_alpha,
-    )
-
-    # 1b. Radar avoidance penalty (negative, increases as d→0 from zone boundary)
-    #     For the jammer, distance to zone boundary = d - radar_kill_radius
-    #     (penalty is about proximity to the UNJAMMED kill zone)
-    dist_to_boundary = (d - radar_kill_radius).clamp(min=0.0)
-    radar_avoid = -_piecewise_lin_exp(
-        dist_to_boundary,
-        d_max=reward_config.radar_avoid_d_max,
-        d_knee=reward_config.radar_avoid_d_knee,
-        w_lin=reward_config.radar_avoid_w_lin,
-        w_exp=reward_config.radar_avoid_w_exp,
-        alpha=reward_config.radar_avoid_alpha,
-    )
-    # Inside kill zone: mark as death penalty zone (no shaping, just agent_destroyed)
-    inside_kill = d < radar_kill_radius
-    radar_avoid[inside_kill] = float('nan')
-
-    # 1c. Jammer jam bonus (flat per-step if within jam_radius)
-    jam_bonus = torch.where(
-        d <= jam_radius,
-        torch.full_like(d, reward_config.jammer_jam_bonus),
-        torch.zeros_like(d),
-    )
-
-    # 1d. Timestep penalty (constant)
-    timestep = torch.full_like(d, reward_config.timestep_penalty)
-
-    # 1e. Net reward
-    net_jammer = jammer_approach + radar_avoid + jam_bonus + timestep
-    net_jammer[inside_kill] = float('nan')
-
-    # Plot components
-    ax.plot(d.numpy(), jammer_approach.numpy(), label="Approach reward", color="#2ca02c", lw=2)
-    ax.plot(d.numpy(), radar_avoid.numpy(), label="Radar avoidance penalty", color="#9467bd", lw=2)
-    ax.plot(d.numpy(), jam_bonus.numpy(), label="Jam bonus", color="#ff7f0e", lw=2, ls="--")
-    ax.plot(d.numpy(), timestep.numpy(), label="Timestep penalty", color="gray", lw=1, ls=":")
-    ax.plot(d.numpy(), net_jammer.numpy(), label="NET reward", color="black", lw=2.5)
-
-    # Kill zone shading
-    ax.axvspan(distance_range[0], radar_kill_radius, alpha=0.15, color="red", label="Kill zone (unjammed)")
-    ax.axvspan(distance_range[0], jammed_kill_radius, alpha=0.25, color="darkred", label=f"Kill zone (jammed, ×{env_config.jammer_jam_effect})")
-
-    # Vertical reference lines
-    ax.axvline(radar_kill_radius, color="red", ls="--", lw=1.5, label=f"Radar kill radius = {radar_kill_radius}")
-    ax.axvline(jam_radius, color="#ff7f0e", ls="-.", lw=1.5, label=f"Jam radius = {jam_radius}")
-    ax.axvline(jammed_kill_radius, color="darkred", ls="--", lw=1, label=f"Jammed kill radius = {jammed_kill_radius:.3f}")
-
-    # Death penalty annotation
-    ax.annotate(
-        f"agent_destroyed = {reward_config.agent_destroyed}",
-        xy=(radar_kill_radius * 0.5, reward_config.agent_destroyed * 0.3),
-        fontsize=9, color="red", ha="center",
-        bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="red", alpha=0.8),
-    )
-
-    ax.axhline(0, color="gray", lw=0.5)
-    ax.set_xlabel("Distance to Radar", fontsize=12)
-    ax.set_ylabel("Reward per step", fontsize=12)
-    ax.set_title("JAMMER — Reward Landscape vs Distance to Radar", fontsize=13, fontweight="bold")
-    ax.legend(loc="upper right", fontsize=8)
-    ax.grid(True, alpha=0.3)
-    ax.set_xlim(distance_range)
-
-    # =====================================================================
-    #  PANEL 2 — STRIKER (distance to target)
-    # =====================================================================
-    ax = axes[1]
-
-    # 2a. Striker approach reward
-    striker_approach = _piecewise_lin_exp(
+    # Striker approach reward (positive)
+    striker_app = _piecewise_lin_exp(
         d,
         d_max=reward_config.striker_approach_d_max,
         d_knee=reward_config.striker_approach_d_knee,
@@ -292,127 +202,80 @@ def plot_jammer_and_striker_reward_landscapes(
         alpha=reward_config.striker_approach_alpha,
     )
 
-    # 2b. Radar avoidance penalty for striker
-    #     Assumption: target is co-located with or near a radar.
-    #     We show the penalty as if the striker must pass through the radar zone
-    #     to reach the target. Distance to radar boundary = d - radar_kill_radius.
-    dist_to_boundary_striker = (d - radar_kill_radius).clamp(min=0.0)
-    radar_avoid_striker = -_piecewise_lin_exp(
-        dist_to_boundary_striker,
+    # Jammer approach reward (positive)
+    jammer_app = _piecewise_lin_exp(
+        d,
+        d_max=reward_config.jammer_approach_d_max,
+        d_knee=reward_config.jammer_approach_d_knee,
+        w_lin=reward_config.jammer_approach_w_lin,
+        w_exp=reward_config.jammer_approach_w_exp,
+        alpha=reward_config.jammer_approach_alpha,
+    )
+
+    # Radar avoidance penalty (negative)
+    radar = -_piecewise_lin_exp(
+        d,
         d_max=reward_config.radar_avoid_d_max,
         d_knee=reward_config.radar_avoid_d_knee,
         w_lin=reward_config.radar_avoid_w_lin,
         w_exp=reward_config.radar_avoid_w_exp,
         alpha=reward_config.radar_avoid_alpha,
     )
-    radar_avoid_striker[inside_kill] = float('nan')
 
-    # 2b-alt. Radar avoidance when JAMMED (smaller kill zone)
-    dist_to_jammed_boundary = (d - jammed_kill_radius).clamp(min=0.0)
-    radar_avoid_jammed = -_piecewise_lin_exp(
-        dist_to_jammed_boundary,
-        d_max=reward_config.radar_avoid_d_max,
-        d_knee=reward_config.radar_avoid_d_knee,
-        w_lin=reward_config.radar_avoid_w_lin,
-        w_exp=reward_config.radar_avoid_w_exp,
-        alpha=reward_config.radar_avoid_alpha,
-    )
-    inside_jammed_kill = d < jammed_kill_radius
-    radar_avoid_jammed[inside_jammed_kill] = float('nan')
-
-    # 2c. Timestep penalty
-    timestep_s = torch.full_like(d, reward_config.timestep_penalty)
-
-    # 2d. Net reward — UNJAMMED scenario
-    net_striker_unjammed = striker_approach + radar_avoid_striker + timestep_s
-    net_striker_unjammed[inside_kill] = float('nan')
-
-    # 2e. Net reward — JAMMED scenario
-    net_striker_jammed = striker_approach + radar_avoid_jammed + timestep_s
-    net_striker_jammed[inside_jammed_kill] = float('nan')
-
-    # Plot components
-    ax.plot(d.numpy(), striker_approach.numpy(), label="Approach reward", color="#2ca02c", lw=2)
-    ax.plot(d.numpy(), radar_avoid_striker.numpy(), label="Radar avoidance (unjammed)", color="#9467bd", lw=2)
-    ax.plot(d.numpy(), radar_avoid_jammed.numpy(), label="Radar avoidance (jammed)", color="#9467bd", lw=2, ls="--")
-    ax.plot(d.numpy(), timestep_s.numpy(), label="Timestep penalty", color="gray", lw=1, ls=":")
-    ax.plot(d.numpy(), net_striker_unjammed.numpy(), label="NET reward (unjammed)", color="black", lw=2.5)
-    ax.plot(d.numpy(), net_striker_jammed.numpy(), label="NET reward (jammed)", color="blue", lw=2.5, ls="--")
-
-    # Kill zone shading
-    ax.axvspan(distance_range[0], radar_kill_radius, alpha=0.15, color="red", label="Kill zone (unjammed)")
-    ax.axvspan(distance_range[0], jammed_kill_radius, alpha=0.25, color="darkred", label=f"Kill zone (jammed)")
-
-    # Vertical reference lines
-    ax.axvline(radar_kill_radius, color="red", ls="--", lw=1.5, label=f"Radar kill radius = {radar_kill_radius}")
-    ax.axvline(jammed_kill_radius, color="darkred", ls="--", lw=1, label=f"Jammed kill radius = {jammed_kill_radius:.3f}")
-    ax.axvline(engage_range, color="#2ca02c", ls="-.", lw=1.5, label=f"Engage range = {engage_range}")
-
-    # Highlight the "safe corridor" when jammed
-    if jammed_kill_radius < engage_range:
-        ax.axvspan(jammed_kill_radius, engage_range, alpha=0.1, color="green",
-                   label=f"Safe engage corridor (jammed)")
-        ax.annotate(
-            "Safe engage\ncorridor",
-            xy=((jammed_kill_radius + engage_range) / 2, 0),
-            fontsize=9, color="green", ha="center", va="bottom",
-            fontweight="bold",
-            bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="green", alpha=0.8),
-        )
-
-    # Death penalty annotation
-    ax.annotate(
-        f"agent_destroyed = {reward_config.agent_destroyed}",
-        xy=(radar_kill_radius * 0.5, reward_config.agent_destroyed * 0.3),
-        fontsize=9, color="red", ha="center",
-        bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="red", alpha=0.8),
+    # Border avoidance penalty (negative)
+    border_dmax = distance_range[1]
+    border = -_piecewise_lin_exp(
+        d,
+        d_max=border_dmax,
+        d_knee=reward_config.border_d_knee,
+        w_lin=reward_config.border_w_lin,
+        w_exp=reward_config.border_w_exp,
+        alpha=reward_config.border_alpha,
     )
 
-    # Engage reward annotation
-    ax.annotate(
-        f"target_destroyed = +{reward_config.target_destroyed}",
-        xy=(engage_range, striker_approach[d <= engage_range][-1].item() if (d <= engage_range).any() else 0),
-        xytext=(engage_range + 0.05, 0.15),
-        fontsize=9, color="#2ca02c",
-        arrowprops=dict(arrowstyle="->", color="#2ca02c"),
-        bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="#2ca02c", alpha=0.8),
-    )
+    # Formation proximity reward — striker side (linear decay, cross-role)
+    striker_form = reward_config.striker_formation_scale * (
+        1.0 - d / reward_config.striker_formation_ref_dist
+    ).clamp(min=0.0)
+    # Formation proximity reward — jammer side (linear decay, cross-role)
+    jammer_form = reward_config.jammer_formation_scale * (
+        1.0 - d / reward_config.jammer_formation_ref_dist
+    ).clamp(min=0.0)
 
-    ax.axhline(0, color="gray", lw=0.5)
-    ax.set_xlabel("Distance to Target (≈ distance to radar)", fontsize=12)
-    ax.set_ylabel("Reward per step", fontsize=12)
-    ax.set_title("STRIKER — Reward Landscape vs Distance to Target", fontsize=13, fontweight="bold")
-    ax.legend(loc="upper right", fontsize=8)
-    ax.grid(True, alpha=0.3)
-    ax.set_xlim(distance_range)
-
-    plt.tight_layout()
-    plt.savefig("reward_landscape_jammer_striker.png", dpi=150, bbox_inches="tight")
+    plt.figure(figsize=(12, 7))
+    plt.plot(d.numpy(), striker_app.numpy(), label="Striker Approach", color="#1f77b4", linewidth=2)
+    plt.plot(d.numpy(), jammer_app.numpy(), label="Jammer Approach", color="#17becf", linewidth=2)
+    plt.plot(d.numpy(), radar.numpy(), label="Radar Avoidance", color="#9467bd", linewidth=2)
+    plt.plot(d.numpy(), border.numpy(), label="Border Avoidance", color="#d62728", linewidth=2)
+    plt.plot(d.numpy(), striker_form.numpy(), label="Striker Formation (↔ jammer)", color="#8c564b", linewidth=2)
+    plt.plot(d.numpy(), jammer_form.numpy(),  label="Jammer Formation (↔ striker)",  color="#bcbd22", linewidth=2, linestyle="--")
+    plt.axhline(0, color="gray", lw=0.5)
+    plt.xlabel("Distance")
+    plt.ylabel("Reward / Penalty")
+    plt.title("Reward Shaping Functions (piecewise lin-exp)")
+    plt.legend()
+    plt.grid(True)
     plt.show()
 
 
 if __name__ == "__main__":
-    try:
-        from .config import ExperimentConfig
-    except ImportError:
-        from config import ExperimentConfig
+    reward_config = RewardConfig()
+    plot_reward_functions(reward_config, distance_range=(0, 0.5))
 
-    config = ExperimentConfig()
-    config.finalize()
 
-    plot_jammer_and_striker_reward_landscapes(
-        env_config=config.env,
-        reward_config=config.env.reward_config,
-        distance_range=(0.0, 1),
-    )
 
-'''
-RUN: Visualisation of the piecewise linear-exponential shaping function using current paramters:
-'''
-# from typing import Tuple
+    
 # import torch
 # import matplotlib.pyplot as plt
+# import matplotlib.patches as mpatches
 # import numpy as np
+# from typing import TYPE_CHECKING, Tuple
+
+# if TYPE_CHECKING:
+#     try:
+#         from .config import EnvConfig
+#     except ImportError:
+#         from config import EnvConfig
 
 
 # def _piecewise_lin_exp(d: torch.Tensor, d_max: float, d_knee: float,
@@ -427,31 +290,37 @@ RUN: Visualisation of the piecewise linear-exponential shaping function using cu
 #     return lin_val + exp_val
 
 
-# def plot_reward_functions(reward_config: RewardConfig, distance_range: Tuple[float, float]):
+# def plot_jammer_and_striker_reward_landscapes(
+#     env_config: "EnvConfig",
+#     reward_config: RewardConfig,
+#     distance_range: Tuple[float, float] = (0.0, 0.6),
+#     n_points: int = 1000,
+# ):
 #     """
-#     Plot reward shaping functions for all visualisable distance-based components.
+#     Two-panel figure:
+#       Left  – Jammer:  reward components vs distance to RADAR
+#       Right – Striker: reward components vs distance to TARGET
 
-#     Shows the piecewise lin-exp curves for:
-#       - Striker approach (positive, toward targets)
-#       - Jammer approach  (positive, toward radars)
-#       - Radar avoidance  (negative, from radar zone boundary)
-#       - Border avoidance  (negative, from map edge)
-#       - Formation cohesion (positive, toward nearest ally)
+#     Vertical reference lines mark operational radii (jam range, engage range,
+#     radar kill zone, jammed kill zone).
 #     """
-#     d = torch.linspace(distance_range[0], distance_range[1], 1000)
+#     d = torch.linspace(distance_range[0], distance_range[1], n_points)
 
-#     # Striker approach reward (positive)
-#     striker_app = _piecewise_lin_exp(
-#         d,
-#         d_max=reward_config.striker_approach_d_max,
-#         d_knee=reward_config.striker_approach_d_knee,
-#         w_lin=reward_config.striker_approach_w_lin,
-#         w_exp=reward_config.striker_approach_w_exp,
-#         alpha=reward_config.striker_approach_alpha,
-#     )
+#     # ── Key distances from EnvConfig ──
+#     radar_kill_radius = env_config.radar_range                          # 0.20
+#     jammed_kill_radius = env_config.radar_range * env_config.jammer_jam_effect  # 0.20 * 0.15 = 0.03
+#     jam_radius = env_config.jammer_jam_radius                           # 0.35
+#     engage_range = env_config.striker_engage_range                      # 0.10
 
-#     # Jammer approach reward (positive)
-#     jammer_app = _piecewise_lin_exp(
+#     fig, axes = plt.subplots(1, 2, figsize=(18, 7), sharey=False)
+
+#     # =====================================================================
+#     #  PANEL 1 — JAMMER (distance to radar)
+#     # =====================================================================
+#     ax = axes[0]
+
+#     # 1a. Jammer approach reward (positive, increases as d→0)
+#     jammer_approach = _piecewise_lin_exp(
 #         d,
 #         d_max=reward_config.jammer_approach_d_max,
 #         d_knee=reward_config.jammer_approach_d_knee,
@@ -460,51 +329,193 @@ RUN: Visualisation of the piecewise linear-exponential shaping function using cu
 #         alpha=reward_config.jammer_approach_alpha,
 #     )
 
-#     # Radar avoidance penalty (negative)
-#     radar = -_piecewise_lin_exp(
-#         d,
+#     # 1b. Radar avoidance penalty (negative, increases as d→0 from zone boundary)
+#     #     For the jammer, distance to zone boundary = d - radar_kill_radius
+#     #     (penalty is about proximity to the UNJAMMED kill zone)
+#     dist_to_boundary = (d - radar_kill_radius).clamp(min=0.0)
+#     radar_avoid = -_piecewise_lin_exp(
+#         dist_to_boundary,
 #         d_max=reward_config.radar_avoid_d_max,
 #         d_knee=reward_config.radar_avoid_d_knee,
 #         w_lin=reward_config.radar_avoid_w_lin,
 #         w_exp=reward_config.radar_avoid_w_exp,
 #         alpha=reward_config.radar_avoid_alpha,
 #     )
+#     # Inside kill zone: mark as death penalty zone (no shaping, just agent_destroyed)
+#     inside_kill = d < radar_kill_radius
+#     radar_avoid[inside_kill] = float('nan')
 
-#     # Border avoidance penalty (negative)
-#     border_dmax = distance_range[1]
-#     border = -_piecewise_lin_exp(
-#         d,
-#         d_max=border_dmax,
-#         d_knee=reward_config.border_d_knee,
-#         w_lin=reward_config.border_w_lin,
-#         w_exp=reward_config.border_w_exp,
-#         alpha=reward_config.border_alpha,
+#     # 1c. Jammer jam bonus (flat per-step if within jam_radius)
+#     jam_bonus = torch.where(
+#         d <= jam_radius,
+#         torch.full_like(d, reward_config.jammer_jam_bonus),
+#         torch.zeros_like(d),
 #     )
 
-#     # Formation proximity reward — striker side (linear decay, cross-role)
-#     striker_form = reward_config.striker_formation_scale * (
-#         1.0 - d / reward_config.striker_formation_ref_dist
-#     ).clamp(min=0.0)
-#     # Formation proximity reward — jammer side (linear decay, cross-role)
-#     jammer_form = reward_config.jammer_formation_scale * (
-#         1.0 - d / reward_config.jammer_formation_ref_dist
-#     ).clamp(min=0.0)
+#     # 1d. Timestep penalty (constant)
+#     timestep = torch.full_like(d, reward_config.timestep_penalty)
 
-#     plt.figure(figsize=(12, 7))
-#     plt.plot(d.numpy(), striker_app.numpy(), label="Striker Approach", color="#1f77b4", linewidth=2)
-#     plt.plot(d.numpy(), jammer_app.numpy(), label="Jammer Approach", color="#17becf", linewidth=2)
-#     plt.plot(d.numpy(), radar.numpy(), label="Radar Avoidance", color="#9467bd", linewidth=2)
-#     plt.plot(d.numpy(), border.numpy(), label="Border Avoidance", color="#d62728", linewidth=2)
-#     plt.plot(d.numpy(), striker_form.numpy(), label="Striker Formation (↔ jammer)", color="#8c564b", linewidth=2)
-#     plt.plot(d.numpy(), jammer_form.numpy(),  label="Jammer Formation (↔ striker)",  color="#bcbd22", linewidth=2, linestyle="--")
-#     plt.axhline(0, color="gray", lw=0.5)
-#     plt.xlabel("Distance")
-#     plt.ylabel("Reward / Penalty")
-#     plt.title("Reward Shaping Functions (piecewise lin-exp)")
-#     plt.legend()
-#     plt.grid(True)
+#     # 1e. Net reward
+#     net_jammer = jammer_approach + radar_avoid + jam_bonus + timestep
+#     net_jammer[inside_kill] = float('nan')
+
+#     # Plot components
+#     ax.plot(d.numpy(), jammer_approach.numpy(), label="Approach reward", color="#2ca02c", lw=2)
+#     ax.plot(d.numpy(), radar_avoid.numpy(), label="Radar avoidance penalty", color="#9467bd", lw=2)
+#     ax.plot(d.numpy(), jam_bonus.numpy(), label="Jam bonus", color="#ff7f0e", lw=2, ls="--")
+#     ax.plot(d.numpy(), timestep.numpy(), label="Timestep penalty", color="gray", lw=1, ls=":")
+#     ax.plot(d.numpy(), net_jammer.numpy(), label="NET reward", color="black", lw=2.5)
+
+#     # Kill zone shading
+#     ax.axvspan(distance_range[0], radar_kill_radius, alpha=0.15, color="red", label="Kill zone (unjammed)")
+#     ax.axvspan(distance_range[0], jammed_kill_radius, alpha=0.25, color="darkred", label=f"Kill zone (jammed, ×{env_config.jammer_jam_effect})")
+
+#     # Vertical reference lines
+#     ax.axvline(radar_kill_radius, color="red", ls="--", lw=1.5, label=f"Radar kill radius = {radar_kill_radius}")
+#     ax.axvline(jam_radius, color="#ff7f0e", ls="-.", lw=1.5, label=f"Jam radius = {jam_radius}")
+#     ax.axvline(jammed_kill_radius, color="darkred", ls="--", lw=1, label=f"Jammed kill radius = {jammed_kill_radius:.3f}")
+
+#     # Death penalty annotation
+#     ax.annotate(
+#         f"agent_destroyed = {reward_config.agent_destroyed}",
+#         xy=(radar_kill_radius * 0.5, reward_config.agent_destroyed * 0.3),
+#         fontsize=9, color="red", ha="center",
+#         bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="red", alpha=0.8),
+#     )
+
+#     ax.axhline(0, color="gray", lw=0.5)
+#     ax.set_xlabel("Distance to Radar", fontsize=12)
+#     ax.set_ylabel("Reward per step", fontsize=12)
+#     ax.set_title("JAMMER — Reward Landscape vs Distance to Radar", fontsize=13, fontweight="bold")
+#     ax.legend(loc="upper right", fontsize=8)
+#     ax.grid(True, alpha=0.3)
+#     ax.set_xlim(distance_range)
+
+#     # =====================================================================
+#     #  PANEL 2 — STRIKER (distance to target)
+#     # =====================================================================
+#     ax = axes[1]
+
+#     # 2a. Striker approach reward
+#     striker_approach = _piecewise_lin_exp(
+#         d,
+#         d_max=reward_config.striker_approach_d_max,
+#         d_knee=reward_config.striker_approach_d_knee,
+#         w_lin=reward_config.striker_approach_w_lin,
+#         w_exp=reward_config.striker_approach_w_exp,
+#         alpha=reward_config.striker_approach_alpha,
+#     )
+
+#     # 2b. Radar avoidance penalty for striker
+#     #     Assumption: target is co-located with or near a radar.
+#     #     We show the penalty as if the striker must pass through the radar zone
+#     #     to reach the target. Distance to radar boundary = d - radar_kill_radius.
+#     dist_to_boundary_striker = (d - radar_kill_radius).clamp(min=0.0)
+#     radar_avoid_striker = -_piecewise_lin_exp(
+#         dist_to_boundary_striker,
+#         d_max=reward_config.radar_avoid_d_max,
+#         d_knee=reward_config.radar_avoid_d_knee,
+#         w_lin=reward_config.radar_avoid_w_lin,
+#         w_exp=reward_config.radar_avoid_w_exp,
+#         alpha=reward_config.radar_avoid_alpha,
+#     )
+#     radar_avoid_striker[inside_kill] = float('nan')
+
+#     # 2b-alt. Radar avoidance when JAMMED (smaller kill zone)
+#     dist_to_jammed_boundary = (d - jammed_kill_radius).clamp(min=0.0)
+#     radar_avoid_jammed = -_piecewise_lin_exp(
+#         dist_to_jammed_boundary,
+#         d_max=reward_config.radar_avoid_d_max,
+#         d_knee=reward_config.radar_avoid_d_knee,
+#         w_lin=reward_config.radar_avoid_w_lin,
+#         w_exp=reward_config.radar_avoid_w_exp,
+#         alpha=reward_config.radar_avoid_alpha,
+#     )
+#     inside_jammed_kill = d < jammed_kill_radius
+#     radar_avoid_jammed[inside_jammed_kill] = float('nan')
+
+#     # 2c. Timestep penalty
+#     timestep_s = torch.full_like(d, reward_config.timestep_penalty)
+
+#     # 2d. Net reward — UNJAMMED scenario
+#     net_striker_unjammed = striker_approach + radar_avoid_striker + timestep_s
+#     net_striker_unjammed[inside_kill] = float('nan')
+
+#     # 2e. Net reward — JAMMED scenario
+#     net_striker_jammed = striker_approach + radar_avoid_jammed + timestep_s
+#     net_striker_jammed[inside_jammed_kill] = float('nan')
+
+#     # Plot components
+#     ax.plot(d.numpy(), striker_approach.numpy(), label="Approach reward", color="#2ca02c", lw=2)
+#     ax.plot(d.numpy(), radar_avoid_striker.numpy(), label="Radar avoidance (unjammed)", color="#9467bd", lw=2)
+#     ax.plot(d.numpy(), radar_avoid_jammed.numpy(), label="Radar avoidance (jammed)", color="#9467bd", lw=2, ls="--")
+#     ax.plot(d.numpy(), timestep_s.numpy(), label="Timestep penalty", color="gray", lw=1, ls=":")
+#     ax.plot(d.numpy(), net_striker_unjammed.numpy(), label="NET reward (unjammed)", color="black", lw=2.5)
+#     ax.plot(d.numpy(), net_striker_jammed.numpy(), label="NET reward (jammed)", color="blue", lw=2.5, ls="--")
+
+#     # Kill zone shading
+#     ax.axvspan(distance_range[0], radar_kill_radius, alpha=0.15, color="red", label="Kill zone (unjammed)")
+#     ax.axvspan(distance_range[0], jammed_kill_radius, alpha=0.25, color="darkred", label=f"Kill zone (jammed)")
+
+#     # Vertical reference lines
+#     ax.axvline(radar_kill_radius, color="red", ls="--", lw=1.5, label=f"Radar kill radius = {radar_kill_radius}")
+#     ax.axvline(jammed_kill_radius, color="darkred", ls="--", lw=1, label=f"Jammed kill radius = {jammed_kill_radius:.3f}")
+#     ax.axvline(engage_range, color="#2ca02c", ls="-.", lw=1.5, label=f"Engage range = {engage_range}")
+
+#     # Highlight the "safe corridor" when jammed
+#     if jammed_kill_radius < engage_range:
+#         ax.axvspan(jammed_kill_radius, engage_range, alpha=0.1, color="green",
+#                    label=f"Safe engage corridor (jammed)")
+#         ax.annotate(
+#             "Safe engage\ncorridor",
+#             xy=((jammed_kill_radius + engage_range) / 2, 0),
+#             fontsize=9, color="green", ha="center", va="bottom",
+#             fontweight="bold",
+#             bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="green", alpha=0.8),
+#         )
+
+#     # Death penalty annotation
+#     ax.annotate(
+#         f"agent_destroyed = {reward_config.agent_destroyed}",
+#         xy=(radar_kill_radius * 0.5, reward_config.agent_destroyed * 0.3),
+#         fontsize=9, color="red", ha="center",
+#         bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="red", alpha=0.8),
+#     )
+
+#     # Engage reward annotation
+#     ax.annotate(
+#         f"target_destroyed = +{reward_config.target_destroyed}",
+#         xy=(engage_range, striker_approach[d <= engage_range][-1].item() if (d <= engage_range).any() else 0),
+#         xytext=(engage_range + 0.05, 0.15),
+#         fontsize=9, color="#2ca02c",
+#         arrowprops=dict(arrowstyle="->", color="#2ca02c"),
+#         bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="#2ca02c", alpha=0.8),
+#     )
+
+#     ax.axhline(0, color="gray", lw=0.5)
+#     ax.set_xlabel("Distance to Target (≈ distance to radar)", fontsize=12)
+#     ax.set_ylabel("Reward per step", fontsize=12)
+#     ax.set_title("STRIKER — Reward Landscape vs Distance to Target", fontsize=13, fontweight="bold")
+#     ax.legend(loc="upper right", fontsize=8)
+#     ax.grid(True, alpha=0.3)
+#     ax.set_xlim(distance_range)
+
+#     plt.tight_layout()
+#     plt.savefig("reward_landscape_jammer_striker.png", dpi=150, bbox_inches="tight")
 #     plt.show()
 
+
 # if __name__ == "__main__":
-#     reward_config = RewardConfig()
-#     plot_reward_functions(reward_config, distance_range=(0, 0.5))
+#     try:
+#         from .config import ExperimentConfig
+#     except ImportError:
+#         from config import ExperimentConfig
+
+#     config = ExperimentConfig()
+#     config.finalize()
+
+#     plot_jammer_and_striker_reward_landscapes(
+#         env_config=config.env,
+#         reward_config=config.env.reward_config,
+#         distance_range=(0.0, 1),
+#     )

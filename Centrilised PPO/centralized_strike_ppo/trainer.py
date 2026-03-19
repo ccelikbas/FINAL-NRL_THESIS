@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import math
 from typing import Dict, List, Tuple
 
 import torch
@@ -17,6 +18,30 @@ from .models import make_actor, make_critic
 from .utils import call_gae, get_loss_component, make_collector, make_ppo_loss, prepare_done_keys
 
 from centralized_strike_ppo.visualization import TestRunner, animate_rollout, plot_training
+
+
+EVAL_REWARD_COMPONENT_KEYS: Tuple[str, ...] = (
+    "target_destroyed",
+    "border_penalty",
+    "timestep_penalty",
+    "radar_avoidance",
+    "striker_approach",
+    "jammer_approach",
+    "striker_progress",
+    "jammer_progress",
+    "jammer_jam_bonus",
+    "formation",
+    "agent_destroyed",
+    "paper_mission",
+    "separation_penalty",
+)
+
+
+def _finite_mean(values: List[float]) -> float:
+    finite_vals = [v for v in values if math.isfinite(v)]
+    if not finite_vals:
+        return float("nan")
+    return float(sum(finite_vals) / len(finite_vals))
 
 try:
     from torchrl.envs.utils import ExplorationType, set_exploration_type
@@ -140,14 +165,24 @@ def evaluate_current_policy(
     ep_survival: List[float] = []
     ep_duration: List[float] = []
     ep_completion: List[float] = []
+    ep_component_rewards: Dict[str, List[float]] = {
+        key: [] for key in EVAL_REWARD_COMPONENT_KEYS
+    }
 
     # with _deterministic_context():
     for _ in range(max(1, int(n_eval_episodes))):
         td = eval_env.reset()
+        episode_component_sums = {key: 0.0 for key in EVAL_REWARD_COMPONENT_KEYS}
 
         for _step in range(env_cfg.max_steps):
             td = actor(td)
             td_next = eval_env.step(td)
+
+            # Per-step team-total component contributions (sum across agents).
+            for comp_key in EVAL_REWARD_COMPONENT_KEYS:
+                comp_tensor = eval_env.last_reward_components[comp_key]  # [B, A]
+                episode_component_sums[comp_key] += float(comp_tensor[0].sum().item())
+
             done = bool(td_next.get(("next", "done"))[0, 0].item())
             if done:
                 break
@@ -162,23 +197,32 @@ def evaluate_current_policy(
             ep_survival.append(float(s.get("survival_frac", float("nan"))))
             ep_duration.append(float(s.get("duration", float("nan"))))
             ep_completion.append(1.0 if bool(s.get("mission_complete", False)) else 0.0)
+            for comp_key in EVAL_REWARD_COMPONENT_KEYS:
+                ep_component_rewards[comp_key].append(episode_component_sums[comp_key])
         else:
             ep_total_rewards.append(float("nan"))
             ep_survival.append(float("nan"))
             ep_duration.append(float("nan"))
             ep_completion.append(float("nan"))
+            for comp_key in EVAL_REWARD_COMPONENT_KEYS:
+                ep_component_rewards[comp_key].append(float("nan"))
     # print("ending evaluation")
 
     # tester = TestRunner(actor, env_cfg=cfg.env, device=cfg.ppo.device, seed=999)
     # frames = tester.rollout()
     # animate_rollout(frames, tester.env)
 
-    return {
+    metrics = {
         "eval_mean_episode_total_reward": float(sum(ep_total_rewards) / len(ep_total_rewards)),
         "eval_survival_rate": float(sum(ep_survival) / len(ep_survival)),
         "eval_mean_duration": float(sum(ep_duration) / len(ep_duration)),
         "eval_task_completion_rate": float(sum(ep_completion) / len(ep_completion)),
     }
+
+    for comp_key in EVAL_REWARD_COMPONENT_KEYS:
+        metrics[f"eval_component_{comp_key}"] = _finite_mean(ep_component_rewards[comp_key])
+
+    return metrics
 
 
 def train_centralized_ppo(
@@ -238,6 +282,8 @@ def train_centralized_ppo(
         "eval_mean_duration": [],
         "eval_task_completion_rate": [],
     }
+    for comp_key in EVAL_REWARD_COMPONENT_KEYS:
+        logs[f"eval_component_{comp_key}"] = []
 
     # MAIN TRAINING LOOP:
     # collect experience (using the collector)
@@ -362,11 +408,15 @@ def train_centralized_ppo(
             logs["eval_survival_rate"].append(eval_metrics["eval_survival_rate"])
             logs["eval_mean_duration"].append(eval_metrics["eval_mean_duration"])
             logs["eval_task_completion_rate"].append(eval_metrics["eval_task_completion_rate"])
+            for comp_key in EVAL_REWARD_COMPONENT_KEYS:
+                logs[f"eval_component_{comp_key}"].append(eval_metrics[f"eval_component_{comp_key}"])
         else:
             logs["eval_mean_episode_total_reward"].append(float("nan"))
             logs["eval_survival_rate"].append(float("nan"))
             logs["eval_mean_duration"].append(float("nan"))
             logs["eval_task_completion_rate"].append(float("nan"))
+            for comp_key in EVAL_REWARD_COMPONENT_KEYS:
+                logs[f"eval_component_{comp_key}"].append(float("nan"))
 
         # Print logs for this iteration
         if do_eval:
