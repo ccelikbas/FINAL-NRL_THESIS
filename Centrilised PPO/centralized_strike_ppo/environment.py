@@ -602,8 +602,12 @@ class StrikeEA2DEnv(EnvBase):
 
         # ------------------------------------------------------------------
         # 4. Radar zone avoidance  (piecewise lin-exp penalty, ALL agents)
+        #    Fixed boundary = jammed effective radar range (non-adaptive).
+        #    This shaping term is always computed against the jammed zone,
+        #    independent of whether jamming is currently active.
         # ------------------------------------------------------------------
-        d_zone = dist_ar - radar_eff_range[:, None, :]                    # [B, A, R]
+        jammed_zone_range = max(self.radar_range - self.jammer.delta_range, 0.0)
+        d_zone = dist_ar - jammed_zone_range                               # [B, A, R]
         d_zone_min = d_zone.min(dim=-1).values.clamp(min=0.0)             # [B, A]
         radar_pen = -self._piecewise_lin_exp(
             d_zone_min,

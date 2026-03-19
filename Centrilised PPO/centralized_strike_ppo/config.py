@@ -59,7 +59,7 @@ class EnvConfig:
 @dataclass
 class PPOConfig:
     num_envs: int = 512 #256
-    n_iters: int = 200
+    n_iters: int = 400
     frames_per_batch: Optional[int] = None
     num_epochs: int = 10
     minibatch_size: int = 2048
@@ -71,11 +71,11 @@ class PPOConfig:
     normalize_rewards: bool = True
 
     actor_lr: float = 3e-4
-    critic_lr: float = 1e-3
+    critic_lr: float = 3e-4
     max_grad_norm: float = 1.0
 
     seed: int = 0
-    log_every: int = 20
+    log_every: int = 10
     device: torch.device = field(default_factory=lambda: torch.device("cuda" if torch.cuda.is_available() else "cpu"))
 
     def __post_init__(self):

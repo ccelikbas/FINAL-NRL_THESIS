@@ -31,7 +31,7 @@ class RewardConfig:
     """
 
     # ─── SPARSE TEAM REWARDS ─────────────────────────────────────────────────
-    target_destroyed: float = 5 
+    target_destroyed: float = 3 
     # Reward when a target is killed.
     # Distribution controlled by team_spirit parameter (see below).
 
@@ -65,8 +65,10 @@ class RewardConfig:
     border_alpha:  float = 0
 
     # ─── RADAR ZONE AVOIDANCE  (piecewise lin-exp penalty, ALL agents) ───────
-    # d = distance from *effective* radar zone boundary (adapts when jammed).
-    # Agents inside the zone get killed and receive agent_destroyed instead.
+    # d = distance from a FIXED jammed radar boundary (non-adaptive).
+    # This shaping does not switch with live jamming state; it always uses
+    # the jammed effective range as the avoidance boundary.
+    # Agents inside lethal radar range are still handled by agent_destroyed.
     radar_avoid_w_lin:  float = 0  # reduced so approach reward dominates
     radar_avoid_w_exp:  float = 0
     radar_avoid_d_max:  float = 0   # penalty starts 200 km outside zone edge
