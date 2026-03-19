@@ -59,7 +59,7 @@ class EnvConfig:
 @dataclass
 class PPOConfig:
     num_envs: int = 512 #256
-    n_iters: int = 20
+    n_iters: int = 300
     frames_per_batch: Optional[int] = None
     num_epochs: int = 10
     minibatch_size: int = 2048
@@ -67,7 +67,7 @@ class PPOConfig:
     gamma: float = 0.99
     lmbda: float = 0.95
     clip_eps: float = 0.2
-    entropy_coef: float = 0 #1e-3
+    entropy_coef: float = 0 #1e-3, turned off
     normalize_rewards: bool = True
 
     actor_lr: float = 3e-4

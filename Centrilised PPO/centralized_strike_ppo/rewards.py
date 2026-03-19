@@ -31,7 +31,7 @@ class RewardConfig:
     """
 
     # ─── SPARSE TEAM REWARDS ─────────────────────────────────────────────────
-    target_destroyed: float = 1 
+    target_destroyed: float = 5 
     # Reward when a target is killed.
     # Distribution controlled by team_spirit parameter (see below).
 
@@ -40,7 +40,7 @@ class RewardConfig:
     # so the per-step signal is clearly positive when approaching.
     # Over 50 steps × 2 agents = −5 total (10% of kill reward).
 
-    agent_destroyed: float = -1 
+    agent_destroyed: float = -5 
     # Penalty applied when an agent is killed by a radar.
     # Distribution controlled by team_spirit parameter (see below).
 

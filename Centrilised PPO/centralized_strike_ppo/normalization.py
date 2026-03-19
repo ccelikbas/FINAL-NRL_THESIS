@@ -74,6 +74,7 @@ class RewardNormalizer:
         eps: float = 1e-8,
     ):
         self.device = device
+        self.num_envs = int(num_envs)
         self.gamma = float(gamma)
         self.eps = float(eps)
         self.returns = torch.zeros(int(num_envs), dtype=torch.float32, device=device)  # [B]
@@ -97,12 +98,38 @@ class RewardNormalizer:
 
     @torch.no_grad()
     def _normalize_step(self, reward_t: torch.Tensor, done_t: torch.Tensor) -> torch.Tensor:
-        # reward_t: [B, A, 1], done_t: [B, 1]
+        # reward_t: [B, A, 1], done_t: [B, 1] (or shape-compatible variant)
         reward_t = reward_t.to(self.device)
         done_t = done_t.to(self.device)
 
-        team_reward_t = reward_t.squeeze(-1).sum(dim=-1)  # [B]
-        done_mask = done_t.squeeze(-1).to(torch.float32)   # [B]
+        team_reward_t = reward_t.squeeze(-1).sum(dim=-1)  # expected [B]
+        if team_reward_t.ndim != 1:
+            raise ValueError(f"Expected team reward [B], got shape {tuple(team_reward_t.shape)}")
+
+        done_mask = done_t.to(torch.float32)
+        if done_mask.ndim > 1 and done_mask.shape[-1] == 1:
+            done_mask = done_mask.squeeze(-1)
+        if done_mask.ndim > 1:
+            done_mask = done_mask.reshape(done_mask.shape[0], -1).amax(dim=-1)
+        if done_mask.ndim != 1:
+            done_mask = done_mask.reshape(-1)
+
+        if done_mask.numel() != self.returns.numel() and done_t.ndim >= 2 and done_t.shape[0] != self.returns.numel() and done_t.shape[1] == self.returns.numel():
+            transposed = done_t.transpose(0, 1).to(torch.float32)
+            if transposed.ndim > 1 and transposed.shape[-1] == 1:
+                transposed = transposed.squeeze(-1)
+            if transposed.ndim > 1:
+                transposed = transposed.reshape(transposed.shape[0], -1).amax(dim=-1)
+            done_mask = transposed.reshape(-1)
+
+        if team_reward_t.numel() != self.returns.numel() and reward_t.ndim >= 3 and reward_t.shape[0] != self.returns.numel() and reward_t.shape[1] == self.returns.numel():
+            team_reward_t = reward_t.transpose(0, 1).squeeze(-1).sum(dim=-1)
+
+        if done_mask.numel() != self.returns.numel() or team_reward_t.numel() != self.returns.numel():
+            raise ValueError(
+                "RewardNormalizer shape mismatch: "
+                f"returns={tuple(self.returns.shape)}, reward_t={tuple(reward_t.shape)}, done_t={tuple(done_t.shape)}"
+            )
 
         self.returns = self.returns * (1.0 - done_mask)
         self.returns = self.gamma * self.returns + team_reward_t
@@ -119,13 +146,27 @@ class RewardNormalizer:
         reward_key: Tuple[str, ...],
         done_key: Tuple[str, ...],
     ) -> Dict[str, float]:
-        rewards = td.get(reward_key)  # [T, B, A, 1] (collector) or [B, A, 1]
-        dones = td.get(done_key)      # [T, B, 1] or [B, 1]
+        rewards = td.get(reward_key)  # collector: [T, B, A, 1] or [B, T, A, 1]
+        dones = td.get(done_key)      # collector: [T, B, 1] or [B, T, 1]
 
         raw_rewards = rewards.detach().clone()
 
         had_time_dim = rewards.ndim >= 4
-        if not had_time_dim:
+        transposed_bt = False
+        if had_time_dim:
+            # Canonicalize to [T, B, A, 1] for sequential return tracking.
+            if rewards.shape[1] == self.num_envs:
+                pass  # already [T, B, A, 1]
+            elif rewards.shape[0] == self.num_envs:
+                rewards = rewards.transpose(0, 1)  # [B, T, A, 1] -> [T, B, A, 1]
+                dones = dones.transpose(0, 1)      # [B, T, 1] -> [T, B, 1]
+                transposed_bt = True
+            else:
+                raise ValueError(
+                    "Unable to infer rollout layout for reward normalization: "
+                    f"rewards shape={tuple(rewards.shape)}, num_envs={self.num_envs}"
+                )
+        else:
             rewards = rewards.unsqueeze(0)
             dones = dones.unsqueeze(0)
 
@@ -136,6 +177,8 @@ class RewardNormalizer:
 
         if not had_time_dim:
             rewards_norm = rewards_norm.squeeze(0)
+        elif transposed_bt:
+            rewards_norm = rewards_norm.transpose(0, 1)
 
         td.set(reward_key, rewards_norm)
 
