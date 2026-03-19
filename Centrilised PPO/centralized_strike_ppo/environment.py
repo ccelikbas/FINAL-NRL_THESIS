@@ -814,35 +814,45 @@ class StrikeEA2DEnv(EnvBase):
         # ------------------------------------------------------------------
         separation_pen_full = torch.zeros(B, A, device=self.device)
 
-        if ns > 1 and float(rp.striker_separation_scale) != 0.0 and float(rp.striker_separation_thresh) > 0.0:
+        if ns > 1 and float(rp.striker_sep_d_max) > 0.0:
             striker_pos = self.agent_pos[:, :ns, :]  # [B, ns, 2]
             d_ss = torch.cdist(striker_pos, striker_pos)  # [B, ns, ns]
             eye_ss = torch.eye(ns, dtype=torch.bool, device=self.device).unsqueeze(0)
             striker_alive = self.agent_alive[:, :ns]
-            valid_ss = (
-                striker_alive.unsqueeze(-1)
-                & striker_alive.unsqueeze(-2)
-                & (~eye_ss)
+            valid_ss = striker_alive.unsqueeze(-1) & striker_alive.unsqueeze(-2) & (~eye_ss)
+            d_ss_valid = d_ss.masked_fill(~valid_ss, float("inf"))
+            d_ss_nearest = d_ss_valid.min(dim=-1).values  # [B, ns]
+            has_neighbor_ss = torch.isfinite(d_ss_nearest)
+            striker_sep = -self._piecewise_lin_exp(
+                d_ss_nearest,
+                d_max=rp.striker_sep_d_max,
+                d_knee=rp.striker_sep_d_knee,
+                w_lin=rp.striker_sep_w_lin,
+                w_exp=rp.striker_sep_w_exp,
+                alpha=rp.striker_sep_alpha,
             )
-            pen_ss = -float(rp.striker_separation_scale) * (1.0 - d_ss / float(rp.striker_separation_thresh)).clamp(min=0.0)
-            pen_ss = torch.where(valid_ss, pen_ss, torch.zeros_like(pen_ss))
-            striker_sep = pen_ss.sum(dim=-1)  # [B, ns]
+            striker_sep = torch.where(has_neighbor_ss & striker_alive, striker_sep, torch.zeros_like(striker_sep))
             reward[:, :ns] += striker_sep
             separation_pen_full[:, :ns] += striker_sep
 
-        if nj > 1 and float(rp.jammer_separation_scale) != 0.0 and float(rp.jammer_separation_thresh) > 0.0:
+        if nj > 1 and float(rp.jammer_sep_d_max) > 0.0:
             jammer_pos = self.agent_pos[:, ns:, :]  # [B, nj, 2]
             d_jj = torch.cdist(jammer_pos, jammer_pos)  # [B, nj, nj]
             eye_jj = torch.eye(nj, dtype=torch.bool, device=self.device).unsqueeze(0)
             jammer_alive = self.agent_alive[:, ns:]
-            valid_jj = (
-                jammer_alive.unsqueeze(-1)
-                & jammer_alive.unsqueeze(-2)
-                & (~eye_jj)
+            valid_jj = jammer_alive.unsqueeze(-1) & jammer_alive.unsqueeze(-2) & (~eye_jj)
+            d_jj_valid = d_jj.masked_fill(~valid_jj, float("inf"))
+            d_jj_nearest = d_jj_valid.min(dim=-1).values  # [B, nj]
+            has_neighbor_jj = torch.isfinite(d_jj_nearest)
+            jammer_sep = -self._piecewise_lin_exp(
+                d_jj_nearest,
+                d_max=rp.jammer_sep_d_max,
+                d_knee=rp.jammer_sep_d_knee,
+                w_lin=rp.jammer_sep_w_lin,
+                w_exp=rp.jammer_sep_w_exp,
+                alpha=rp.jammer_sep_alpha,
             )
-            pen_jj = -float(rp.jammer_separation_scale) * (1.0 - d_jj / float(rp.jammer_separation_thresh)).clamp(min=0.0)
-            pen_jj = torch.where(valid_jj, pen_jj, torch.zeros_like(pen_jj))
-            jammer_sep = pen_jj.sum(dim=-1)  # [B, nj]
+            jammer_sep = torch.where(has_neighbor_jj & jammer_alive, jammer_sep, torch.zeros_like(jammer_sep))
             reward[:, ns:] += jammer_sep
             separation_pen_full[:, ns:] += jammer_sep
 

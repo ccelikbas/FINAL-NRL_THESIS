@@ -136,10 +136,17 @@ class RewardConfig:
     mission_reward_weight: float = 0.02
 
     # ─── SAME-ROLE SEPARATION PENALTY (optional shaping) ─────────────────────
-    striker_separation_scale: float = 0.05
-    striker_separation_thresh: float = 50.0
-    jammer_separation_scale: float = 0.05
-    jammer_separation_thresh: float = 50.0
+    striker_sep_d_max:  float = 0.0
+    striker_sep_d_knee: float = 0.0
+    striker_sep_w_lin:  float = 0.0
+    striker_sep_w_exp:  float = 0.0
+    striker_sep_alpha:  float = 0.0
+
+    jammer_sep_d_max:  float = 0.0
+    jammer_sep_d_knee: float = 0.0
+    jammer_sep_w_lin:  float = 0.0
+    jammer_sep_w_exp:  float = 0.0
+    jammer_sep_alpha:  float = 0.0
 
 
 
