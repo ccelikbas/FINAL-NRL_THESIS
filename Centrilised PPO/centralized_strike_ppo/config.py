@@ -67,7 +67,7 @@ class PPOConfig:
     gamma: float = 0.99
     lmbda: float = 0.95
     clip_eps: float = 0.2
-    entropy_coef: float = 0 #1e-3, turned off
+    entropy_coef: float = 0.01 #1e-3, turned off
     normalize_rewards: bool = True
 
     actor_lr: float = 3e-4

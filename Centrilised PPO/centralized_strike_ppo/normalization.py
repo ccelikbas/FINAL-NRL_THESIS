@@ -58,10 +58,9 @@ class RunningMeanStd:
 
 
 class RewardNormalizer:
-    """Return-based reward normalization for MAPPO rollouts.
+    """Per-step reward-based normalization for MAPPO rollouts.
 
-    - Tracks per-env discounted returns.
-    - Updates running std from returns.
+    - Tracks running stats of per-step tracked rewards.
     - Normalizes rewards by dividing by std only (no mean subtraction).
     """
 
@@ -75,22 +74,21 @@ class RewardNormalizer:
     ):
         self.device = device
         self.num_envs = int(num_envs)
+        # Keep gamma for backward-compatible checkpoint loading/config surface.
         self.gamma = float(gamma)
         self.eps = float(eps)
-        self.returns = torch.zeros(int(num_envs), dtype=torch.float32, device=device)  # [B]
         self.ret_rms = RunningMeanStd(device=device)
 
     def state_dict(self) -> Dict[str, torch.Tensor]:
         return {
-            "returns": self.returns.detach().clone(),
             "ret_rms": self.ret_rms.state_dict(),
             "gamma": torch.tensor(self.gamma, dtype=torch.float32, device=self.device),
             "eps": torch.tensor(self.eps, dtype=torch.float32, device=self.device),
         }
 
     def load_state_dict(self, state_dict: Dict[str, torch.Tensor]) -> None:
-        self.returns = state_dict["returns"].detach().to(self.device, dtype=torch.float32)
-        self.ret_rms.load_state_dict(state_dict["ret_rms"])
+        if "ret_rms" in state_dict:
+            self.ret_rms.load_state_dict(state_dict["ret_rms"])
         if "gamma" in state_dict:
             self.gamma = float(state_dict["gamma"].item())
         if "eps" in state_dict:
@@ -100,18 +98,10 @@ class RewardNormalizer:
     def _normalize_step(self, reward_t: torch.Tensor, done_t: torch.Tensor) -> torch.Tensor:
         # reward_t: [B, A, 1], done_t: [B, 1]
         reward_t = reward_t.to(self.device)
-        done_t = done_t.to(self.device)
+        _ = done_t.to(self.device)
 
-        team_reward_t = reward_t.squeeze(-1).mean(dim=-1)  # [B]
-        done_mask = done_t.squeeze(-1).to(torch.float32)   # [B]
-
-        # Correct timing for terminal transitions:
-        # 1) accumulate return with current reward,
-        # 2) update running stats with this full return,
-        # 3) then reset done environments.
-        self.returns = self.gamma * self.returns + team_reward_t
-        self.ret_rms.update(self.returns)
-        self.returns = self.returns * (1.0 - done_mask)
+        r_track = reward_t.squeeze(-1).mean(dim=-1)  # [B]
+        self.ret_rms.update(r_track)
 
         std = self.ret_rms.std.clamp_min(self.eps)
         return reward_t / std
