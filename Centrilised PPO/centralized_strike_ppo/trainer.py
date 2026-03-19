@@ -473,6 +473,14 @@ def train_centralized_ppo(
 
         # Print logs for this iteration
         if do_eval:
+            norm_log = ""
+            if bool(ppo_cfg.normalize_rewards):
+                norm_log = (
+                    f" | raw_σ {norm_stats['raw_reward_std']:.4f}"
+                    f" | norm_σ {norm_stats['normalized_reward_std']:.4f}"
+                    f" | ret_std {norm_stats['running_std']:.4f}"
+                    f" | ret_μ {norm_stats['running_mean']:.4f}"
+                )
             print(
                 f"Iter {it + 1:4d}/{ppo_cfg.n_iters} | "
                 f"train_ep_return_total {logs['train_mean_episode_total_reward'][-1]: .3f} | "
@@ -485,6 +493,7 @@ def train_centralized_ppo(
                 f"value {logs['loss_value'][-1]:.4f} | "
                 f"ev {logs['explained_variance'][-1]:.4f} | "
                 f"entropy {logs['entropy'][-1]:.4f}"
+                f"{norm_log}"
             )
 
         if it + 1 >= ppo_cfg.n_iters:
