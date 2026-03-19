@@ -71,7 +71,7 @@ class RewardNormalizer:
         num_envs: int,
         gamma: float,
         device: torch.device,
-        eps: float = 1e-8,
+        eps: float = 1e-2,
     ):
         self.device = device
         self.num_envs = int(num_envs)
@@ -98,42 +98,20 @@ class RewardNormalizer:
 
     @torch.no_grad()
     def _normalize_step(self, reward_t: torch.Tensor, done_t: torch.Tensor) -> torch.Tensor:
-        # reward_t: [B, A, 1], done_t: [B, 1] (or shape-compatible variant)
+        # reward_t: [B, A, 1], done_t: [B, 1]
         reward_t = reward_t.to(self.device)
         done_t = done_t.to(self.device)
 
-        team_reward_t = reward_t.squeeze(-1).sum(dim=-1)  # expected [B]
-        if team_reward_t.ndim != 1:
-            raise ValueError(f"Expected team reward [B], got shape {tuple(team_reward_t.shape)}")
+        team_reward_t = reward_t.squeeze(-1).mean(dim=-1)  # [B]
+        done_mask = done_t.squeeze(-1).to(torch.float32)   # [B]
 
-        done_mask = done_t.to(torch.float32)
-        if done_mask.ndim > 1 and done_mask.shape[-1] == 1:
-            done_mask = done_mask.squeeze(-1)
-        if done_mask.ndim > 1:
-            done_mask = done_mask.reshape(done_mask.shape[0], -1).amax(dim=-1)
-        if done_mask.ndim != 1:
-            done_mask = done_mask.reshape(-1)
-
-        if done_mask.numel() != self.returns.numel() and done_t.ndim >= 2 and done_t.shape[0] != self.returns.numel() and done_t.shape[1] == self.returns.numel():
-            transposed = done_t.transpose(0, 1).to(torch.float32)
-            if transposed.ndim > 1 and transposed.shape[-1] == 1:
-                transposed = transposed.squeeze(-1)
-            if transposed.ndim > 1:
-                transposed = transposed.reshape(transposed.shape[0], -1).amax(dim=-1)
-            done_mask = transposed.reshape(-1)
-
-        if team_reward_t.numel() != self.returns.numel() and reward_t.ndim >= 3 and reward_t.shape[0] != self.returns.numel() and reward_t.shape[1] == self.returns.numel():
-            team_reward_t = reward_t.transpose(0, 1).squeeze(-1).sum(dim=-1)
-
-        if done_mask.numel() != self.returns.numel() or team_reward_t.numel() != self.returns.numel():
-            raise ValueError(
-                "RewardNormalizer shape mismatch: "
-                f"returns={tuple(self.returns.shape)}, reward_t={tuple(reward_t.shape)}, done_t={tuple(done_t.shape)}"
-            )
-
-        self.returns = self.returns * (1.0 - done_mask)
+        # Correct timing for terminal transitions:
+        # 1) accumulate return with current reward,
+        # 2) update running stats with this full return,
+        # 3) then reset done environments.
         self.returns = self.gamma * self.returns + team_reward_t
         self.ret_rms.update(self.returns)
+        self.returns = self.returns * (1.0 - done_mask)
 
         std = self.ret_rms.std.clamp_min(self.eps)
         return reward_t / std
