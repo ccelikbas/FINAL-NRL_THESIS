@@ -41,6 +41,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--critic_lr", type=float, default=ppo_defaults.critic_lr)
     p.add_argument("--clip_eps", type=float, default=ppo_defaults.clip_eps)
     p.add_argument("--entropy_coef", type=float, default=ppo_defaults.entropy_coef)
+    p.add_argument("--normalize_rewards", action=argparse.BooleanOptionalAction, default=ppo_defaults.normalize_rewards)
     p.add_argument("--seed", type=int, default=ppo_defaults.seed)
     # Network
     p.add_argument("--actor_hidden", type=int, default=net_defaults.actor_hidden)
@@ -57,6 +58,7 @@ def build_parser() -> argparse.ArgumentParser:
     # Save
     p.add_argument("--save_dir", type=str, default="runs")
     p.add_argument("--save_name", type=str, default="centralized_actor.pt")
+    p.add_argument("--load_checkpoint", type=str, default=None)
     p.add_argument("--no_plot", action="store_true")
     p.add_argument("--no_animate", action="store_true")
     return p
@@ -89,6 +91,7 @@ def main() -> None:
         critic_lr=args.critic_lr,
         clip_eps=args.clip_eps,
         entropy_coef=args.entropy_coef,
+        normalize_rewards=args.normalize_rewards,
         seed=args.seed,
     )
     net_cfg = NetworkConfig(
@@ -97,7 +100,17 @@ def main() -> None:
         depth=args.depth,
     )
     cfg = ExperimentConfig(env=env_cfg, ppo=ppo_cfg, net=net_cfg).finalize()
-    base_env, actor, critic, logs = train_centralized_ppo(cfg.env, cfg.ppo, cfg.net)
+    checkpoint = None
+    if args.load_checkpoint:
+        checkpoint = torch.load(args.load_checkpoint, map_location=cfg.ppo.device)
+        print(f"Loaded checkpoint from: {args.load_checkpoint}")
+
+    base_env, actor, critic, logs, reward_normalizer = train_centralized_ppo(
+        cfg.env,
+        cfg.ppo,
+        cfg.net,
+        checkpoint=checkpoint,
+    )
     save_dir = Path(args.save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
     save_path = save_dir / args.save_name
@@ -109,6 +122,9 @@ def main() -> None:
             "ppo_cfg": cfg.ppo,
             "net_cfg": cfg.net,
             "logs": logs,
+            "reward_normalizer_state_dict": (
+                reward_normalizer.state_dict() if reward_normalizer is not None else None
+            ),
         },
         save_path,
     )

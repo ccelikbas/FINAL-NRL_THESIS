@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import math
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -15,6 +15,7 @@ from torchrl.objectives import ValueEstimators
 from .config import EnvConfig, NetworkConfig, PPOConfig
 from .environment import StrikeEA2DEnv
 from .models import make_actor, make_critic
+from .normalization import RewardNormalizer
 from .utils import call_gae, get_loss_component, make_collector, make_ppo_loss, prepare_done_keys
 
 from centralized_strike_ppo.visualization import TestRunner, animate_rollout, plot_training
@@ -229,7 +230,8 @@ def train_centralized_ppo(
     env_cfg: EnvConfig,
     ppo_cfg: PPOConfig,
     net_cfg: NetworkConfig,
-) -> Tuple[StrikeEA2DEnv, object, object, Dict[str, List[float]]]:
+    checkpoint: Optional[Dict[str, Any]] = None,
+) -> Tuple[StrikeEA2DEnv, object, object, Dict[str, List[float]], Optional[RewardNormalizer]]:
     device = ppo_cfg.device
 
     base_env = build_env(env_cfg, ppo_cfg)
@@ -242,6 +244,24 @@ def train_centralized_ppo(
     # Define the actor and critic networks 
     actor = make_actor(base_env, hidden=net_cfg.actor_hidden, depth=net_cfg.depth)
     critic = make_critic(base_env, hidden=net_cfg.critic_hidden, depth=net_cfg.depth)
+    reward_normalizer: Optional[RewardNormalizer] = None
+    if bool(ppo_cfg.normalize_rewards):
+        reward_normalizer = RewardNormalizer(
+            num_envs=ppo_cfg.num_envs,
+            gamma=ppo_cfg.gamma,
+            device=device,
+        )
+
+    if checkpoint is not None:
+        try:
+            if "actor_state_dict" in checkpoint:
+                actor.load_state_dict(checkpoint["actor_state_dict"])
+            if "critic_state_dict" in checkpoint:
+                critic.load_state_dict(checkpoint["critic_state_dict"])
+            if reward_normalizer is not None and checkpoint.get("reward_normalizer_state_dict") is not None:
+                reward_normalizer.load_state_dict(checkpoint["reward_normalizer_state_dict"])
+        except Exception as exc:
+            print(f"checkpoint load warning (continuing): {type(exc).__name__}: {exc}")
 
     # The collector is responsible for collecting experience from the environment using the current policy (actor) and providing it to the training loop
     collector = make_collector(env, actor, ppo_cfg.frames_per_batch, ppo_cfg.n_iters, device)
@@ -281,6 +301,12 @@ def train_centralized_ppo(
         "eval_survival_rate": [],
         "eval_mean_duration": [],
         "eval_task_completion_rate": [],
+        "reward_norm_running_mean": [],
+        "reward_norm_running_std": [],
+        "raw_reward_mean": [],
+        "raw_reward_std": [],
+        "normalized_reward_mean": [],
+        "normalized_reward_std": [],
     }
     for comp_key in EVAL_REWARD_COMPONENT_KEYS:
         logs[f"eval_component_{comp_key}"] = []
@@ -290,6 +316,27 @@ def train_centralized_ppo(
     for it, td in enumerate(collector):
         # Create a TensorDict from the collected experience for observations, actions, rewards, etc. (one itteration of collected experience)
         td = td.to(device)
+
+        # Reward normalization is applied after collection and before GAE.
+        if reward_normalizer is not None:
+            norm_stats = reward_normalizer.normalize_rollout_td(
+                td,
+                reward_key=("next",) + base_env._reward_key,
+                done_key=("next", "done"),
+            )
+        else:
+            raw_r = td.get(("next",) + base_env._reward_key)
+            raw_mean = float(raw_r.mean().item()) if raw_r.numel() > 0 else float("nan")
+            raw_std = float(raw_r.std(unbiased=False).item()) if raw_r.numel() > 0 else float("nan")
+            norm_stats = {
+                "running_mean": float("nan"),
+                "running_std": float("nan"),
+                "raw_reward_mean": raw_mean,
+                "raw_reward_std": raw_std,
+                "normalized_reward_mean": raw_mean,
+                "normalized_reward_std": raw_std,
+            }
+
         # Helper fucntion: It takes the scalar done flag [B, 1] at the root of the TensorDict and copies it into the agent group as [B, A, 1] so that the PPO loss module can find it at the key it expects
         prepare_done_keys(td, base_env)
 
@@ -398,6 +445,12 @@ def train_centralized_ppo(
         logs["entropy"].append(ent_acc / div)
         logs["approx_kl"].append(kl_acc / div)
         logs["clip_ratio"].append(clip_acc / div)
+        logs["reward_norm_running_mean"].append(norm_stats["running_mean"])
+        logs["reward_norm_running_std"].append(norm_stats["running_std"])
+        logs["raw_reward_mean"].append(norm_stats["raw_reward_mean"])
+        logs["raw_reward_std"].append(norm_stats["raw_reward_std"])
+        logs["normalized_reward_mean"].append(norm_stats["normalized_reward_mean"])
+        logs["normalized_reward_std"].append(norm_stats["normalized_reward_std"])
 
         # Mission-level evaluation logs: separate from training itterations
         do_eval = bool(ppo_cfg.log_every) and ((it + 1) % ppo_cfg.log_every == 0)
@@ -443,4 +496,4 @@ def train_centralized_ppo(
     except Exception:
         pass
 
-    return base_env, actor, critic, logs
+    return base_env, actor, critic, logs, reward_normalizer

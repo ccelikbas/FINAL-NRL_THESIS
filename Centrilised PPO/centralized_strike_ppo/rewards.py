@@ -125,7 +125,7 @@ class RewardConfig:
     striker_formation_scale:    float = 0   # reward to each striker for being near a jammer
     striker_formation_ref_dist: float = 0    # distance (map units) beyond which reward = 0
 
-    jammer_formation_scale:     float = 0.01   # reward to each jammer for being near a striker
+    jammer_formation_scale:     float = 0.05   # reward to each jammer for being near a striker
     jammer_formation_ref_dist:  float = 0.5    # distance (map units) beyond which reward = 0
 
     # ─── OPTIONAL PAPER-STYLE MISSION REWARD ────────────────────────────────
@@ -145,13 +145,13 @@ class RewardConfig:
     # Typical w_lin, w_exp: 0.01–0.05 (gentle penalty relative to approach rewards).
     striker_sep_d_max:  float = 0.1
     striker_sep_d_knee: float = 0.0
-    striker_sep_w_lin:  float = 0.01
+    striker_sep_w_lin:  float = 0.05
     striker_sep_w_exp:  float = 0.0
     striker_sep_alpha:  float = 0.0
 
     jammer_sep_d_max:  float = 0.1
     jammer_sep_d_knee: float = 0.0
-    jammer_sep_w_lin:  float = 0.01
+    jammer_sep_w_lin:  float = 0.05
     jammer_sep_w_exp:  float = 0.0
     jammer_sep_alpha:  float = 0.0
 
