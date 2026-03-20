@@ -16,9 +16,11 @@ class RewardConfig:
     • Exponential region: steep gradient near the entity of interest.
     • Continuous at d_knee (exponential term = 0 at the boundary).
 
-    Sign convention:
-      Approach rewards (striker→target, jammer→radar) are *positive*.
-      Avoidance penalties (border, radar zone) are *negative* (−f).
+        Sign convention:
+            Approach shaping (striker→target, jammer→radar) is flipped into a
+            distance penalty: it is **0 at d = 0** and becomes more negative as
+            distance increases.
+            Avoidance penalties (border, radar zone) are *negative* (−f).
 
     Tuning guide:
     - w_lin : overall magnitude in the linear region
@@ -69,39 +71,38 @@ class RewardConfig:
     # This shaping does not switch with live jamming state; it always uses
     # the jammed effective range as the avoidance boundary.
     # Agents inside lethal radar range are still handled by agent_destroyed.
-    radar_avoid_w_lin:  float = 0  # reduced so approach reward dominates
+    radar_avoid_w_lin:  float = 0.05  # reduced so approach reward dominates
     radar_avoid_w_exp:  float = 0
-    radar_avoid_d_max:  float = 0   # penalty starts 200 km outside zone edge
+    radar_avoid_d_max:  float = 0.2   # penalty starts 200 km outside zone edge
     radar_avoid_d_knee: float = 0   # 30 km from zone → exponential
     radar_avoid_alpha:  float = 0
 
-    # ─── STRIKER APPROACH  (piecewise lin-exp reward toward targets) ──────────
-    # Positive reward that increases as striker gets closer to alive targets.
-    # d_max=1.0 covers the full map width so the approach reward is nonzero
-    # from ANY starting position. w_lin=0.5 ensures the linear-region reward
-    # exceeds the timestep penalty even at mid-map distances:
-    #   f(0.5) = 0.5 × (1.0−0.5)/(1.0−0.15) = 0.29 > 0.05 ✓
+    # ─── STRIKER APPROACH  (piecewise lin-exp distance penalty toward targets) ──────────
+    # Flipped from a positive approach reward into a penalty that is 0 at d=0
+    # and becomes more negative as the striker gets farther from alive targets.
+    # The same shape and scale are kept; only the sign/baseline are flipped.
     striker_approach_w_lin:  float = 0.1
-    striker_approach_w_exp:  float = 0    # strong pull into engage range
+    striker_approach_w_exp:  float = 0    # same scale as before, now as penalty
     striker_approach_d_max:  float = 1    # spans FULL map width (was 0.5)
-    striker_approach_d_knee: float = 0   # exponential onset near engage range (0.10)
+    striker_approach_d_knee: float = 0    # exponential onset near engage range (0.10)
     striker_approach_alpha:  float = 0
     striker_nearest_only:    bool  = True
-    # True  = reward based only on distance to nearest alive target
-    # False = reward = mean over all alive targets (encourages approaching all)
+    # True  = penalty based only on distance to nearest alive target
+    # False = penalty = mean over all alive targets (same aggregation as before)
 
-    # ─── JAMMER APPROACH  (piecewise lin-exp reward toward radars) ────────────
-    # Positive reward that increases as jammer gets closer to radars.
+    # ─── JAMMER APPROACH  (piecewise lin-exp distance penalty toward radars) ────────────
+    # Flipped from a positive approach reward into a penalty that is 0 at d=0
+    # and becomes more negative as the jammer gets farther from radars.
     # Matched to striker approach scale so both agents have equally strong
-    # gradients pulling them toward their respective objectives.
+    # gradients, but now in the away-from-target direction.
     jammer_approach_w_lin:  float = 0    # matched to striker
-    jammer_approach_w_exp:  float = 0    # moderate exponential near jam range
+    jammer_approach_w_exp:  float = 0    # same scale as before, now as penalty
     jammer_approach_d_max:  float = 0    # spans full map (was 0.5)
     jammer_approach_d_knee: float = 0    # exponential onset inside jam_radius (0.35)
     jammer_approach_alpha:  float = 0
     jammer_nearest_only:    bool  = False
-    # True  = reward based only on distance to nearest radar
-    # False = reward = mean over all radars (encourages approaching all)
+    # True  = penalty based only on distance to nearest radar
+    # False = penalty = mean over all radars (same aggregation as before)
 
     # ─── POTENTIAL-BASED PROGRESS  (per-step velocity signal) ────────────────
     # Reward = scale × (prev_dist − curr_dist). At v_max=0.02, each step of
@@ -194,7 +195,7 @@ def plot_reward_functions(reward_config: RewardConfig, distance_range: Tuple[flo
     """
     d = torch.linspace(distance_range[0], distance_range[1], 1000)
 
-    # Striker approach reward (positive)
+    # Striker approach distance penalty (0 at d=0, negative as d increases)
     striker_app = _piecewise_lin_exp(
         d,
         d_max=reward_config.striker_approach_d_max,
@@ -203,10 +204,26 @@ def plot_reward_functions(reward_config: RewardConfig, distance_range: Tuple[flo
         w_exp=reward_config.striker_approach_w_exp,
         alpha=reward_config.striker_approach_alpha,
     )
+    striker_app = striker_app - _piecewise_lin_exp(
+        torch.zeros((), device=d.device),
+        d_max=reward_config.striker_approach_d_max,
+        d_knee=reward_config.striker_approach_d_knee,
+        w_lin=reward_config.striker_approach_w_lin,
+        w_exp=reward_config.striker_approach_w_exp,
+        alpha=reward_config.striker_approach_alpha,
+    )
 
-    # Jammer approach reward (positive)
+    # Jammer approach distance penalty (0 at d=0, negative as d increases)
     jammer_app = _piecewise_lin_exp(
         d,
+        d_max=reward_config.jammer_approach_d_max,
+        d_knee=reward_config.jammer_approach_d_knee,
+        w_lin=reward_config.jammer_approach_w_lin,
+        w_exp=reward_config.jammer_approach_w_exp,
+        alpha=reward_config.jammer_approach_alpha,
+    )
+    jammer_app = jammer_app - _piecewise_lin_exp(
+        torch.zeros((), device=d.device),
         d_max=reward_config.jammer_approach_d_max,
         d_knee=reward_config.jammer_approach_d_knee,
         w_lin=reward_config.jammer_approach_w_lin,
@@ -245,8 +262,8 @@ def plot_reward_functions(reward_config: RewardConfig, distance_range: Tuple[flo
     ).clamp(min=0.0)
 
     plt.figure(figsize=(12, 7))
-    plt.plot(d.numpy(), striker_app.numpy(), label="Striker Approach", color="#1f77b4", linewidth=2)
-    plt.plot(d.numpy(), jammer_app.numpy(), label="Jammer Approach", color="#17becf", linewidth=2)
+    plt.plot(d.numpy(), striker_app.numpy(), label="Striker Distance Penalty", color="#1f77b4", linewidth=2)
+    plt.plot(d.numpy(), jammer_app.numpy(), label="Jammer Distance Penalty", color="#17becf", linewidth=2)
     plt.plot(d.numpy(), radar.numpy(), label="Radar Avoidance", color="#9467bd", linewidth=2)
     plt.plot(d.numpy(), border.numpy(), label="Border Avoidance", color="#d62728", linewidth=2)
     plt.plot(d.numpy(), striker_form.numpy(), label="Striker Formation (↔ jammer)", color="#8c564b", linewidth=2)

@@ -620,7 +620,9 @@ class StrikeEA2DEnv(EnvBase):
         reward += radar_pen
 
         # ------------------------------------------------------------------
-        # 5. Striker approach  (piecewise lin-exp reward toward targets)
+        # 5. Striker approach  (piecewise lin-exp distance penalty toward targets)
+        #    Flipped so it is 0 at d=0 and becomes more negative as the
+        #    striker moves farther from the target.
         # ------------------------------------------------------------------
         striker_approach_full = torch.zeros(B, A, device=self.device)
         if striker_idx.numel() > 0 and self.n_targets > 0:
@@ -649,6 +651,16 @@ class StrikeEA2DEnv(EnvBase):
                 n_alive_t = mask_t.float().sum(dim=-1).clamp_min(1.0)     # [B, ns]
                 striker_app = app_vals.sum(dim=-1) / n_alive_t            # [B, ns]
 
+            striker_zero = self._piecewise_lin_exp(
+                torch.zeros((), device=self.device, dtype=dist_st.dtype),
+                d_max=rp.striker_approach_d_max,
+                d_knee=rp.striker_approach_d_knee,
+                w_lin=rp.striker_approach_w_lin,
+                w_exp=rp.striker_approach_w_exp,
+                alpha=rp.striker_approach_alpha,
+            )
+            striker_app = striker_app - striker_zero
+
             # Zero when all targets dead
             any_alive = mask_t.any(dim=-1)
             striker_app = torch.where(any_alive, striker_app, torch.zeros_like(striker_app))
@@ -659,7 +671,9 @@ class StrikeEA2DEnv(EnvBase):
             striker_approach_full[:, :self.n_strikers] = striker_app
 
         # ------------------------------------------------------------------
-        # 6. Jammer approach  (piecewise lin-exp reward toward radars)
+        # 6. Jammer approach  (piecewise lin-exp distance penalty toward radars)
+        #    Flipped so it is 0 at d=0 and becomes more negative as the
+        #    jammer moves farther from the radar.
         # ------------------------------------------------------------------
         jammer_approach_full = torch.zeros(B, A, device=self.device)
         if jammer_idx.numel() > 0 and self.n_radars > 0:
@@ -682,6 +696,16 @@ class StrikeEA2DEnv(EnvBase):
                 jammer_app = app_vals_j.gather(-1, nearest_idx_j).squeeze(-1)  # [B, nj]
             else:
                 jammer_app = app_vals_j.mean(dim=-1)                      # [B, nj]
+
+            jammer_zero = self._piecewise_lin_exp(
+                torch.zeros((), device=self.device, dtype=dist_jr.dtype),
+                d_max=rp.jammer_approach_d_max,
+                d_knee=rp.jammer_approach_d_knee,
+                w_lin=rp.jammer_approach_w_lin,
+                w_exp=rp.jammer_approach_w_exp,
+                alpha=rp.jammer_approach_alpha,
+            )
+            jammer_app = jammer_app - jammer_zero
 
             jammer_app = jammer_app * jammer_alive_f
             reward[:, self.n_strikers:] += jammer_app
