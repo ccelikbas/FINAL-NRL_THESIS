@@ -48,6 +48,22 @@ def plot_training(logs: Dict[str, List[float]]) -> None:
     # --- Training plots ---
     if "train_mean_episode_total_reward" in logs:
         _plot_valid(axes[0, 0], logs["train_mean_episode_total_reward"], "train_ep_return_total")
+
+    # Plot per-component training return lines only if they are non-zero somewhere.
+    for key in sorted(logs.keys()):
+        if not key.startswith("train_component_"):
+            continue
+        y = np.asarray(logs[key], dtype=float)
+        if y.size == 0:
+            continue
+        valid = np.isfinite(y)
+        if not np.any(valid):
+            continue
+        if np.nanmax(np.abs(y[valid])) <= 1e-12:
+            continue
+        label = key.replace("train_component_", "")
+        _plot_valid(axes[0, 0], logs[key], label)
+
     axes[0, 0].set_title("Training Episode Reward")
     axes[0, 0].set_xlabel("Iteration")
     axes[0, 0].legend()

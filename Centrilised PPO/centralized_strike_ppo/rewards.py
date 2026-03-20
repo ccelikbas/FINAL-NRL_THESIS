@@ -33,11 +33,11 @@ class RewardConfig:
     """
 
     # ─── SPARSE TEAM REWARDS ─────────────────────────────────────────────────
-    target_destroyed: float = 3 
+    target_destroyed: float = 6
     # Reward when a target is killed.
     # Distribution controlled by team_spirit parameter (see below).
 
-    timestep_penalty: float = -0.1
+    timestep_penalty: float = -0.05
     # Per-step cost per alive agent. Kept low relative to approach reward
     # so the per-step signal is clearly positive when approaching.
     # Over 50 steps × 2 agents = −5 total (10% of kill reward).
@@ -71,7 +71,7 @@ class RewardConfig:
     # This shaping does not switch with live jamming state; it always uses
     # the jammed effective range as the avoidance boundary.
     # Agents inside lethal radar range are still handled by agent_destroyed.
-    radar_avoid_w_lin:  float = 0.05  # reduced so approach reward dominates
+    radar_avoid_w_lin:  float = 0.2  # reduced so approach reward dominates
     radar_avoid_w_exp:  float = 0
     radar_avoid_d_max:  float = 0.2   # penalty starts 200 km outside zone edge
     radar_avoid_d_knee: float = 0   # 30 km from zone → exponential
@@ -122,13 +122,12 @@ class RewardConfig:
     # and each jammer for being close to the nearest *alive striker*.
     # Same-role proximity (striker↔striker, jammer↔jammer) is NOT rewarded.
     # Works for any ns × nj configuration (1+1, 1+2, 2+2, …).
-    #
     # Reward = scale × max(0, 1 − d_nearest_cross_role / ref_dist)
     # Set scale to 0.0 to disable for that role independently.
     striker_formation_scale:    float = 0   # reward to each striker for being near a jammer
     striker_formation_ref_dist: float = 0    # distance (map units) beyond which reward = 0
 
-    jammer_formation_scale:     float = 0.05   # reward to each jammer for being near a striker
+    jammer_formation_scale:     float = 0.1   # reward to each jammer for being near a striker
     jammer_formation_ref_dist:  float = 0.5    # distance (map units) beyond which reward = 0
 
     # ─── OPTIONAL PAPER-STYLE MISSION REWARD ────────────────────────────────

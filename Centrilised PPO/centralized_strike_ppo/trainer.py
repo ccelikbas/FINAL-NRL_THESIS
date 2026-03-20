@@ -309,6 +309,8 @@ def train_centralized_ppo(
         "normalized_reward_std": [],
     }
     for comp_key in EVAL_REWARD_COMPONENT_KEYS:
+        logs[f"train_component_{comp_key}"] = []
+    for comp_key in EVAL_REWARD_COMPONENT_KEYS:
         logs[f"eval_component_{comp_key}"] = []
 
     # MAIN TRAINING LOOP:
@@ -427,6 +429,15 @@ def train_centralized_ppo(
         else:
             train_mean_episode_total_reward = float("nan")
 
+        train_component_means = {comp_key: float("nan") for comp_key in EVAL_REWARD_COMPONENT_KEYS}
+        if train_ep_stats:
+            for comp_key in EVAL_REWARD_COMPONENT_KEYS:
+                comp_vals = [
+                    float(s.get("episode_component_reward", {}).get(comp_key, float("nan")))
+                    for s in train_ep_stats
+                ]
+                train_component_means[comp_key] = _finite_mean(comp_vals)
+
         # Algorithm-performance logs (during training, not evaluation). Averaged over all updates in this iteration.
         div = max(1, n_updates)
 
@@ -451,6 +462,8 @@ def train_centralized_ppo(
         logs["raw_reward_std"].append(norm_stats["raw_reward_std"])
         logs["normalized_reward_mean"].append(norm_stats["normalized_reward_mean"])
         logs["normalized_reward_std"].append(norm_stats["normalized_reward_std"])
+        for comp_key in EVAL_REWARD_COMPONENT_KEYS:
+            logs[f"train_component_{comp_key}"].append(train_component_means[comp_key])
 
         # Mission-level evaluation logs: separate from training itterations
         do_eval = bool(ppo_cfg.log_every) and ((it + 1) % ppo_cfg.log_every == 0)

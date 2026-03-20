@@ -170,6 +170,22 @@ class StrikeEA2DEnv(EnvBase):
         self._jammer_prev_dist = torch.zeros(B, n_jammers, n_radars, device=self._device)
         # Running team-total reward per env for current episode (sum over agents)
         self._episode_team_reward = torch.zeros(B, device=self.device)
+        # Running per-component team-total reward per env for current episode
+        self._episode_component_reward = {
+            "target_destroyed": torch.zeros(B, device=self.device),
+            "border_penalty": torch.zeros(B, device=self.device),
+            "timestep_penalty": torch.zeros(B, device=self.device),
+            "radar_avoidance": torch.zeros(B, device=self.device),
+            "striker_approach": torch.zeros(B, device=self.device),
+            "jammer_approach": torch.zeros(B, device=self.device),
+            "striker_progress": torch.zeros(B, device=self.device),
+            "jammer_progress": torch.zeros(B, device=self.device),
+            "jammer_jam_bonus": torch.zeros(B, device=self.device),
+            "formation": torch.zeros(B, device=self.device),
+            "agent_destroyed": torch.zeros(B, device=self.device),
+            "paper_mission": torch.zeros(B, device=self.device),
+            "separation_penalty": torch.zeros(B, device=self.device),
+        }
 
         # Episode outcome tracking (bypasses tensordict auto-reset overwrite)
         self._completed_episodes: list = []
@@ -427,6 +443,8 @@ class StrikeEA2DEnv(EnvBase):
             self.radar_eff_range[reset_idx] = self.radar_range
             self.step_count[reset_idx] = 0
             self._episode_team_reward[reset_idx] = 0.0
+            for comp_key in self._episode_component_reward:
+                self._episode_component_reward[comp_key][reset_idx] = 0.0
 
             # Initialise previous distances for striker progress reward
             if self.n_strikers > 0 and self.n_targets > 0:
@@ -906,6 +924,8 @@ class StrikeEA2DEnv(EnvBase):
         # Accumulate team-total reward per env for episode-level logging
         step_team_reward = reward.squeeze(-1).sum(dim=-1)  # [B]
         self._episode_team_reward += step_team_reward
+        for comp_key, comp_tensor in self.last_reward_components.items():
+            self._episode_component_reward[comp_key] += comp_tensor.sum(dim=-1)
 
         # ---- done flags ----
         self.step_count += 1
@@ -935,10 +955,16 @@ class StrikeEA2DEnv(EnvBase):
                         "survival_frac": surv_frac,
                         "duration": int(self.step_count[b, 0].item()),
                         "episode_total_reward": float(self._episode_team_reward[b].item()),
+                        "episode_component_reward": {
+                            comp_key: float(self._episode_component_reward[comp_key][b].item())
+                            for comp_key in self._episode_component_reward
+                        },
                     })
 
             # Avoid duplicate logging if terminal envs are stepped again before reset
             self._episode_team_reward[done.squeeze(-1)] = 0.0
+            for comp_key in self._episode_component_reward:
+                self._episode_component_reward[comp_key][done.squeeze(-1)] = 0.0
 
         return next_td
 
@@ -952,7 +978,8 @@ class StrikeEA2DEnv(EnvBase):
         Each entry is a dict with keys:
           mission_complete (bool), targets_frac (float),
                     survival_frac (float), duration (int),
-                    episode_total_reward (float).
+                                        episode_total_reward (float),
+                                        episode_component_reward (dict[str, float]).
         """
         stats = self._completed_episodes
         self._completed_episodes = []
