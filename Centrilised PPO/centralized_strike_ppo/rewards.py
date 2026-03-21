@@ -33,7 +33,7 @@ class RewardConfig:
     """
 
     # ─── SPARSE TEAM REWARDS ─────────────────────────────────────────────────
-    target_destroyed: float = 6
+    target_destroyed: float = 3
     # Reward when a target is killed.
     # Distribution controlled by team_spirit parameter (see below).
 
@@ -71,9 +71,9 @@ class RewardConfig:
     # This shaping does not switch with live jamming state; it always uses
     # the jammed effective range as the avoidance boundary.
     # Agents inside lethal radar range are still handled by agent_destroyed.
-    radar_avoid_w_lin:  float = 0.2  # reduced so approach reward dominates
+    radar_avoid_w_lin:  float = 0.05  # reduced so approach reward dominates
     radar_avoid_w_exp:  float = 0
-    radar_avoid_d_max:  float = 0.2   # penalty starts 200 km outside zone edge
+    radar_avoid_d_max:  float = 0.3   # penalty starts 200 km outside zone edge
     radar_avoid_d_knee: float = 0   # 30 km from zone → exponential
     radar_avoid_alpha:  float = 0
 
@@ -127,8 +127,8 @@ class RewardConfig:
     striker_formation_scale:    float = 0   # reward to each striker for being near a jammer
     striker_formation_ref_dist: float = 0    # distance (map units) beyond which reward = 0
 
-    jammer_formation_scale:     float = 0.1   # reward to each jammer for being near a striker
-    jammer_formation_ref_dist:  float = 0.5    # distance (map units) beyond which reward = 0
+    jammer_formation_scale:     float = 0.05   # reward to each jammer for being near a striker
+    jammer_formation_ref_dist:  float = 0.2    # distance (map units) beyond which reward = 0
 
     # ─── OPTIONAL PAPER-STYLE MISSION REWARD ────────────────────────────────
     # R_mission = -Reward_fn(n_targets_alive, n_targets_initial)
