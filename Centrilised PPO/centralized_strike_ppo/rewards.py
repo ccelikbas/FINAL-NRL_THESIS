@@ -159,7 +159,6 @@ class RewardConfig:
 
 
 
-
 '''
 RUN: Visualisation of the piecewise linear-exponential shaping function using current paramters:
 '''

@@ -185,7 +185,7 @@ class TestRunner:
 
     def _snapshot(self) -> Dict[str, torch.Tensor]:
         env = self.env
-        return {
+        snap = {
             "agent_pos": env.agent_pos[0].detach().cpu(),
             "agent_alive": env.agent_alive[0].detach().cpu(),
             "agent_heading": env.agent_heading[0].detach().cpu(),
@@ -194,10 +194,39 @@ class TestRunner:
             "radar_pos": env.radar_pos[0].detach().cpu(),
             "radar_eff_range": env.radar_eff_range[0].detach().cpu(),
         }
+        # Capture per-step reward components (not available on first frame before any step)
+        if hasattr(env, "last_reward_components") and env.last_reward_components:
+            snap["reward_components"] = {
+                k: v[0].detach().cpu().clone() for k, v in env.last_reward_components.items()
+            }
+        return snap
 
 
 def animate_rollout(frames: List[Dict[str, torch.Tensor]], env: StrikeEA2DEnv, interval_ms: int = 70):
-    fig, ax = plt.subplots(figsize=(10, 10))
+    # --- Pre-compute reward time-series from frames ---
+    reward_ts: Dict[str, List[float]] = {}  # component_name -> list of per-step team-sum values
+    total_ts: List[float] = []
+    for fr in frames:
+        rc = fr.get("reward_components")
+        if rc is None:
+            continue
+        step_total = 0.0
+        for comp_name, comp_tensor in rc.items():
+            val = float(comp_tensor.sum().item())
+            reward_ts.setdefault(comp_name, []).append(val)
+            step_total += val
+        total_ts.append(step_total)
+
+    # Filter to only non-zero components for cleaner plot
+    active_components = {k: v for k, v in reward_ts.items() if any(abs(x) > 1e-9 for x in v)}
+
+    # --- Create figure: animation (left) + reward plot (right) ---
+    fig = plt.figure(figsize=(20, 9))
+    gs = fig.add_gridspec(1, 2, width_ratios=[1, 1], wspace=0.25)
+    ax = fig.add_subplot(gs[0, 0])
+    ax_rew = fig.add_subplot(gs[0, 1])
+
+    # -- Left panel: rollout animation (same as before) --
     ax.set_xlim(0, 1000)
     ax.set_ylim(0, 1000)
     ax.set_aspect("equal", adjustable="box")
@@ -216,6 +245,29 @@ def animate_rollout(frames: List[Dict[str, torch.Tensor]], env: StrikeEA2DEnv, i
     heading_lines = [ax.plot([], [])[0] for _ in range(env.n_agents)]
     ax.legend(loc="upper right")
 
+    # -- Right panel: reward time-series (static plot drawn once, vertical line animated) --
+    ax_rew.set_xlabel("Timestep")
+    ax_rew.set_ylabel("Reward (team sum)")
+    ax_rew.set_title("Per-Timestep Reward Components")
+
+    n_reward_steps = len(total_ts)
+    if n_reward_steps > 0:
+        timesteps = np.arange(1, n_reward_steps + 1)
+
+        # Plot each active component
+        for comp_name, values in sorted(active_components.items()):
+            ax_rew.plot(timesteps, values, lw=1.5, alpha=0.8, label=comp_name)
+
+        # Plot total reward as a thicker black line
+        ax_rew.plot(timesteps, total_ts, lw=2.5, color="black", label="total", zorder=10)
+        ax_rew.axhline(0, color="gray", lw=0.5)
+        ax_rew.set_xlim(1, max(n_reward_steps, 2))
+        ax_rew.legend(loc="best", fontsize=7, ncol=2)
+    ax_rew.grid(True, alpha=0.3)
+
+    # Vertical line to track current timestep on the reward plot
+    time_vline = ax_rew.axvline(x=1, color="red", lw=1.5, ls="--", alpha=0.8)
+
     empty_xy = np.empty((0, 2), dtype=float)
 
     def init():
@@ -229,7 +281,8 @@ def animate_rollout(frames: List[Dict[str, torch.Tensor]], env: StrikeEA2DEnv, i
             a.set_visible(False)
         for ln in heading_lines:
             ln.set_data([], [])
-        return [striker_sc, jammer_sc, target_sc, radar_sc, *radar_circles, *jammer_circles, *striker_arcs, *heading_lines]
+        time_vline.set_xdata([1])
+        return [striker_sc, jammer_sc, target_sc, radar_sc, *radar_circles, *jammer_circles, *striker_arcs, *heading_lines, time_vline]
 
     def update(i: int):
         fr = frames[i]
@@ -288,8 +341,13 @@ def animate_rollout(frames: List[Dict[str, torch.Tensor]], env: StrikeEA2DEnv, i
                 ln.set_data([], [])
 
         ax.set_xlabel(f"t={i} | Agents: {int(aa.sum().item())}/{env.n_agents} | Targets: {int(ta.sum().item())}/{env.n_targets}")
-        return [striker_sc, jammer_sc, target_sc, radar_sc, *radar_circles, *jammer_circles, *striker_arcs, *heading_lines]
 
-    ani = animation.FuncAnimation(fig, update, frames=len(frames), init_func=init, interval=interval_ms, blit=True, repeat=False)
+        # Update vertical time marker on reward plot (frame 0 = reset, reward steps start at frame 1)
+        reward_step = min(i, n_reward_steps) if n_reward_steps > 0 else 1
+        time_vline.set_xdata([reward_step])
+
+        return [striker_sc, jammer_sc, target_sc, radar_sc, *radar_circles, *jammer_circles, *striker_arcs, *heading_lines, time_vline]
+
+    ani = animation.FuncAnimation(fig, update, frames=len(frames), init_func=init, interval=interval_ms, blit=False, repeat=False)
     plt.show()
     return ani
