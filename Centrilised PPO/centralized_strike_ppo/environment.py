@@ -701,26 +701,27 @@ class StrikeEA2DEnv(EnvBase):
             dist_st    = torch.linalg.norm(rel_st_all, dim=-1)            # [B, ns, T]
             mask_t     = self.target_alive[:, None, :].expand(-1, self.n_strikers, -1)  # [B, ns, T]
 
-            # Compute shaping value per striker-target pair
-            app_vals = self._piecewise_lin_exp(
-                dist_st,
+            if rp.striker_nearest_only:
+                # Nearest alive target only
+                big_dist = torch.where(mask_t, dist_st, torch.full_like(dist_st, 1e6))
+                shaped_dist = big_dist.min(dim=-1).values                 # [B, ns]
+            else:
+                # Soft-nearest weighted distance over alive targets:
+                # w_i = 1 / (d_i + eps), normalized over alive targets only.
+                eps = 1e-6
+                inv_dist = torch.where(mask_t, 1.0 / (dist_st + eps), torch.zeros_like(dist_st))
+                weight_sum = inv_dist.sum(dim=-1, keepdim=True).clamp_min(eps)
+                weights = inv_dist / weight_sum
+                shaped_dist = (weights * dist_st).sum(dim=-1)             # [B, ns]
+
+            striker_app = self._piecewise_lin_exp(
+                shaped_dist,
                 d_max=rp.striker_approach_d_max,
                 d_knee=rp.striker_approach_d_knee,
                 w_lin=rp.striker_approach_w_lin,
                 w_exp=rp.striker_approach_w_exp,
                 alpha=rp.striker_approach_alpha,
-            )  # [B, ns, T]
-            app_vals = app_vals * mask_t.float()  # zero for dead targets
-
-            if rp.striker_nearest_only:
-                # Nearest alive target only
-                big_dist = torch.where(mask_t, dist_st, torch.full_like(dist_st, 1e6))
-                nearest_idx = big_dist.argmin(dim=-1, keepdim=True)       # [B, ns, 1]
-                striker_app = app_vals.gather(-1, nearest_idx).squeeze(-1) # [B, ns]
-            else:
-                # Mean over all alive targets
-                n_alive_t = mask_t.float().sum(dim=-1).clamp_min(1.0)     # [B, ns]
-                striker_app = app_vals.sum(dim=-1) / n_alive_t            # [B, ns]
+            )
 
             striker_zero = self._piecewise_lin_exp(
                 torch.zeros((), device=self.device, dtype=dist_st.dtype),

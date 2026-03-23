@@ -37,10 +37,9 @@ class RewardConfig:
     # Reward when a target is killed.
     # Distribution controlled by team_spirit parameter (see below).
 
-    terminal_bonus: float = 0.0
+    terminal_bonus: float = 1
     # One-time bonus granted when all targets are destroyed (mission complete).
     # Applied to every agent in the terminal transition.
-    # Set to 0.0 to disable.
 
     timestep_penalty: float = -0.01
     # Per-step cost per alive agent. Kept low relative to approach reward
@@ -92,9 +91,11 @@ class RewardConfig:
     striker_approach_d_max:  float = 1    # spans FULL map width (was 0.5)
     striker_approach_d_knee: float = 0    # exponential onset near engage range (0.10)
     striker_approach_alpha:  float = 0
-    striker_nearest_only:    bool  = True
-    # True  = penalty based only on distance to nearest alive target
-    # False = penalty = mean over all alive targets (same aggregation as before)
+    striker_nearest_only:    bool  = False
+    # True  = hard-nearest: use distance to nearest alive target.
+    # False = soft-nearest: compute shaped_dist = Σ_i (w_i * dist_i) over alive targets,
+    #         with w_i = (1 / (dist_i + eps)) / Σ_j (1 / (dist_j + eps)), eps=1e-6.
+    #         This smooths target-switching and reduces jumps when a target dies.
 
     # ─── JAMMER APPROACH  (piecewise lin-exp distance penalty toward radars) ────────────
     # Flipped from a positive approach reward into a penalty that is 0 at d=0
