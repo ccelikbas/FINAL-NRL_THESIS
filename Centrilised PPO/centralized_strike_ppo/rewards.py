@@ -76,7 +76,7 @@ class RewardConfig:
     # This shaping does not switch with live jamming state; it always uses
     # the jammed effective range as the avoidance boundary.
     # Agents inside lethal radar range are still handled by agent_destroyed.
-    radar_avoid_w_lin:  float = 0.01  # reduced so approach reward dominates
+    radar_avoid_w_lin:  float = 0.05  # reduced so approach reward dominates
     radar_avoid_w_exp:  float = 0
     radar_avoid_d_max:  float = 0.2   # penalty starts 200 km outside zone edge
     radar_avoid_d_knee: float = 0   # 30 km from zone → exponential
@@ -91,7 +91,7 @@ class RewardConfig:
     striker_approach_d_max:  float = 1    # spans FULL map width (was 0.5)
     striker_approach_d_knee: float = 0    # exponential onset near engage range (0.10)
     striker_approach_alpha:  float = 0
-    striker_nearest_only:    bool  = False
+    striker_nearest_only:    bool  = True
     # True  = hard-nearest: use distance to nearest alive target.
     # False = soft-nearest: compute shaped_dist = Σ_i (w_i * dist_i) over alive targets,
     #         with w_i = (1 / (dist_i + eps)) / Σ_j (1 / (dist_j + eps)), eps=1e-6.
