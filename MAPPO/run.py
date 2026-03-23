@@ -144,7 +144,7 @@ def main() -> None:
 
     if not args.no_animate:
         try:
-            for _ in range(5):
+            for _ in range(10):
                 tester = TestRunner(actor, env_cfg=cfg.env, device=cfg.ppo.device, seed=999)
                 frames = tester.rollout()
                 animate_rollout(frames, tester.env)
@@ -154,3 +154,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
