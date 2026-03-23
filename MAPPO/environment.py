@@ -521,6 +521,7 @@ class StrikeEA2DEnv(EnvBase):
         acc = self._act_table[action.long()]  # [B, A, 2] float in {-1,-0.5,-0.1,0,+0.1,+0.5,+1}
 
         alive = self.agent_alive  # Keep as bool for bitwise operations
+        alive_before_kill = alive
         alive_float = alive.float()  # Use for multiplication
 
         # ---- Velocity dynamics ----
@@ -601,6 +602,10 @@ class StrikeEA2DEnv(EnvBase):
             can        = can & alive[:, striker_idx, None] & self.target_alive[:, None, :]
             kill_t     = can.any(dim=1)
             self.target_alive = self.target_alive & (~kill_t)
+
+        # Refresh alive mask after kill updates so reward terms use current alive state.
+        alive = self.agent_alive
+        alive_float = alive.float()
 
         # ==================================================================
         # Reward computation  (piecewise linear-exponential shaping)
@@ -687,7 +692,7 @@ class StrikeEA2DEnv(EnvBase):
             w_lin=rp.radar_avoid_w_lin,
             w_exp=rp.radar_avoid_w_exp,
             alpha=rp.radar_avoid_alpha,
-        ) * alive_float
+        )
         reward += radar_pen
 
         # ------------------------------------------------------------------
