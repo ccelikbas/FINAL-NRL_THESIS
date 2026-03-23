@@ -33,16 +33,16 @@ class RewardConfig:
     """
 
     # ─── SPARSE TEAM REWARDS ─────────────────────────────────────────────────
-    target_destroyed: float = 3
+    target_destroyed: float = 1
     # Reward when a target is killed.
     # Distribution controlled by team_spirit parameter (see below).
 
-    timestep_penalty: float = -0.05
+    timestep_penalty: float = -0.01
     # Per-step cost per alive agent. Kept low relative to approach reward
     # so the per-step signal is clearly positive when approaching.
     # Over 50 steps × 2 agents = −5 total (10% of kill reward).
 
-    agent_destroyed: float = -3
+    agent_destroyed: float = -1
     # Penalty applied when an agent is killed by a radar.
     # Distribution controlled by team_spirit parameter (see below).
 
@@ -61,7 +61,8 @@ class RewardConfig:
 
     # ─── BORDER AVOIDANCE  (piecewise lin-exp penalty, per alive agent) ──────
     # d = distance from nearest map edge.  d_max = border_thresh (EnvConfig).
-    border_w_lin:  float = 0   # gentle early-warning ramp (50 km → 30 km from edge)
+    border_d_max:  float = 0.05
+    border_w_lin:  float = 0.1   # gentle early-warning ramp (50 km → 30 km from edge)
     border_w_exp:  float = 0
     border_d_knee: float = 0   # 30 km from edge → exponential kicks in
     border_alpha:  float = 0
@@ -240,10 +241,10 @@ def plot_reward_functions(reward_config: RewardConfig, distance_range: Tuple[flo
     )
 
     # Border avoidance penalty (negative)
-    border_dmax = distance_range[1]
+
     border = -_piecewise_lin_exp(
         d,
-        d_max=border_dmax,
+        d_max=reward_config.border_d_max,
         d_knee=reward_config.border_d_knee,
         w_lin=reward_config.border_w_lin,
         w_exp=reward_config.border_w_exp,

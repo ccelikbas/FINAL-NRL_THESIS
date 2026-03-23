@@ -21,7 +21,7 @@ step() returns a "next" nested TD (time t+1):
 from __future__ import annotations
 
 import math
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 import torch
 from tensordict import TensorDict
@@ -200,20 +200,62 @@ class StrikeEA2DEnv(EnvBase):
         self._rng.manual_seed(int(seed))
         return seed
 
+    @staticmethod
+    def _sample_spaced_radars(
+        n_radars: int,
+        x_lo: float, x_hi: float,
+        y_lo: float, y_hi: float,
+        min_sep: float,
+        rng: torch.Generator,
+        device: Optional[torch.device] = None,
+        max_attempts: int = 500,
+    ) -> torch.Tensor:
+        """Sample *n_radars* positions with at least *min_sep* between each pair.
+
+        Uses rejection sampling: draw candidates one-by-one, reject if too
+        close to any already-placed radar.  Falls back to uniform (no spacing
+        guarantee) after *max_attempts* total draws to avoid infinite loops.
+        """
+        sample_device = device if device is not None else torch.device("cpu")
+        placed: List[torch.Tensor] = []
+        attempts = 0
+        while len(placed) < n_radars and attempts < max_attempts:
+            cx = x_lo + (x_hi - x_lo) * torch.rand(1, generator=rng, device=sample_device)
+            cy = y_lo + (y_hi - y_lo) * torch.rand(1, generator=rng, device=sample_device)
+            candidate = torch.tensor([cx.item(), cy.item()], device=sample_device)
+            ok = True
+            for p in placed:
+                if torch.linalg.norm(candidate - p).item() < min_sep:
+                    ok = False
+                    break
+            if ok:
+                placed.append(candidate)
+            attempts += 1
+
+        # Fallback: fill remaining radars without spacing constraint
+        while len(placed) < n_radars:
+            cx = x_lo + (x_hi - x_lo) * torch.rand(1, generator=rng, device=sample_device)
+            cy = y_lo + (y_hi - y_lo) * torch.rand(1, generator=rng, device=sample_device)
+            placed.append(torch.tensor([cx.item(), cy.item()], device=sample_device))
+
+        return torch.stack(placed, dim=0)  # [R, 2]
+
     def _pregenerate_layouts(self):
         """Pre-generate fixed radar positions for n_env_layouts distinct scenarios.
 
-        Radars are placed in the top half of the map with margin from borders.
+        Radars are placed within the configured spawn zone with minimum spacing.
         Each layout uses a deterministic seed for reproducibility.
         """
         layouts = []
-        margin = 0.1  # 100 km margin from borders
+        x_lo, x_hi = 0.2, 0.8
+        y_lo, y_hi = 0.6, 0.8
+        min_sep = 0.2
         for seed_idx in range(self.n_env_layouts):
             rng = torch.Generator()
             rng.manual_seed(seed_idx + 1000)  # Offset to avoid collision with main RNG
-            radar_x = self.low + margin + (self.high - self.low - 2 * margin) * torch.rand(self.n_radars, generator=rng)
-            radar_y = 0.5 + (self.high - 0.5 - margin) * torch.rand(self.n_radars, generator=rng)
-            radar_pos = torch.stack([radar_x, radar_y], dim=-1)  # [R, 2]
+            radar_pos = self._sample_spaced_radars(
+                self.n_radars, x_lo, x_hi, y_lo, y_hi, min_sep, rng,
+            )
             layouts.append(radar_pos)
         return layouts
 
@@ -426,14 +468,14 @@ class StrikeEA2DEnv(EnvBase):
                     layout_idx = env_i % len(self._layouts)
                     radar_pos_reset[i] = self._layouts[layout_idx].to(self.device)
             else:
-                # Fully random radar positions in top half with margin
-                margin = 0.1  # 100 km from borders
-                radar_pos_reset[..., 0] = (self.low + margin
-                    + (self.high - self.low - 2 * margin)
-                    * torch.rand(n_reset, R, device=self.device, generator=self._rng))
-                radar_pos_reset[..., 1] = (0.5
-                    + (self.high - 0.5 - margin)
-                    * torch.rand(n_reset, R, device=self.device, generator=self._rng))
+                # Random radar positions with minimum spacing constraint
+                x_lo, x_hi = 0.2, 0.8
+                y_lo, y_hi = 0.6, 0.8
+                min_sep = 0.2
+                for i in range(n_reset):
+                    radar_pos_reset[i] = self._sample_spaced_radars(
+                        R, x_lo, x_hi, y_lo, y_hi, min_sep, self._rng, device=self.device,
+                    ).to(self.device)
             self.radar_pos[reset_idx] = radar_pos_reset
 
             # Spawn targets relative to radars (strategic zone logic)
@@ -604,7 +646,7 @@ class StrikeEA2DEnv(EnvBase):
         ], dim=-1).min(dim=-1).values                                     # [B, A]
         border_pen = -self._piecewise_lin_exp(
             dist_bord,
-            d_max=self.border_thresh,
+            d_max=rp.border_d_max,
             d_knee=rp.border_d_knee,
             w_lin=rp.border_w_lin,
             w_exp=rp.border_w_exp,
