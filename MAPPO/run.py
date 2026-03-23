@@ -6,15 +6,12 @@ from pathlib import Path
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from mappo_strike_ppo.config import EnvConfig, ExperimentConfig, NetworkConfig, PPOConfig
-    from mappo_strike_ppo.trainer import train_mappo
-    from mappo_strike_ppo.rewards import RewardConfig
-    from mappo_strike_ppo.visualization import TestRunner, animate_rollout, plot_training
-else:
-    from .config import EnvConfig, ExperimentConfig, NetworkConfig, PPOConfig
-    from .trainer import train_mappo
-    from .rewards import RewardConfig
-    from .visualization import TestRunner, animate_rollout, plot_training
+    __package__ = "MAPPO"
+
+from .config import EnvConfig, ExperimentConfig, NetworkConfig, PPOConfig
+from .trainer import train_mappo
+from .rewards import RewardConfig
+from .visualization import TestRunner, animate_rollout, plot_training
 
 import torch
 
