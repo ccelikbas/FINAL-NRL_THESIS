@@ -836,26 +836,28 @@ class StrikeEA2DEnv(EnvBase):
                 striker_pos[:, :, None, :] - jammer_pos[:, None, :, :], dim=-1
             )  # [B, ns, nj]
 
-            # --- Striker formation: reward each live striker near nearest live jammer ---
+            # --- Striker formation: distance penalty toward nearest live jammer ---
+            #     Flipped: 0 at d=0, −scale at d ≥ ref_dist.
             if float(rp.striker_formation_scale) > 0:
                 # Mask dead jammers so they are never selected as "nearest"
                 dead_j = ~self.agent_alive[:, ns:].unsqueeze(1).expand(B, ns, nj)  # [B, ns, nj]
                 d_near_j = d_sj.masked_fill(dead_j, float('inf')).min(dim=-1).values  # [B, ns]
                 striker_form = float(rp.striker_formation_scale) * (
-                    1.0 - d_near_j / float(rp.striker_formation_ref_dist)
-                ).clamp(min=0.0) * alive[:, :ns].float()
+                    (1.0 - d_near_j / float(rp.striker_formation_ref_dist)).clamp(min=0.0) - 1.0
+                ) * alive[:, :ns].float()
                 reward[:, :ns]        += striker_form
                 formation_full[:, :ns] = striker_form
 
-            # --- Jammer formation: reward each live jammer near nearest live striker ---
+            # --- Jammer formation: distance penalty toward nearest live striker ---
+            #     Flipped: 0 at d=0, −scale at d ≥ ref_dist.
             if float(rp.jammer_formation_scale) > 0:
                 # Transpose to [B, nj, ns] then mask dead strikers
                 d_js   = d_sj.transpose(1, 2)                                          # [B, nj, ns]
                 dead_s = ~self.agent_alive[:, :ns].unsqueeze(1).expand(B, nj, ns)      # [B, nj, ns]
                 d_near_s = d_js.masked_fill(dead_s, float('inf')).min(dim=-1).values   # [B, nj]
                 jammer_form = float(rp.jammer_formation_scale) * (
-                    1.0 - d_near_s / float(rp.jammer_formation_ref_dist)
-                ).clamp(min=0.0) * alive[:, ns:].float()
+                    (1.0 - d_near_s / float(rp.jammer_formation_ref_dist)).clamp(min=0.0) - 1.0
+                ) * alive[:, ns:].float()
                 reward[:, ns:]        += jammer_form
                 formation_full[:, ns:] = jammer_form
 

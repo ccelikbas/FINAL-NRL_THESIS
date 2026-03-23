@@ -119,11 +119,12 @@ class RewardConfig:
     jammer_jam_bonus: float = 0   # Deactivated
 
     # ─── FORMATION COHESION  (striker ↔ jammer cross-role proximity) ──────────
-    # Each striker is rewarded for being close to the nearest *alive jammer*,
-    # and each jammer for being close to the nearest *alive striker*.
-    # Same-role proximity (striker↔striker, jammer↔jammer) is NOT rewarded.
+    # Each striker/jammer receives a distance penalty for being far from the
+    # nearest alive cross-role teammate.  Flipped sign convention (same as
+    # striker approach): 0 at d=0, becomes more negative as distance grows.
+    # Penalty = scale × (max(0, 1 − d / ref_dist) − 1)
+    #         = 0 at d=0,  −scale at d ≥ ref_dist.
     # Works for any ns × nj configuration (1+1, 1+2, 2+2, …).
-    # Reward = scale × max(0, 1 − d_nearest_cross_role / ref_dist)
     # Set scale to 0.0 to disable for that role independently.
     striker_formation_scale:    float = 0   # reward to each striker for being near a jammer
     striker_formation_ref_dist: float = 0    # distance (map units) beyond which reward = 0
@@ -251,14 +252,14 @@ def plot_reward_functions(reward_config: RewardConfig, distance_range: Tuple[flo
         alpha=reward_config.border_alpha,
     )
 
-    # Formation proximity reward — striker side (linear decay, cross-role)
+    # Formation distance penalty — striker side (flipped: 0 at d=0, −scale at d≥ref_dist)
     striker_form = reward_config.striker_formation_scale * (
-        1.0 - d / reward_config.striker_formation_ref_dist
-    ).clamp(min=0.0)
-    # Formation proximity reward — jammer side (linear decay, cross-role)
+        (1.0 - d / reward_config.striker_formation_ref_dist).clamp(min=0.0) - 1.0
+    )
+    # Formation distance penalty — jammer side (flipped: 0 at d=0, −scale at d≥ref_dist)
     jammer_form = reward_config.jammer_formation_scale * (
-        1.0 - d / reward_config.jammer_formation_ref_dist
-    ).clamp(min=0.0)
+        (1.0 - d / reward_config.jammer_formation_ref_dist).clamp(min=0.0) - 1.0
+    )
 
     plt.figure(figsize=(12, 7))
     plt.plot(d.numpy(), striker_app.numpy(), label="Striker Distance Penalty", color="#1f77b4", linewidth=2)
