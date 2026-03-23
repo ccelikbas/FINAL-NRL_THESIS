@@ -23,6 +23,7 @@ from centralized_strike_ppo.visualization import TestRunner, animate_rollout, pl
 
 EVAL_REWARD_COMPONENT_KEYS: Tuple[str, ...] = (
     "target_destroyed",
+    "terminal_bonus",
     "border_penalty",
     "timestep_penalty",
     "radar_avoidance",

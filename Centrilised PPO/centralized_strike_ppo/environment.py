@@ -173,6 +173,7 @@ class StrikeEA2DEnv(EnvBase):
         # Running per-component team-total reward per env for current episode
         self._episode_component_reward = {
             "target_destroyed": torch.zeros(B, device=self.device),
+            "terminal_bonus": torch.zeros(B, device=self.device),
             "border_penalty": torch.zeros(B, device=self.device),
             "timestep_penalty": torch.zeros(B, device=self.device),
             "radar_avoidance": torch.zeros(B, device=self.device),
@@ -636,6 +637,15 @@ class StrikeEA2DEnv(EnvBase):
             target_destroyed_full = target_rew
 
         # ------------------------------------------------------------------
+        # 1b. Mission-complete terminal bonus (all targets destroyed)
+        # ------------------------------------------------------------------
+        terminal_bonus_full = torch.zeros(B, A, device=self.device)
+        all_targets_done_now = (~self.target_alive).all(dim=-1)  # [B]
+        if float(rp.terminal_bonus) != 0.0 and all_targets_done_now.any():
+            terminal_bonus_full[all_targets_done_now] = float(rp.terminal_bonus)
+            reward += terminal_bonus_full
+
+        # ------------------------------------------------------------------
         # 2. Border avoidance  (piecewise lin-exp penalty, d_max = border_thresh)
         # ------------------------------------------------------------------
         pos       = self.agent_pos
@@ -964,6 +974,7 @@ class StrikeEA2DEnv(EnvBase):
         # Store per-component reward breakdown for diagnostics  (each [B, A])
         self.last_reward_components = {
             "target_destroyed":   target_destroyed_full.detach(),
+            "terminal_bonus":     terminal_bonus_full.detach(),
             "border_penalty":     border_pen.detach(),
             "timestep_penalty":   timestep_rew.detach(),
             "radar_avoidance":    radar_pen.detach(),

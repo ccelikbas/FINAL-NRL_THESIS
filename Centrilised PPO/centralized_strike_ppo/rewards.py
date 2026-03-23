@@ -37,6 +37,11 @@ class RewardConfig:
     # Reward when a target is killed.
     # Distribution controlled by team_spirit parameter (see below).
 
+    terminal_bonus: float = 0.0
+    # One-time bonus granted when all targets are destroyed (mission complete).
+    # Applied to every agent in the terminal transition.
+    # Set to 0.0 to disable.
+
     timestep_penalty: float = -0.01
     # Per-step cost per alive agent. Kept low relative to approach reward
     # so the per-step signal is clearly positive when approaching.
