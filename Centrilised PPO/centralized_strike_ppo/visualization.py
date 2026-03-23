@@ -248,6 +248,7 @@ def animate_rollout(frames: List[Dict[str, torch.Tensor]], env: StrikeEA2DEnv, i
     # -- Right panel: reward time-series (static plot drawn once, vertical line animated) --
     ax_rew.set_xlabel("Timestep")
     ax_rew.set_ylabel("Reward (team sum)")
+    ax_rew.set_ylim(-0.25, 0.25)
     ax_rew.set_title("Per-Timestep Reward Components")
 
     n_reward_steps = len(total_ts)

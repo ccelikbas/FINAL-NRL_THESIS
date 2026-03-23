@@ -185,6 +185,7 @@ class StrikeEA2DEnv(EnvBase):
             "agent_destroyed": torch.zeros(B, device=self.device),
             "paper_mission": torch.zeros(B, device=self.device),
             "separation_penalty": torch.zeros(B, device=self.device),
+            "control_effort": torch.zeros(B, device=self.device),
         }
 
         # Episode outcome tracking (bypasses tensordict auto-reset overwrite)
