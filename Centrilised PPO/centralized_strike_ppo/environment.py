@@ -946,6 +946,20 @@ class StrikeEA2DEnv(EnvBase):
             reward[:, ns:] += jammer_sep
             separation_pen_full[:, ns:] += jammer_sep
 
+        # ------------------------------------------------------------------
+        # 12. Control effort penalty  (per alive agent)
+        #     -accel_effort_scale × accel² - angular_effort_scale × angular²
+        # ------------------------------------------------------------------
+        control_pen_full = torch.zeros(B, A, device=self.device)
+        accel_scale = float(rp.accel_effort_scale)
+        angular_scale = float(rp.angular_effort_scale)
+        if (accel_scale > 0 or angular_scale > 0):
+            # acc: [B, A, 2] — multipliers in {-1, -0.5, -0.1, 0, +0.1, +0.5, +1}
+            control_pen = -(accel_scale * acc[..., 0] ** 2
+                            + angular_scale * acc[..., 1] ** 2) * alive_float
+            reward += control_pen
+            control_pen_full = control_pen
+
         # Store per-component reward breakdown for diagnostics  (each [B, A])
         self.last_reward_components = {
             "target_destroyed":   target_destroyed_full.detach(),
@@ -961,6 +975,7 @@ class StrikeEA2DEnv(EnvBase):
             "agent_destroyed":    death_pen_full.detach(),
             "paper_mission":      mission_reward_full.detach(),
             "separation_penalty": separation_pen_full.detach(),
+            "control_effort":     control_pen_full.detach(),
         }
         
         reward = reward.unsqueeze(-1).contiguous()  # [B, A, 1]

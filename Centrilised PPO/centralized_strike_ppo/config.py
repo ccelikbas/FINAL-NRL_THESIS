@@ -17,8 +17,8 @@ class EnvConfig:
     # Team composition
     n_strikers: int = 1
     n_jammers: int = 1
-    n_targets: int = 2
-    n_radars: int = 2
+    n_targets: int = 1
+    n_radars: int = 1
 
     # World / episode
     world_bounds: Tuple[float, float] = (0.0, 1.0)
@@ -59,7 +59,7 @@ class EnvConfig:
 @dataclass
 class PPOConfig:
     num_envs: int = 256 #256
-    n_iters: int = 10
+    n_iters: int = 50
     frames_per_batch: Optional[int] = None
     num_epochs: int = 10
     minibatch_size: int = 2048

@@ -35,6 +35,7 @@ EVAL_REWARD_COMPONENT_KEYS: Tuple[str, ...] = (
     "agent_destroyed",
     "paper_mission",
     "separation_penalty",
+    "control_effort",
 )
 
 

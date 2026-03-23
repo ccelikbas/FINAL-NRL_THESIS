@@ -62,7 +62,7 @@ class RewardConfig:
     # ─── BORDER AVOIDANCE  (piecewise lin-exp penalty, per alive agent) ──────
     # d = distance from nearest map edge.  d_max = border_thresh (EnvConfig).
     border_d_max:  float = 0.05
-    border_w_lin:  float = 0.1   # gentle early-warning ramp (50 km → 30 km from edge)
+    border_w_lin:  float = 0.05   # gentle early-warning ramp (50 km → 30 km from edge)
     border_w_exp:  float = 0
     border_d_knee: float = 0   # 30 km from edge → exponential kicks in
     border_alpha:  float = 0
@@ -74,7 +74,7 @@ class RewardConfig:
     # Agents inside lethal radar range are still handled by agent_destroyed.
     radar_avoid_w_lin:  float = 0.05  # reduced so approach reward dominates
     radar_avoid_w_exp:  float = 0
-    radar_avoid_d_max:  float = 0.3   # penalty starts 200 km outside zone edge
+    radar_avoid_d_max:  float = 0.1   # penalty starts 200 km outside zone edge
     radar_avoid_d_knee: float = 0   # 30 km from zone → exponential
     radar_avoid_alpha:  float = 0
 
@@ -130,7 +130,7 @@ class RewardConfig:
     striker_formation_ref_dist: float = 0    # distance (map units) beyond which reward = 0
 
     jammer_formation_scale:     float = 0.05   # reward to each jammer for being near a striker
-    jammer_formation_ref_dist:  float = 0.2    # distance (map units) beyond which reward = 0
+    jammer_formation_ref_dist:  float = 0.5    # distance (map units) beyond which reward = 0
 
     # ─── OPTIONAL PAPER-STYLE MISSION REWARD ────────────────────────────────
     # R_mission = -Reward_fn(n_targets_alive, n_targets_initial)
@@ -158,6 +158,14 @@ class RewardConfig:
     jammer_sep_w_lin:  float = 0.05
     jammer_sep_w_exp:  float = 0.0
     jammer_sep_alpha:  float = 0.0
+
+    # ─── CONTROL EFFORT PENALTY  (per alive agent, per step) ───────────────
+    # Penalises large control actions to encourage smooth trajectories.
+    # Penalty = −accel_effort_scale × accel² − angular_effort_scale × angular_accel²
+    # where accel and angular_accel are the discrete multipliers in [-1, 1].
+    # Set both scales to 0.0 to disable.
+    accel_effort_scale:   float = 0.0   # weight on velocity-acceleration squared
+    angular_effort_scale: float = 0.0   # weight on angular-acceleration squared
 
 
 
