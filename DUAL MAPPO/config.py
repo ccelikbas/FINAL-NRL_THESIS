@@ -17,8 +17,8 @@ class EnvConfig:
     # Team composition
     n_strikers: int = 1
     n_jammers: int = 1
-    n_targets: int = 2
-    n_radars: int = 2
+    n_targets: int = 1
+    n_radars: int = 1
 
     # World / episode
     world_bounds: Tuple[float, float] = (0.0, 1.0)
@@ -49,7 +49,7 @@ class EnvConfig:
 
     # Threats
     radar_range: float = 0.20
-    radar_kill_probability: float = 0
+    radar_kill_probability: float = 1
 
     # Rewards
     border_thresh: float = 0.05

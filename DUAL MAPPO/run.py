@@ -5,8 +5,18 @@ import sys
 from pathlib import Path
 
 if __package__ in (None, ""):
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    __package__ = "MAPPO"
+    import types
+    _this_dir = Path(__file__).resolve().parent
+    sys.path.insert(0, str(_this_dir.parent))
+    # Register this directory as a proper Python package so that
+    # relative imports resolve to DUAL MAPPO modules, not MAPPO.
+    _pkg_name = "dual_mappo"
+    _pkg = types.ModuleType(_pkg_name)
+    _pkg.__path__ = [str(_this_dir)]
+    _pkg.__package__ = _pkg_name
+    _pkg.__file__ = str(_this_dir / "__init__.py")
+    sys.modules[_pkg_name] = _pkg
+    __package__ = _pkg_name
 
 from .config import EnvConfig, ExperimentConfig, NetworkConfig, PPOConfig
 from .trainer import train_mappo
