@@ -33,11 +33,11 @@ def _deterministic_context():
 
 
 def plot_training(logs: Dict[str, List[float]]) -> None:
-    """Plot training curves with per-role loss breakdown.
+    """Plot training curves with combined striker/jammer diagnostics.
 
     Layout (3×3):
-        Row 0: Training reward | Striker policy+value loss | Jammer policy+value loss
-        Row 1: Striker entropy/KL/clip/EV | Jammer entropy/KL/clip/EV | Combined loss overview
+        Row 0: Training reward | Combined policy+value loss | Combined entropy/KL/clip/EV
+        Row 1: (unused)
         Row 2: Eval return | Eval survival+completion | Eval duration
     """
     def _plot_valid(ax, series: List[float], label: str, **kwargs):
@@ -72,70 +72,47 @@ def plot_training(logs: Dict[str, List[float]]) -> None:
     ax.legend(fontsize=6)
     ax.grid(True)
 
-    # --- Row 0, Col 1: Striker Losses ---
+    # --- Row 0, Col 1: Combined striker+jammer losses ---
     ax = axes[0, 1]
     if "striker_loss_policy" in logs:
         _plot_valid(ax, logs["striker_loss_policy"], "striker_policy_loss", color="tab:blue")
     if "striker_loss_value" in logs:
         _plot_valid(ax, logs["striker_loss_value"], "striker_value_loss", color="tab:orange")
-    ax.set_title("Striker: Policy & Value Loss")
-    ax.set_xlabel("Iteration")
-    ax.legend()
-    ax.grid(True)
-
-    # --- Row 0, Col 2: Jammer Losses ---
-    ax = axes[0, 2]
     if "jammer_loss_policy" in logs:
-        _plot_valid(ax, logs["jammer_loss_policy"], "jammer_policy_loss", color="tab:blue")
+        _plot_valid(ax, logs["jammer_loss_policy"], "jammer_policy_loss", color="tab:green")
     if "jammer_loss_value" in logs:
-        _plot_valid(ax, logs["jammer_loss_value"], "jammer_value_loss", color="tab:orange")
-    ax.set_title("Jammer: Policy & Value Loss")
+        _plot_valid(ax, logs["jammer_loss_value"], "jammer_value_loss", color="tab:red")
+    ax.set_title("Policy & Value Loss (Striker + Jammer)")
     ax.set_xlabel("Iteration")
     ax.legend()
     ax.grid(True)
 
-    # --- Row 1, Col 0: Striker diagnostics ---
-    ax = axes[1, 0]
+    # --- Row 0, Col 2: Combined striker+jammer diagnostics ---
+    ax = axes[0, 2]
     if "striker_entropy" in logs:
-        _plot_valid(ax, logs["striker_entropy"], "entropy", color="tab:green")
-    if "striker_approx_kl" in logs:
-        _plot_valid(ax, logs["striker_approx_kl"], "kl_approx", color="tab:red")
-    if "striker_clip_ratio" in logs:
-        _plot_valid(ax, logs["striker_clip_ratio"], "clip_ratio", color="tab:purple")
-    if "striker_explained_variance" in logs:
-        _plot_valid(ax, logs["striker_explained_variance"], "explained_var", color="tab:cyan")
-    ax.set_title("Striker: Entropy, KL, Clip, EV")
-    ax.set_xlabel("Iteration")
-    ax.legend(fontsize=7)
-    ax.grid(True)
-
-    # --- Row 1, Col 1: Jammer diagnostics ---
-    ax = axes[1, 1]
+        _plot_valid(ax, logs["striker_entropy"], "striker_entropy", color="tab:green")
     if "jammer_entropy" in logs:
-        _plot_valid(ax, logs["jammer_entropy"], "entropy", color="tab:green")
+        _plot_valid(ax, logs["jammer_entropy"], "jammer_entropy", color="tab:olive")
+    if "striker_approx_kl" in logs:
+        _plot_valid(ax, logs["striker_approx_kl"], "striker_kl_approx", color="tab:red")
     if "jammer_approx_kl" in logs:
-        _plot_valid(ax, logs["jammer_approx_kl"], "kl_approx", color="tab:red")
+        _plot_valid(ax, logs["jammer_approx_kl"], "jammer_kl_approx", color="tab:pink")
+    if "striker_clip_ratio" in logs:
+        _plot_valid(ax, logs["striker_clip_ratio"], "striker_clip_ratio", color="tab:purple")
     if "jammer_clip_ratio" in logs:
-        _plot_valid(ax, logs["jammer_clip_ratio"], "clip_ratio", color="tab:purple")
+        _plot_valid(ax, logs["jammer_clip_ratio"], "jammer_clip_ratio", color="tab:brown")
+    if "striker_explained_variance" in logs:
+        _plot_valid(ax, logs["striker_explained_variance"], "striker_explained_var", color="tab:cyan")
     if "jammer_explained_variance" in logs:
-        _plot_valid(ax, logs["jammer_explained_variance"], "explained_var", color="tab:cyan")
-    ax.set_title("Jammer: Entropy, KL, Clip, EV")
+        _plot_valid(ax, logs["jammer_explained_variance"], "jammer_explained_var", color="tab:gray")
+    ax.set_title("Entropy / KL / Clip / EV (Striker + Jammer)")
     ax.set_xlabel("Iteration")
     ax.legend(fontsize=7)
     ax.grid(True)
 
-    # --- Row 1, Col 2: Combined loss overview ---
-    ax = axes[1, 2]
-    if "loss_policy" in logs:
-        _plot_valid(ax, logs["loss_policy"], "avg_policy_loss")
-    if "loss_value" in logs:
-        _plot_valid(ax, logs["loss_value"], "avg_value_loss")
-    if "entropy" in logs:
-        _plot_valid(ax, logs["entropy"], "avg_entropy")
-    ax.set_title("Combined (avg): Loss & Entropy")
-    ax.set_xlabel("Iteration")
-    ax.legend()
-    ax.grid(True)
+    # --- Row 1: intentionally unused (old separate/combined loss panels removed) ---
+    for ax in axes[1, :]:
+        ax.axis("off")
 
     # --- Row 2, Col 0: Eval Episode Return ---
     ax = axes[2, 0]
