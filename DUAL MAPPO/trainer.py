@@ -142,7 +142,7 @@ def evaluate_current_policy(
     policy: CombinedPolicy,
     env_cfg: EnvConfig,
     ppo_cfg: PPOConfig,
-    n_eval_episodes: int = 10,
+    n_eval_episodes: int = 30,
 ) -> Dict[str, float]:
     eval_env = StrikeEA2DEnv(
         num_envs=1,
