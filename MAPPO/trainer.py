@@ -130,7 +130,7 @@ def evaluate_current_policy(
     actor,
     env_cfg: EnvConfig,
     ppo_cfg: PPOConfig,
-    n_eval_episodes: int = 30,
+    n_eval_episodes: int = 10,
 ) -> Dict[str, float]:
     eval_env = StrikeEA2DEnv(
         num_envs=1,

@@ -41,7 +41,7 @@ class RewardConfig:
     # One-time bonus granted when all targets are destroyed (mission complete).
     # Applied to every agent in the terminal transition.
 
-    timestep_penalty: float = -0.01
+    timestep_penalty: float = -0.05
     # Per-step cost per alive agent. Kept low relative to approach reward
     # so the per-step signal is clearly positive when approaching.
     # Over 50 steps × 2 agents = −5 total (10% of kill reward).
