@@ -57,7 +57,7 @@ class EnvConfig:
 class PPOConfig:
     """Shared PPO hyperparameters used by BOTH the striker and jammer MAPPO instances."""
     num_envs: int = 512
-    n_iters: int = 200
+    n_iters: int = 400
     frames_per_batch: Optional[int] = None
     num_epochs: int = 10
     minibatch_size: int = 2048

@@ -152,11 +152,13 @@ def main() -> None:
         print(f"  striker_loss_policy             = {logs['striker_loss_policy'][-1]:.4f}")
         print(f"  striker_loss_value              = {logs['striker_loss_value'][-1]:.4f}")
         print(f"  striker_entropy                 = {logs['striker_entropy'][-1]:.4f}")
+        print(f"  striker_clip_ratio              = {logs['striker_clip_ratio'][-1]:.4f}")
         print(f"  striker_explained_variance      = {logs['striker_explained_variance'][-1]:.4f}")
         print(f"  --- Jammer ---")
         print(f"  jammer_loss_policy              = {logs['jammer_loss_policy'][-1]:.4f}")
         print(f"  jammer_loss_value               = {logs['jammer_loss_value'][-1]:.4f}")
         print(f"  jammer_entropy                  = {logs['jammer_entropy'][-1]:.4f}")
+        print(f"  jammer_clip_ratio               = {logs['jammer_clip_ratio'][-1]:.4f}")
         print(f"  jammer_explained_variance       = {logs['jammer_explained_variance'][-1]:.4f}")
 
     if not args.no_plot:

@@ -35,10 +35,9 @@ def _deterministic_context():
 def plot_training(logs: Dict[str, List[float]]) -> None:
     """Plot training curves with combined striker/jammer diagnostics.
 
-    Layout (3×3):
+    Layout (2×3):
         Row 0: Training reward | Combined policy+value loss | Combined entropy/KL/clip/EV
-        Row 1: (unused)
-        Row 2: Eval return | Eval survival+completion | Eval duration
+        Row 1: Eval return | Eval survival+completion | Eval duration
     """
     def _plot_valid(ax, series: List[float], label: str, **kwargs):
         y = np.asarray(series, dtype=float)
@@ -50,7 +49,7 @@ def plot_training(logs: Dict[str, List[float]]) -> None:
             return
         ax.plot(x[valid], y[valid], marker="o", markersize=2, label=label, **kwargs)
 
-    fig, axes = plt.subplots(3, 3, figsize=(22, 14))
+    fig, axes = plt.subplots(2, 3, figsize=(22, 10))
 
     # --- Row 0, Col 0: Training Episode Reward ---
     ax = axes[0, 0]
@@ -110,12 +109,8 @@ def plot_training(logs: Dict[str, List[float]]) -> None:
     ax.legend(fontsize=7)
     ax.grid(True)
 
-    # --- Row 1: intentionally unused (old separate/combined loss panels removed) ---
-    for ax in axes[1, :]:
-        ax.axis("off")
-
-    # --- Row 2, Col 0: Eval Episode Return ---
-    ax = axes[2, 0]
+    # --- Row 1, Col 0: Eval Episode Return ---
+    ax = axes[1, 0]
     if "eval_mean_episode_total_reward" in logs:
         _plot_valid(ax, logs["eval_mean_episode_total_reward"], "eval_ep_return_total")
     for key in sorted(logs.keys()):
@@ -134,8 +129,8 @@ def plot_training(logs: Dict[str, List[float]]) -> None:
     ax.legend(fontsize=6)
     ax.grid(True)
 
-    # --- Row 2, Col 1: Eval Survival & Completion ---
-    ax = axes[2, 1]
+    # --- Row 1, Col 1: Eval Survival & Completion ---
+    ax = axes[1, 1]
     if "eval_survival_rate" in logs:
         _plot_valid(ax, logs["eval_survival_rate"], "eval_survival_ratio")
     if "eval_task_completion_rate" in logs:
@@ -145,8 +140,8 @@ def plot_training(logs: Dict[str, List[float]]) -> None:
     ax.legend()
     ax.grid(True)
 
-    # --- Row 2, Col 2: Eval Mission Duration ---
-    ax = axes[2, 2]
+    # --- Row 1, Col 2: Eval Mission Duration ---
+    ax = axes[1, 2]
     if "eval_mean_duration" in logs:
         _plot_valid(ax, logs["eval_mean_duration"], "eval_mission_duration")
     ax.set_title("Eval Mission Duration")
@@ -155,7 +150,7 @@ def plot_training(logs: Dict[str, List[float]]) -> None:
     ax.grid(True)
 
     fig.suptitle("Dual-MAPPO Training Dashboard (Striker + Jammer)", fontsize=14, fontweight="bold")
-    fig.tight_layout(rect=[0, 0, 1, 0.97])
+    fig.tight_layout(rect=[0, 0, 1, 0.95])
     plt.show()
 
 
