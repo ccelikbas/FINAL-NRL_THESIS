@@ -253,7 +253,7 @@ class CombinedCritic(nn.Module):
         state = td.get("state")  # [B, state_dim]
         sv = self.striker_critic(state)  # [B, ns, 1]
         jv = self.jammer_critic(state)   # [B, nj, 1]
-        td.set(("agents", "state_value"), torch.cat([sv, jv], dim=1))
+        td.set(("agents", "state_value"), torch.cat([sv, jv], dim=-2))
         return td
 
 

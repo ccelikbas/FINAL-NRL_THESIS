@@ -6,10 +6,7 @@ from typing import Optional, Tuple
 
 import torch
 
-try:
-    from .rewards import RewardConfig
-except ImportError:
-    from rewards import RewardConfig
+from .rewards import RewardConfig
 
 
 @dataclass
