@@ -65,7 +65,7 @@ class RewardConfig:
 
     # ─── BORDER AVOIDANCE  (piecewise lin-exp penalty, per alive agent) ──────
     # d = distance from nearest map edge.  d_max = border_thresh (EnvConfig).
-    border_d_max:  float = 0.025
+    border_d_max:  float = 0.05
     border_w_lin:  float = 0.05  # gentle early-warning ramp (50 km → 30 km from edge)
     border_w_exp:  float = 0
     border_d_knee: float = 0   # 30 km from edge → exponential kicks in
@@ -78,7 +78,7 @@ class RewardConfig:
     # Agents inside lethal radar range are still handled by agent_destroyed.
     radar_avoid_w_lin:  float = 0.05  # reduced so approach reward dominates
     radar_avoid_w_exp:  float = 0
-    radar_avoid_d_max:  float = 0.2   # penalty starts 200 km outside zone edge
+    radar_avoid_d_max:  float = 0.1   # penalty starts 200 km outside zone edge
     radar_avoid_d_knee: float = 0   # 30 km from zone → exponential
     radar_avoid_alpha:  float = 0
 
