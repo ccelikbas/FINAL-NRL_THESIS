@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import argparse
 import copy
-import math
 import random
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 if __package__ in (None, ""):
     import types
@@ -43,17 +42,6 @@ class CurriculumStage:
     label: str
 
 
-def _parse_range(text: str, cast_type):
-    parts = [p.strip() for p in text.split(":")]
-    if len(parts) != 2:
-        raise ValueError(f"Invalid range '{text}'. Expected format min:max")
-    lo = cast_type(parts[0])
-    hi = cast_type(parts[1])
-    if lo > hi:
-        lo, hi = hi, lo
-    return lo, hi
-
-
 def _split_iters(total: int, chunks: int) -> List[int]:
     total = int(total)
     chunks = int(chunks)
@@ -65,78 +53,68 @@ def _split_iters(total: int, chunks: int) -> List[int]:
     return [x for x in out if x > 0]
 
 
-def _lerp_int(a: int, b: int, t: float) -> int:
-    return int(round(a + (b - a) * t))
-
-
-def _lerp_float(a: float, b: float, t: float) -> float:
-    return float(a + (b - a) * t)
-
-
-def _build_linear_curriculum(args: argparse.Namespace, total_iters: int) -> List[CurriculumStage]:
-    stages = max(1, int(args.curriculum_stages))
-    stage_iters = _split_iters(total_iters, stages)
-    if not stage_iters:
-        return []
-
-    out: List[CurriculumStage] = []
-    for i, n_iters in enumerate(stage_iters):
-        if len(stage_iters) == 1:
-            t = 1.0
-        else:
-            t = i / float(len(stage_iters) - 1)
-        out.append(
-            CurriculumStage(
-                index=len(out) + 1,
-                n_iters=n_iters,
-                n_strikers=max(1, _lerp_int(args.start_n_strikers, args.n_strikers, t)),
-                n_jammers=max(1, _lerp_int(args.start_n_jammers, args.n_jammers, t)),
-                n_targets=max(1, _lerp_int(args.start_n_targets, args.n_targets, t)),
-                n_radars=max(1, _lerp_int(args.start_n_radars, args.n_radars, t)),
-                radar_kill_probability=max(
-                    0.0,
-                    min(1.0, _lerp_float(args.start_radar_kill_probability, args.end_radar_kill_probability, t)),
-                ),
-                label=f"curriculum_{i + 1}",
-            )
-        )
-    return out
-
-
-def _build_domain_randomization(
-    args: argparse.Namespace,
-    total_iters: int,
-    start_index: int,
-) -> List[CurriculumStage]:
-    if total_iters <= 0:
-        return []
-
+def _build_requested_five_stage_plan(args: argparse.Namespace) -> List[CurriculumStage]:
     rng = random.Random(int(args.seed) + 1093)
 
-    ns_lo, ns_hi = _parse_range(args.dr_n_strikers_range, int)
-    nj_lo, nj_hi = _parse_range(args.dr_n_jammers_range, int)
-    nt_lo, nt_hi = _parse_range(args.dr_n_targets_range, int)
-    nr_lo, nr_hi = _parse_range(args.dr_n_radars_range, int)
-    kp_lo, kp_hi = _parse_range(args.dr_radar_kill_probability_range, float)
+    stage2_template = dict(n_strikers=1, n_jammers=1, n_targets=1, n_radars=1, radar_kill_probability=1.0)
+    stage3_template = dict(n_strikers=1, n_jammers=1, n_targets=2, n_radars=2, radar_kill_probability=1.0)
+    stage4_template = dict(n_strikers=2, n_jammers=2, n_targets=2, n_radars=2, radar_kill_probability=1.0)
 
-    chunks = max(1, int(math.ceil(total_iters / max(1, args.dr_stage_iters))))
-    stage_iters = _split_iters(total_iters, chunks)
+    stages: List[CurriculumStage] = [
+        CurriculumStage(
+            index=1,
+            label="stage_1",
+            n_iters=args.stage1_iters,
+            n_strikers=1,
+            n_jammers=1,
+            n_targets=1,
+            n_radars=1,
+            radar_kill_probability=0.5,
+        ),
+        CurriculumStage(
+            index=2,
+            label="stage_2",
+            n_iters=args.stage2_iters,
+            **stage2_template,
+        ),
+        CurriculumStage(
+            index=3,
+            label="stage_3",
+            n_iters=args.stage3_iters,
+            **stage3_template,
+        ),
+        CurriculumStage(
+            index=4,
+            label="stage_4",
+            n_iters=args.stage4_iters,
+            **stage4_template,
+        ),
+    ]
 
-    out: List[CurriculumStage] = []
-    for i, n_iters in enumerate(stage_iters):
-        out.append(
+    random_stage_choices = [
+        ("stage2", stage2_template),
+        ("stage3", stage3_template),
+        ("stage4", stage4_template),
+    ]
+    stage5_chunks = _split_iters(args.stage5_iters, max(1, int(args.stage5_chunk_iters)))
+    next_index = 5
+    for i, chunk_iters in enumerate(stage5_chunks):
+        choice_name, cfg = random_stage_choices[rng.randint(0, len(random_stage_choices) - 1)]
+        stages.append(
             CurriculumStage(
-                index=start_index + i,
-                n_iters=n_iters,
-                n_strikers=max(1, rng.randint(ns_lo, ns_hi)),
-                n_jammers=max(1, rng.randint(nj_lo, nj_hi)),
-                n_targets=max(1, rng.randint(nt_lo, nt_hi)),
-                n_radars=max(1, rng.randint(nr_lo, nr_hi)),
-                radar_kill_probability=max(0.0, min(1.0, rng.uniform(kp_lo, kp_hi))),
-                label=f"domain_randomized_{i + 1}",
+                index=next_index,
+                label=f"stage_5_random_{i + 1}_{choice_name}",
+                n_iters=chunk_iters,
+                n_strikers=cfg["n_strikers"],
+                n_jammers=cfg["n_jammers"],
+                n_targets=cfg["n_targets"],
+                n_radars=cfg["n_radars"],
+                radar_kill_probability=cfg["radar_kill_probability"],
             )
         )
-    return out
+        next_index += 1
+
+    return stages
 
 
 def _merge_logs(dst: Dict[str, List[float]], src: Dict[str, List[float]]) -> None:
@@ -169,13 +147,17 @@ def _adapt_checkpoint_for_stage(
 
     if isinstance(src_policy, dict):
         for key, tensor in src_policy.items():
-            if key in dst_policy and tuple(dst_policy[key].shape) == tuple(tensor.shape):
+            if not isinstance(tensor, torch.Tensor):
+                continue
+            if key in dst_policy and isinstance(dst_policy[key], torch.Tensor) and tuple(dst_policy[key].shape) == tuple(tensor.shape):
                 dst_policy[key] = tensor.detach().to(dst_policy[key].device, dtype=dst_policy[key].dtype)
                 matched_policy += 1
 
     if isinstance(src_critic, dict):
         for key, tensor in src_critic.items():
-            if key in dst_critic and tuple(dst_critic[key].shape) == tuple(tensor.shape):
+            if not isinstance(tensor, torch.Tensor):
+                continue
+            if key in dst_critic and isinstance(dst_critic[key], torch.Tensor) and tuple(dst_critic[key].shape) == tuple(tensor.shape):
                 dst_critic[key] = tensor.detach().to(dst_critic[key].device, dtype=dst_critic[key].dtype)
                 matched_critic += 1
 
@@ -201,22 +183,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = argparse.ArgumentParser(description="Dual-MAPPO curriculum runner (run.py remains unchanged)")
 
-    p.add_argument("--n_strikers", type=int, default=env_defaults.n_strikers)
-    p.add_argument("--n_jammers", type=int, default=env_defaults.n_jammers)
-    p.add_argument("--n_targets", type=int, default=env_defaults.n_targets)
-    p.add_argument("--n_radars", type=int, default=env_defaults.n_radars)
-
-    p.add_argument("--start_n_strikers", type=int, default=1)
-    p.add_argument("--start_n_jammers", type=int, default=1)
-    p.add_argument("--start_n_targets", type=int, default=1)
-    p.add_argument("--start_n_radars", type=int, default=1)
-
-    p.add_argument("--start_radar_kill_probability", type=float, default=0.25)
-    p.add_argument("--end_radar_kill_probability", type=float, default=env_defaults.radar_kill_probability)
+    p.add_argument("--stage1_iters", type=int, default=50)
+    p.add_argument("--stage2_iters", type=int, default=50)
+    p.add_argument("--stage3_iters", type=int, default=200)
+    p.add_argument("--stage4_iters", type=int, default=100)
+    p.add_argument("--stage5_iters", type=int, default=200)
+    p.add_argument("--stage5_chunk_iters", type=int, default=20)
 
     p.add_argument("--num_envs", type=int, default=ppo_defaults.num_envs)
     p.add_argument("--max_steps", type=int, default=env_defaults.max_steps)
-    p.add_argument("--n_iters", type=int, default=ppo_defaults.n_iters)
     p.add_argument("--num_epochs", type=int, default=ppo_defaults.num_epochs)
     p.add_argument("--minibatch_size", type=int, default=ppo_defaults.minibatch_size)
     p.add_argument("--actor_lr", type=float, default=ppo_defaults.actor_lr)
@@ -225,16 +200,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--entropy_coef", type=float, default=ppo_defaults.entropy_coef)
     p.add_argument("--normalize_rewards", action=argparse.BooleanOptionalAction, default=ppo_defaults.normalize_rewards)
     p.add_argument("--seed", type=int, default=ppo_defaults.seed)
-    p.add_argument("--curriculum_stages", type=int, default=4)
-
-    p.add_argument("--enable_domain_randomization", action=argparse.BooleanOptionalAction, default=False)
-    p.add_argument("--dr_fraction", type=float, default=0.3)
-    p.add_argument("--dr_stage_iters", type=int, default=10)
-    p.add_argument("--dr_n_strikers_range", type=str, default="1:4")
-    p.add_argument("--dr_n_jammers_range", type=str, default="1:4")
-    p.add_argument("--dr_n_targets_range", type=str, default="1:4")
-    p.add_argument("--dr_n_radars_range", type=str, default="1:4")
-    p.add_argument("--dr_radar_kill_probability_range", type=str, default="0.1:1.0")
+    p.add_argument("--log_every", type=int, default=ppo_defaults.log_every)
 
     p.add_argument("--actor_hidden", type=int, default=net_defaults.actor_hidden)
     p.add_argument("--critic_hidden", type=int, default=net_defaults.critic_hidden)
@@ -261,8 +227,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = build_parser().parse_args()
 
-    if args.n_iters <= 0:
-        raise ValueError("n_iters must be > 0")
+    for key in ("stage1_iters", "stage2_iters", "stage3_iters", "stage4_iters", "stage5_iters"):
+        if int(getattr(args, key)) <= 0:
+            raise ValueError(f"{key} must be > 0")
+    if int(args.stage5_chunk_iters) <= 0:
+        raise ValueError("stage5_chunk_iters must be > 0")
 
     reward_cfg = RewardConfig(
         target_destroyed=args.target_destroyed,
@@ -285,6 +254,7 @@ def main() -> None:
         entropy_coef=args.entropy_coef,
         normalize_rewards=args.normalize_rewards,
         seed=args.seed,
+        log_every=args.log_every,
     )
     net_cfg = NetworkConfig(
         actor_hidden=args.actor_hidden,
@@ -292,17 +262,7 @@ def main() -> None:
         depth=args.depth,
     )
 
-    dr_fraction = max(0.0, min(1.0, float(args.dr_fraction)))
-    if args.enable_domain_randomization:
-        dr_iters = int(round(args.n_iters * dr_fraction))
-        cur_iters = int(args.n_iters - dr_iters)
-    else:
-        dr_iters = 0
-        cur_iters = int(args.n_iters)
-
-    stages: List[CurriculumStage] = []
-    stages.extend(_build_linear_curriculum(args, cur_iters))
-    stages.extend(_build_domain_randomization(args, dr_iters, start_index=len(stages) + 1))
+    stages: List[CurriculumStage] = _build_requested_five_stage_plan(args)
 
     if not stages:
         raise RuntimeError("No curriculum stages were generated. Check n_iters and settings.")
