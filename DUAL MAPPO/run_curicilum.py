@@ -184,7 +184,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Dual-MAPPO curriculum runner (run.py remains unchanged)")
 
     p.add_argument("--stage1_iters", type=int, default=50)
-    p.add_argument("--stage2_iters", type=int, default=50)
+    p.add_argument("--stage2_iters", type=int, default=100)
     p.add_argument("--stage3_iters", type=int, default=200)
     p.add_argument("--stage4_iters", type=int, default=100)
     p.add_argument("--stage5_iters", type=int, default=200)
