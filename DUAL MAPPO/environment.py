@@ -144,6 +144,9 @@ class StrikeEA2DEnv(EnvBase):
         self._act_table = torch.tensor(
             [-1.0, -0.5, -0.1, 0.0, 0.1, 0.5, 1.0], device=self._device
         )  # maps discrete index → continuous multiplier
+        self.n_other_agent_obs_slots = 3
+        self.n_radar_obs_slots = 2
+        self.n_target_obs_slots = 2
         self.obs_dim   = self._compute_obs_dim()
         self.state_dim = self._compute_state_dim()
 
@@ -262,12 +265,13 @@ class StrikeEA2DEnv(EnvBase):
         return layouts
 
     def _compute_obs_dim(self) -> int:
-        # Ego-centric relative observations:
+        # Fixed-size ego-centric relative observations (independent of team sizes):
         #   own state:     [x, y, speed, heading, heading_rate, t_norm]             = 6
-        #   other agents:  [dist, rel_angle, heading, role] per agent               = (n_agents-1)*4
-        #   radars:        [dist, rel_angle, jammed] per radar                      = n_radars*3
-        #   targets:       [dist, rel_angle, alive] per target                      = n_targets*3
-        return 6 + (self.n_agents - 1) * 4 + self.n_radars * 3 + self.n_targets * 3
+        #   other agents:  top-K slots [dist, rel_angle, heading, role]             = K_a * 4
+        #   radars:        top-K slots [dist, rel_angle, jammed]                    = K_r * 3
+        #   targets:       top-K slots [dist, rel_angle, alive]                     = K_t * 3
+        # Unseen or missing entities are zero-padded in their slots.
+        return 6 + self.n_other_agent_obs_slots * 4 + self.n_radar_obs_slots * 3 + self.n_target_obs_slots * 3
 
     def _compute_state_dim(self) -> int:
         A, T, R = self.n_agents, self.n_targets, self.n_radars
@@ -1170,18 +1174,55 @@ class StrikeEA2DEnv(EnvBase):
         return dist, rel_angle
 
     def _build_local_obs(self) -> torch.Tensor:
-        """Ego-centric relative observation per agent.
+        """Ego-centric relative observation per agent with fixed slot counts.
 
         Layout (per agent):
-          own:     [x, y, speed, heading, heading_rate, t_norm]          (6)
-          agents:  [dist, rel_angle, heading, role] × (A-1)             (4 per other agent; zeroed if outside R_obs or dead)
-          radars:  [dist, rel_angle, jammed] × R                        (3 per radar; jammed flag zeroed if outside R_obs)
-          targets: [dist, rel_angle, alive] × T                         (3 per target; alive flag zeroed if outside R_obs)
-          Total obs_dim = 6 + 4*(A-1) + 3*R + 3*T
+          own:     [x, y, speed, heading, heading_rate, t_norm]                 (6)
+          agents:  3 nearest visible other agents [dist, rel_angle, heading, role] (3×4)
+          radars:  2 nearest visible radars [dist, rel_angle, jammed]              (2×3)
+          targets: 2 nearest visible alive targets [dist, rel_angle, alive]         (2×3)
+
+        Visibility is partial observability via R_obs. If an entity is outside
+        observation range or a slot is unused, that slot is all zeros.
         """
         B, A, T, R = self.num_envs, self.n_agents, self.n_targets, self.n_radars
         max_dist = math.hypot(self.high - self.low, self.high - self.low)  # for normalisation
         world_range = self.high - self.low
+
+        def _select_nearest_slots(
+            dist: torch.Tensor,
+            feat: torch.Tensor,
+            visible: torch.Tensor,
+            k: int,
+        ) -> torch.Tensor:
+            """Select up to k nearest visible entities into fixed slots.
+
+            dist:    [B, A, E]
+            feat:    [B, A, E, F]
+            visible: [B, A, E]
+            return:  [B, A, k, F]
+            """
+            E = feat.shape[2]
+            F = feat.shape[3]
+            if k <= 0:
+                return torch.zeros(B, A, 0, F, device=self.device, dtype=feat.dtype)
+            if E == 0:
+                return torch.zeros(B, A, k, F, device=self.device, dtype=feat.dtype)
+
+            keep = min(k, E)
+            inf = torch.full_like(dist, float("inf"))
+            masked_dist = torch.where(visible, dist, inf)
+            top_vals, top_idx = torch.topk(masked_dist, k=keep, dim=2, largest=False)
+
+            gather_idx = top_idx.unsqueeze(-1).expand(B, A, keep, F)
+            gathered = feat.gather(2, gather_idx)
+            valid = torch.isfinite(top_vals)
+            gathered = torch.where(valid.unsqueeze(-1), gathered, torch.zeros_like(gathered))
+
+            if keep < k:
+                pad = torch.zeros(B, A, k - keep, F, device=self.device, dtype=feat.dtype)
+                gathered = torch.cat([gathered, pad], dim=2)
+            return gathered
 
         # --- Own kinematic state ---
         pos_norm     = (self.agent_pos - self.low) / world_range                 # [B,A,2] in [0,1]
@@ -1216,19 +1257,14 @@ class StrikeEA2DEnv(EnvBase):
         heading_other = self.agent_heading[:, None, :].expand(B, A, A) / math.pi    # [B,A,A] heading of observed agent
         role_other    = role[:, None, :].expand(B, A, A)                            # [B,A,A] role of observed agent
 
-        # Stack features and apply visibility mask, then drop self-column
-        other_obs = torch.stack([dist_aa_norm, angle_aa_norm, heading_other, role_other], dim=-1)  # [B,A,A,4]
-        other_obs = other_obs * visible.unsqueeze(-1).float()  # zero out non-visible
-
-        # Remove self-column: gather all-but-diagonal
-        idx = []
-        for a in range(A):
-            idx.append(torch.cat([torch.arange(0, a, device=self.device),
-                                  torch.arange(a + 1, A, device=self.device)]))
-        idx = torch.stack(idx, dim=0)  # [A, A-1]
-        idx_exp = idx[None, :, :, None].expand(B, A, A - 1, 4)  # [B,A,A-1,4]
-        other_obs = other_obs.gather(2, idx_exp)                 # [B,A,A-1,4]
-        other_obs = other_obs.reshape(B, A, -1)                  # [B,A,(A-1)*4]
+        other_feat = torch.stack([dist_aa_norm, angle_aa_norm, heading_other, role_other], dim=-1)  # [B,A,A,4]
+        other_slots = _select_nearest_slots(
+            dist=dist_aa,
+            feat=other_feat,
+            visible=visible,
+            k=self.n_other_agent_obs_slots,
+        )  # [B,A,3,4]
+        other_obs = other_slots.reshape(B, A, -1)  # [B,A,3*4]
 
         # --- Radars (relative distance + relative angle + jammed flag) ---
         dist_ar, angle_ar = self._relative_polar(
@@ -1239,9 +1275,14 @@ class StrikeEA2DEnv(EnvBase):
         jammed = (self.radar_eff_range < self.radar_range).float()          # [B,R] 1=jammed
         jammed_exp = jammed[:, None, :].expand(B, A, R)                     # [B,A,R]
         radar_visible = dist_ar <= self.R_obs                               # [B,A,R]
-        jammed_obs = jammed_exp * radar_visible.float()                     # masked by R_obs
-        radar_obs = torch.stack([dist_ar_norm, angle_ar_norm, jammed_obs], dim=-1)  # [B,A,R,3]
-        radar_obs = radar_obs.reshape(B, A, -1)                             # [B,A,R*3]
+        radar_feat = torch.stack([dist_ar_norm, angle_ar_norm, jammed_exp], dim=-1)  # [B,A,R,3]
+        radar_slots = _select_nearest_slots(
+            dist=dist_ar,
+            feat=radar_feat,
+            visible=radar_visible,
+            k=self.n_radar_obs_slots,
+        )  # [B,A,2,3]
+        radar_obs = radar_slots.reshape(B, A, -1)                           # [B,A,2*3]
 
         # --- Targets (relative distance + relative angle + alive flag) ---
         dist_at, angle_at = self._relative_polar(
@@ -1251,9 +1292,14 @@ class StrikeEA2DEnv(EnvBase):
         angle_at_norm = angle_at / math.pi
         alive_t = self.target_alive[:, None, :].expand(B, A, T).float()     # [B,A,T]
         target_visible = dist_at <= self.R_obs                               # [B,A,T]
-        alive_obs = alive_t * target_visible.float()                         # masked by R_obs
-        target_obs = torch.stack([dist_at_norm, angle_at_norm, alive_obs], dim=-1)  # [B,A,T,3]
-        target_obs = target_obs.reshape(B, A, -1)                            # [B,A,T*3]
+        target_feat = torch.stack([dist_at_norm, angle_at_norm, alive_t], dim=-1)  # [B,A,T,3]
+        target_slots = _select_nearest_slots(
+            dist=dist_at,
+            feat=target_feat,
+            visible=target_visible & self.target_alive[:, None, :],
+            k=self.n_target_obs_slots,
+        )  # [B,A,2,3]
+        target_obs = target_slots.reshape(B, A, -1)                          # [B,A,2*3]
 
         # --- Concatenate ---
         obs = torch.cat([own, other_obs, radar_obs, target_obs], dim=-1)  # [B,A,obs_dim]
