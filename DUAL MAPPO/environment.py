@@ -624,7 +624,7 @@ class StrikeEA2DEnv(EnvBase):
         n_killed = kill_t.float().sum(dim=-1)                             # [B]
         n_alive  = self.agent_alive.float().sum(dim=-1).clamp_min(1.0)    # [B]
         target_destroyed_full = torch.zeros(B, A, device=self.device)
-        if float(rp.target_destroyed) != 0.0 and kill_t.any():
+        if float(rp.target_destroyed) != 0.0 and bool(kill_t.any().item()):
             # Team component: shared equally among alive agents
             team_share = (n_killed * float(rp.target_destroyed) / n_alive)  # [B]
             team_comp = team_share.unsqueeze(-1) * alive_float              # [B, A]
@@ -650,7 +650,7 @@ class StrikeEA2DEnv(EnvBase):
         # ------------------------------------------------------------------
         terminal_bonus_full = torch.zeros(B, A, device=self.device)
         all_targets_done_now = (~self.target_alive).all(dim=-1)  # [B]
-        if float(rp.terminal_bonus) != 0.0 and all_targets_done_now.any():
+        if float(rp.terminal_bonus) != 0.0 and bool(all_targets_done_now.any().item()):
             terminal_bonus_full[all_targets_done_now] = float(rp.terminal_bonus)
             reward += terminal_bonus_full
 
@@ -887,7 +887,7 @@ class StrikeEA2DEnv(EnvBase):
         # ------------------------------------------------------------------
         death_pen_full = torch.zeros(B, A, device=self.device)
         n_killed_agents = killed.float().sum(dim=-1)                      # [B]
-        if float(rp.agent_destroyed) != 0.0 and killed.any():
+        if float(rp.agent_destroyed) != 0.0 and bool(killed.any().item()):
             # Team component: shared among alive agents
             team_death = (n_killed_agents * float(rp.agent_destroyed) / n_alive)  # [B]
             team_death_comp = team_death.unsqueeze(-1) * alive_float              # [B, A]
@@ -1025,7 +1025,7 @@ class StrikeEA2DEnv(EnvBase):
         next_td.set("state",       self._build_global_state())
 
         # Track completed episode stats in Python list (immune to auto-reset)
-        if done.any():
+        if bool(done.any().item()):
             for b in range(B):
                 if done[b, 0].item():
                     tgt_frac = float((~self.target_alive[b]).float().mean().item())
