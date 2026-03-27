@@ -99,6 +99,7 @@ def _build_requested_five_stage_plan(args: argparse.Namespace) -> List[Curriculu
     # Final phase: domain randomization per ITERATION (not every N iters).
     # Each stage below has n_iters=1 and randomised S/J/R/T sampled within user bounds.
     # This keeps one actor policy continuously optimised while exposing varied configs.
+    # Radar kill probability is intentionally fixed to 1.0 for all stages except stage 1.
     next_index = 5
     for i in range(int(args.stage5_iters)):
         if bool(args.stage5_use_bounds):
@@ -107,10 +108,7 @@ def _build_requested_five_stage_plan(args: argparse.Namespace) -> List[Curriculu
                 "n_jammers": rng.randint(int(args.stage5_min_jammers), int(args.stage5_max_jammers)),
                 "n_targets": rng.randint(int(args.stage5_min_targets), int(args.stage5_max_targets)),
                 "n_radars": rng.randint(int(args.stage5_min_radars), int(args.stage5_max_radars)),
-                "radar_kill_probability": rng.uniform(
-                    float(args.stage5_min_radar_kill_probability),
-                    float(args.stage5_max_radar_kill_probability),
-                ),
+                "radar_kill_probability": 1.0,
             }
             choice_name = "bounds"
             cfg = sampled_cfg
@@ -125,7 +123,7 @@ def _build_requested_five_stage_plan(args: argparse.Namespace) -> List[Curriculu
                 n_jammers=cfg["n_jammers"],
                 n_targets=cfg["n_targets"],
                 n_radars=cfg["n_radars"],
-                radar_kill_probability=max(0.0, min(1.0, float(cfg["radar_kill_probability"]))),
+                radar_kill_probability=1.0,
             )
         )
         next_index += 1
