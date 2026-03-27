@@ -20,7 +20,7 @@ class EnvConfig:
     # World / episode
     world_bounds: Tuple[float, float] = (0.0, 1.0)
     dt: float = 1.0
-    max_steps: int = 100
+    max_steps: int = 150
     n_env_layouts: int = 0
     target_spawn_angle_range: Tuple[float, float] = (0, 360)
 
@@ -32,7 +32,7 @@ class EnvConfig:
     min_turn_radius: float = 0.001
 
     # Sensors
-    R_obs: float = 1.0
+    R_obs: float = 0.5
 
     # Strikers
     striker_engage_range: float = 0.10

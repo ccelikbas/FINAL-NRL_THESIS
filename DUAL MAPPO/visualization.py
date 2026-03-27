@@ -259,8 +259,17 @@ def animate_rollout(frames: List[Dict[str, torch.Tensor]], env: StrikeEA2DEnv, i
     target_sc = ax.scatter([], [], s=80, marker="*", label="Targets")
     radar_sc = ax.scatter([], [], s=80, marker="X", label="Radars")
 
+    target_light = "#f2c178"
+    target_dark = "#a65e00"
+    radar_light = "#b9c5ff"
+    radar_dark = "#243c9b"
+
+    discovered_targets = np.zeros(env.n_targets, dtype=bool)
+    discovered_radars = np.zeros(env.n_radars, dtype=bool)
+
     radar_circles = [ax.add_patch(Circle((0, 0), 0, fill=False, edgecolor="C3", alpha=0.6, lw=2)) for _ in range(env.n_radars)]
     jammer_circles = [ax.add_patch(Circle((0, 0), 0, fill=False, edgecolor="C4", alpha=0.5, lw=1.5, ls="--")) for _ in range(env.n_jammers)]
+    obs_circles = [ax.add_patch(Circle((0, 0), 0, fill=False, edgecolor="C0", alpha=0.35, lw=1.0, ls=":")) for _ in range(env.n_agents)]
     striker_arcs = [ax.add_patch(Polygon(np.empty((0, 2)), closed=True, fc="C2", alpha=0.18, ec="C2")) for _ in range(env.n_strikers)]
     heading_lines = [ax.plot([], [])[0] for _ in range(env.n_agents)]
     ax.legend(loc="upper right")
@@ -290,14 +299,14 @@ def animate_rollout(frames: List[Dict[str, torch.Tensor]], env: StrikeEA2DEnv, i
         jammer_sc.set_offsets(empty_xy)
         target_sc.set_offsets(empty_xy)
         radar_sc.set_offsets(empty_xy)
-        for c in [*radar_circles, *jammer_circles]:
+        for c in [*radar_circles, *jammer_circles, *obs_circles]:
             c.set_visible(False)
         for a in striker_arcs:
             a.set_visible(False)
         for ln in heading_lines:
             ln.set_data([], [])
         time_vline.set_xdata([1])
-        return [striker_sc, jammer_sc, target_sc, radar_sc, *radar_circles, *jammer_circles, *striker_arcs, *heading_lines, time_vline]
+        return [striker_sc, jammer_sc, target_sc, radar_sc, *radar_circles, *jammer_circles, *obs_circles, *striker_arcs, *heading_lines, time_vline]
 
     def update(i: int):
         fr = frames[i]
@@ -317,8 +326,34 @@ def animate_rollout(frames: List[Dict[str, torch.Tensor]], env: StrikeEA2DEnv, i
         jammer_xy = ap_km[env.n_strikers:][aa[env.n_strikers:]]
         striker_sc.set_offsets(striker_xy.numpy() if striker_xy.numel() else empty_xy)
         jammer_sc.set_offsets(jammer_xy.numpy() if jammer_xy.numel() else empty_xy)
-        target_sc.set_offsets(tp_km[ta].numpy() if ta.any() else empty_xy)
-        radar_sc.set_offsets(rp_km.numpy() if rp_km.numel() else empty_xy)
+
+        if aa.any() and env.n_targets > 0:
+            alive_pos = ap[aa]
+            dist_to_targets = torch.cdist(alive_pos, tp)
+            discovered_targets[:] = discovered_targets | (dist_to_targets <= env.R_obs).any(dim=0).detach().cpu().numpy()
+        if aa.any() and env.n_radars > 0:
+            alive_pos = ap[aa]
+            dist_to_radars = torch.cdist(alive_pos, rp)
+            discovered_radars[:] = discovered_radars | (dist_to_radars <= env.R_obs).any(dim=0).detach().cpu().numpy()
+
+        if ta.any():
+            target_offsets = tp_km[ta].numpy()
+            target_sc.set_offsets(target_offsets)
+            alive_target_idx = torch.where(ta)[0].detach().cpu().numpy()
+            target_colors = [target_dark if discovered_targets[idx] else target_light for idx in alive_target_idx]
+            target_sc.set_color(target_colors)
+        else:
+            target_sc.set_offsets(empty_xy)
+            target_sc.set_color([])
+
+        if rp_km.numel():
+            radar_offsets = rp_km.numpy()
+            radar_sc.set_offsets(radar_offsets)
+            radar_colors = [radar_dark if discovered_radars[idx] else radar_light for idx in range(env.n_radars)]
+            radar_sc.set_color(radar_colors)
+        else:
+            radar_sc.set_offsets(empty_xy)
+            radar_sc.set_color([])
 
         for j, c in enumerate(radar_circles):
             c.set_visible(True)
@@ -333,6 +368,14 @@ def animate_rollout(frames: List[Dict[str, torch.Tensor]], env: StrikeEA2DEnv, i
                 jc.set_radius(env.jammer.jam_radius * 1000)
             else:
                 jc.set_visible(False)
+
+        for k, oc in enumerate(obs_circles):
+            if aa[k].item():
+                oc.set_visible(True)
+                oc.set_center((float(ap_km[k, 0]), float(ap_km[k, 1])))
+                oc.set_radius(float(env.R_obs) * 1000)
+            else:
+                oc.set_visible(False)
 
         half_fov = 0.5 * env.striker.engage_fov_deg
         r_str = env.striker.engage_range * 1000
@@ -360,7 +403,7 @@ def animate_rollout(frames: List[Dict[str, torch.Tensor]], env: StrikeEA2DEnv, i
         reward_step = min(i, n_reward_steps) if n_reward_steps > 0 else 1
         time_vline.set_xdata([reward_step])
 
-        return [striker_sc, jammer_sc, target_sc, radar_sc, *radar_circles, *jammer_circles, *striker_arcs, *heading_lines, time_vline]
+        return [striker_sc, jammer_sc, target_sc, radar_sc, *radar_circles, *jammer_circles, *obs_circles, *striker_arcs, *heading_lines, time_vline]
 
     ani = animation.FuncAnimation(fig, update, frames=len(frames), init_func=init, interval=interval_ms, blit=False, repeat=False)
     plt.show()
