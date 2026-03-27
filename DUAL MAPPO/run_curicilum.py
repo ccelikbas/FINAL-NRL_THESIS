@@ -26,7 +26,7 @@ import torch
 from .config import EnvConfig, ExperimentConfig, NetworkConfig, PPOConfig
 from .models import make_combined_critic, make_combined_policy
 from .rewards import RewardConfig
-from .trainer import build_env, train_mappo
+from .trainer import build_env, evaluate_current_policy, train_mappo
 from .visualization import TestRunner, animate_rollout, plot_training
 
 
@@ -175,6 +175,89 @@ def _adapt_checkpoint_for_stage(
     return adapted
 
 
+def _evaluate_generalized_policy(
+    checkpoint: Dict[str, Any],
+    reward_cfg: RewardConfig,
+    ppo_template: PPOConfig,
+    net_cfg: NetworkConfig,
+    max_steps: int,
+    n_eval_episodes: int,
+) -> List[Dict[str, Any]]:
+    eval_setups = [
+        ("1s1j1r1t", 1, 1, 1, 1),
+        ("1s1j2r2t", 1, 1, 2, 2),
+        ("2s2j2r2t", 2, 2, 2, 2),
+        ("2s2j3r3t", 2, 2, 3, 3),
+    ]
+
+    print("\n=== Generalized Single-Policy Evaluation ===")
+    print(f"Episodes per configuration: {n_eval_episodes}")
+
+    results: List[Dict[str, Any]] = []
+    for label, ns, nj, nr, nt in eval_setups:
+        eval_env_cfg = EnvConfig(
+            n_strikers=ns,
+            n_jammers=nj,
+            n_targets=nt,
+            n_radars=nr,
+            max_steps=max_steps,
+            radar_kill_probability=1.0,
+            reward_config=copy.deepcopy(reward_cfg),
+        )
+        eval_ppo_cfg = PPOConfig(
+            num_envs=ppo_template.num_envs,
+            n_iters=1,
+            num_epochs=ppo_template.num_epochs,
+            minibatch_size=ppo_template.minibatch_size,
+            actor_lr=ppo_template.actor_lr,
+            critic_lr=ppo_template.critic_lr,
+            clip_eps=ppo_template.clip_eps,
+            entropy_coef=ppo_template.entropy_coef,
+            normalize_rewards=ppo_template.normalize_rewards,
+            seed=ppo_template.seed,
+            log_every=ppo_template.log_every,
+            device=ppo_template.device,
+        )
+
+        adapted_ckpt = _adapt_checkpoint_for_stage(checkpoint, eval_env_cfg, eval_ppo_cfg, net_cfg)
+        if adapted_ckpt is None:
+            raise RuntimeError("Generalized evaluation requires a trained checkpoint.")
+
+        eval_env = build_env(eval_env_cfg, eval_ppo_cfg)
+        eval_policy = make_combined_policy(eval_env, hidden=net_cfg.actor_hidden, depth=net_cfg.depth)
+        eval_policy.load_state_dict(adapted_ckpt["policy_state_dict"], strict=False)
+        eval_policy = eval_policy.to(eval_ppo_cfg.device)
+
+        metrics = evaluate_current_policy(
+            eval_policy,
+            eval_env_cfg,
+            eval_ppo_cfg,
+            n_eval_episodes=int(n_eval_episodes),
+        )
+
+        results.append(
+            {
+                "config": label,
+                "completion_rate": float(metrics["eval_task_completion_rate"]),
+                "survival_rate": float(metrics["eval_survival_rate"]),
+                "mean_duration": float(metrics["eval_mean_duration"]),
+            }
+        )
+
+    headers = ("Config", "Completion", "Survival", "Mean Time")
+    print("\n" + f"{headers[0]:<14}{headers[1]:>14}{headers[2]:>12}{headers[3]:>14}")
+    print("-" * 54)
+    for row in results:
+        print(
+            f"{row['config']:<14}"
+            f"{row['completion_rate']:>14.4f}"
+            f"{row['survival_rate']:>12.4f}"
+            f"{row['mean_duration']:>14.2f}"
+        )
+
+    return results
+
+
 def build_parser() -> argparse.ArgumentParser:
     env_defaults = EnvConfig()
     ppo_defaults = PPOConfig()
@@ -189,6 +272,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--stage4_iters", type=int, default=100)
     p.add_argument("--stage5_iters", type=int, default=200)
     p.add_argument("--stage5_chunk_iters", type=int, default=20)
+    p.add_argument("--generalized_eval_episodes", type=int, default=30)
+    p.add_argument("--generalized_eval", action=argparse.BooleanOptionalAction, default=True)
 
     p.add_argument("--num_envs", type=int, default=ppo_defaults.num_envs)
     p.add_argument("--max_steps", type=int, default=env_defaults.max_steps)
@@ -232,6 +317,8 @@ def main() -> None:
             raise ValueError(f"{key} must be > 0")
     if int(args.stage5_chunk_iters) <= 0:
         raise ValueError("stage5_chunk_iters must be > 0")
+    if int(args.generalized_eval_episodes) <= 0:
+        raise ValueError("generalized_eval_episodes must be > 0")
 
     reward_cfg = RewardConfig(
         target_destroyed=args.target_destroyed,
@@ -385,6 +472,26 @@ def main() -> None:
     if final_env_cfg is None or final_policy is None or final_critic is None:
         raise RuntimeError("Curriculum did not produce a final policy.")
 
+    final_checkpoint_payload = {
+        "policy_state_dict": final_policy.state_dict(),
+        "critic_state_dict": final_critic.state_dict(),
+        "reward_normalizer_state_dict": (
+            final_reward_normalizer.state_dict() if final_reward_normalizer is not None else None
+        ),
+        "stage_label": "final_curriculum_policy",
+    }
+
+    generalized_eval_results: List[Dict[str, Any]] = []
+    if bool(args.generalized_eval):
+        generalized_eval_results = _evaluate_generalized_policy(
+            checkpoint=final_checkpoint_payload,
+            reward_cfg=reward_cfg,
+            ppo_template=ppo_template,
+            net_cfg=net_cfg,
+            max_steps=args.max_steps,
+            n_eval_episodes=args.generalized_eval_episodes,
+        )
+
     save_dir = Path(args.save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
     save_path = save_dir / args.save_name
@@ -400,6 +507,7 @@ def main() -> None:
                 final_reward_normalizer.state_dict() if final_reward_normalizer is not None else None
             ),
             "curriculum_stages": stage_records,
+            "generalized_policy_eval": generalized_eval_results,
         },
         save_path,
     )
