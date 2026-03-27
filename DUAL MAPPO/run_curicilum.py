@@ -146,12 +146,9 @@ def _adapt_checkpoint_for_stage(
     matched_critic = 0
 
     if isinstance(src_policy, dict):
-        for key, tensor in src_policy.items():
-            if not isinstance(tensor, torch.Tensor):
-                continue
-            if key in dst_policy and isinstance(dst_policy[key], torch.Tensor) and tuple(dst_policy[key].shape) == tuple(tensor.shape):
-                dst_policy[key] = tensor.detach().to(dst_policy[key].device, dtype=dst_policy[key].dtype)
-                matched_policy += 1
+        temp_policy.load_state_dict(src_policy, strict=True)
+        dst_policy = temp_policy.state_dict()
+        matched_policy = len([v for v in dst_policy.values() if isinstance(v, torch.Tensor)])
 
     if isinstance(src_critic, dict):
         for key, tensor in src_critic.items():
@@ -162,7 +159,7 @@ def _adapt_checkpoint_for_stage(
                 matched_critic += 1
 
     print(
-        f"Checkpoint adaptation: policy matched {matched_policy}/{len(dst_policy)}, "
+        f"Checkpoint adaptation: policy strict_load tensors={matched_policy}, "
         f"critic matched {matched_critic}/{len(dst_critic)}"
     )
 
