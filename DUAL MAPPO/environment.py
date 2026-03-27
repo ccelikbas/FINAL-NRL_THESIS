@@ -522,7 +522,8 @@ class StrikeEA2DEnv(EnvBase):
 
         # Map discrete indices to continuous multipliers via lookup table
         # _act_table: [-1, -0.5, -0.1, 0, +0.1, +0.5, +1]
-        acc = self._act_table[action.long()]  # [B, A, 2] float in {-1,-0.5,-0.1,0,+0.1,+0.5,+1}
+        action_idx = action.long().clamp(0, self.n_choices - 1)
+        acc = self._act_table[action_idx]  # [B, A, 2] float in {-1,-0.5,-0.1,0,+0.1,+0.5,+1}
 
         alive = self.agent_alive  # Keep as bool for bitwise operations
         alive_before_kill = alive

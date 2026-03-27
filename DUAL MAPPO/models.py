@@ -34,7 +34,15 @@ class MultiCategorical(torch.distributions.Distribution):
     arg_constraints = {}
     has_rsample = False
 
+    @staticmethod
+    def _sanitize_logits(logits: torch.Tensor) -> torch.Tensor:
+        # Guard against NaN/Inf explosions which can trigger CUDA asserts in
+        # categorical sampling kernels (reported asynchronously in env.step).
+        logits = torch.nan_to_num(logits, nan=0.0, posinf=20.0, neginf=-20.0)
+        return logits.clamp(min=-20.0, max=20.0)
+
     def __init__(self, logits: torch.Tensor):
+        logits = self._sanitize_logits(logits)
         self._cats = torch.distributions.Categorical(logits=logits)
         batch_shape = logits.shape[:-2]
         super().__init__(batch_shape=batch_shape, validate_args=False)
@@ -191,6 +199,7 @@ class CombinedPolicy(nn.Module):
         s_logits = self.striker_policy(obs[:, : self.n_strikers])  # [B, ns, ad, nc]
         j_logits = self.jammer_policy(obs[:, self.n_strikers :])   # [B, nj, ad, nc]
         all_logits = torch.cat([s_logits, j_logits], dim=1)        # [B, A, ad, nc]
+        all_logits = MultiCategorical._sanitize_logits(all_logits)
 
         dist = MultiCategorical(logits=all_logits)
         if self.deterministic:
@@ -212,7 +221,7 @@ class CombinedPolicy(nn.Module):
         self, obs: torch.Tensor, action: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """obs: [B, ns, obs_dim], action: [B, ns, 2] → (log_prob [B,ns], entropy [B,ns])"""
-        logits = self.striker_policy(obs)
+        logits = MultiCategorical._sanitize_logits(self.striker_policy(obs))
         dist = MultiCategorical(logits=logits)
         return dist.log_prob(action), dist.entropy()
 
@@ -220,7 +229,7 @@ class CombinedPolicy(nn.Module):
         self, obs: torch.Tensor, action: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """obs: [B, nj, obs_dim], action: [B, nj, 2] → (log_prob [B,nj], entropy [B,nj])"""
-        logits = self.jammer_policy(obs)
+        logits = MultiCategorical._sanitize_logits(self.jammer_policy(obs))
         dist = MultiCategorical(logits=logits)
         return dist.log_prob(action), dist.entropy()
 
