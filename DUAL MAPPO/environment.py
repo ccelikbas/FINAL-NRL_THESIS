@@ -1331,6 +1331,14 @@ class StrikeEA2DEnv(EnvBase):
         angle_ar_norm = angle_ar / math.pi
         jammed = (self.radar_eff_range < self.radar_range).float()          # [B,R] 1=jammed
         jammed_exp = jammed[:, None, :].expand(B, A, R)                     # [B,A,R]
+
+        # ------------------------------------------------------------------
+        # Communication graph over alive agents (per env in batch)
+        #   comm_adj[b, i, j]  = edge(i,j) in G_t   iff dist(i,j) <= R_comm
+        #   comm_reach         = transitive closure of G_t (multi-hop reachability)
+        # This implements subset-based sharing: agents in same connected component
+        # share unknown detections with each other at this timestep.
+        # ------------------------------------------------------------------
         alive_agents = self.agent_alive
         eye_agents = torch.eye(A, dtype=torch.bool, device=self.device).unsqueeze(0).expand(B, -1, -1)
         comm_adj = (dist_agents <= self.R_comm) & alive_agents[:, :, None] & alive_agents[:, None, :]
@@ -1338,6 +1346,15 @@ class StrikeEA2DEnv(EnvBase):
         for _ in range(max(A - 1, 0)):
             comm_reach = comm_reach | (torch.matmul(comm_reach.float(), comm_reach.float()) > 0)
 
+        # ------------------------------------------------------------------
+        # Radar visibility sets
+        #   Known radars are always visible: R_K
+        #   Unknown radars are locally detectable only within R_obs
+        #   Shared unknown radars are unioned over comm_reach (multi-hop):
+        #       R_share(i) = union_{j in component(i)} R_loc(j)
+        # Final set used for slots:
+        #   radar_visible = R_K OR shared_unknown_radar_obs
+        # ------------------------------------------------------------------
         radar_known_mask = self.radar_known[:, None, :].expand(B, A, R)
         local_radar_obs = (dist_ar <= self.R_obs) & alive_agents[:, :, None]
         unknown_radar_mask = (~self.radar_known)[:, None, :].expand(B, A, R)
@@ -1362,6 +1379,16 @@ class StrikeEA2DEnv(EnvBase):
         dist_at_norm  = dist_at / max_dist
         angle_at_norm = angle_at / math.pi
         alive_t = self.target_alive[:, None, :].expand(B, A, T).float()     # [B,A,T]
+
+        # ------------------------------------------------------------------
+        # Target visibility sets (same logic as radars)
+        #   Known targets are always visible: T_K
+        #   Unknown targets are local only when within R_obs and alive
+        #   Shared unknown targets are unioned over comm_reach
+        # Final set used for slots:
+        #   target_visible = T_K OR shared_unknown_target_obs
+        # Note: no persistence/memory is used; unknown visibility is per-step.
+        # ------------------------------------------------------------------
         target_known_mask = self.target_known[:, None, :].expand(B, A, T)
         local_target_obs = (dist_at <= self.R_obs) & alive_agents[:, :, None] & self.target_alive[:, None, :]
         unknown_target_mask = (~self.target_known)[:, None, :].expand(B, A, T)
@@ -1382,3 +1409,4 @@ class StrikeEA2DEnv(EnvBase):
         # --- Concatenate ---
         obs = torch.cat([own, other_obs, radar_obs, target_obs], dim=-1)  # [B,A,obs_dim]
         return obs
+

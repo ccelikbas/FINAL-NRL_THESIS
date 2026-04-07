@@ -36,8 +36,8 @@ class EnvConfig:
     min_turn_radius: float = 0.001
 
     # Sensors
-    R_obs: float = 0.5
-    R_comm: float = 0.5
+    R_obs: float = 0.4
+    R_comm: float = 0.6
 
     # Strikers
     striker_engage_range: float = 0.10
@@ -87,7 +87,7 @@ class EnvConfig:
 class PPOConfig:
     """Shared PPO hyperparameters used by BOTH the striker and jammer MAPPO instances."""
     num_envs: int = 512
-    n_iters: int = 400
+    n_iters: int = 200
     frames_per_batch: Optional[int] = None
     num_epochs: int = 10
     minibatch_size: int = 2048
