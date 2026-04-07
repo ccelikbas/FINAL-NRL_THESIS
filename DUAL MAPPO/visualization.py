@@ -184,6 +184,7 @@ class TestRunner:
             h_accel_magnitude_fraction=env_cfg.h_accel_magnitude_fraction,
             min_turn_radius=env_cfg.min_turn_radius,
             R_obs=env_cfg.R_obs,
+            R_comm=env_cfg.R_comm,
             striker_engage_range=env_cfg.striker_engage_range,
             striker_engage_fov=env_cfg.striker_engage_fov,
             striker_v_min=env_cfg.striker_v_min,
@@ -272,6 +273,8 @@ def animate_rollout(frames: List[Dict[str, torch.Tensor]], env: StrikeEA2DEnv, i
     obs_circles = [ax.add_patch(Circle((0, 0), 0, fill=False, edgecolor="C0", alpha=0.35, lw=1.0, ls=":")) for _ in range(env.n_agents)]
     striker_arcs = [ax.add_patch(Polygon(np.empty((0, 2)), closed=True, fc="C2", alpha=0.18, ec="C2")) for _ in range(env.n_strikers)]
     heading_lines = [ax.plot([], [])[0] for _ in range(env.n_agents)]
+    comm_lines = [ax.plot([], [], color="black", lw=1.4, alpha=0.7)[0] for _ in range(max(env.n_agents - 1, 1))]
+    ax.plot([], [], color="black", lw=1.4, alpha=0.7, label="Comm MST")
     ax.legend(loc="upper right")
 
     ax_rew.set_xlabel("Timestep")
@@ -307,6 +310,8 @@ def animate_rollout(frames: List[Dict[str, torch.Tensor]], env: StrikeEA2DEnv, i
             a.set_visible(False)
         for ln in heading_lines:
             ln.set_data([], [])
+        for cl in comm_lines:
+            cl.set_data([], [])
         time_vline.set_xdata([1])
         return [
             striker_sc,
@@ -320,6 +325,7 @@ def animate_rollout(frames: List[Dict[str, torch.Tensor]], env: StrikeEA2DEnv, i
             *obs_circles,
             *striker_arcs,
             *heading_lines,
+            *comm_lines,
             time_vline,
         ]
 
@@ -413,6 +419,77 @@ def animate_rollout(frames: List[Dict[str, torch.Tensor]], env: StrikeEA2DEnv, i
             else:
                 ln.set_data([], [])
 
+        alive_idx = torch.where(aa)[0]
+        edges_for_plot = []
+        if alive_idx.numel() > 1:
+            alive_pos_world = ap[alive_idx]  # [Na,2]
+            alive_pos_km = ap_km[alive_idx]  # [Na,2]
+            na = alive_idx.numel()
+            dmat = torch.cdist(alive_pos_world, alive_pos_world)
+            adj = dmat <= env.R_comm
+
+            visited = torch.zeros(na, dtype=torch.bool)
+            components = []
+            for start in range(na):
+                if visited[start]:
+                    continue
+                queue = [start]
+                visited[start] = True
+                comp = [start]
+                while queue:
+                    u = queue.pop(0)
+                    neigh = torch.where(adj[u])[0].tolist()
+                    for v in neigh:
+                        if not visited[v]:
+                            visited[v] = True
+                            queue.append(v)
+                            comp.append(v)
+                components.append(comp)
+
+            for comp in components:
+                if len(comp) <= 1:
+                    continue
+
+                parent = {u: u for u in comp}
+
+                def _find(u):
+                    while parent[u] != u:
+                        parent[u] = parent[parent[u]]
+                        u = parent[u]
+                    return u
+
+                def _union(u, v):
+                    ru, rv = _find(u), _find(v)
+                    if ru == rv:
+                        return False
+                    parent[rv] = ru
+                    return True
+
+                cand = []
+                for i in range(len(comp)):
+                    for j in range(i + 1, len(comp)):
+                        u, v = comp[i], comp[j]
+                        if bool(adj[u, v].item()):
+                            cand.append((float(dmat[u, v].item()), u, v))
+                cand.sort(key=lambda x: x[0])
+
+                added = 0
+                for _w, u, v in cand:
+                    if _union(u, v):
+                        p1 = alive_pos_km[u]
+                        p2 = alive_pos_km[v]
+                        edges_for_plot.append((float(p1[0]), float(p1[1]), float(p2[0]), float(p2[1])))
+                        added += 1
+                        if added == len(comp) - 1:
+                            break
+
+        for li, line in enumerate(comm_lines):
+            if li < len(edges_for_plot):
+                x1, y1, x2, y2 = edges_for_plot[li]
+                line.set_data([x1, x2], [y1, y2])
+            else:
+                line.set_data([], [])
+
         ax.set_xlabel(f"t={i} | Agents: {int(aa.sum().item())}/{env.n_agents} | Targets: {int(ta.sum().item())}/{env.n_targets}")
 
         reward_step = min(i, n_reward_steps) if n_reward_steps > 0 else 1
@@ -430,6 +507,7 @@ def animate_rollout(frames: List[Dict[str, torch.Tensor]], env: StrikeEA2DEnv, i
             *obs_circles,
             *striker_arcs,
             *heading_lines,
+            *comm_lines,
             time_vline,
         ]
 

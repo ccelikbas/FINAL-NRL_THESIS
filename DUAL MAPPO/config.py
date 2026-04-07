@@ -14,12 +14,12 @@ class EnvConfig:
     # Team composition
     n_strikers: int = 1
     n_jammers: int = 1
-    n_known_targets: int = 0
-    n_unknown_targets: int = 0
-    n_known_radars: int = 0
-    n_unknown_radars: int = 0
-    n_targets: int = 3
-    n_radars: int = 3
+    n_known_targets: int = 1
+    n_unknown_targets: int = 1
+    n_known_radars: int = 1
+    n_unknown_radars: int = 1
+    n_targets: int = 0
+    n_radars: int = 0
 
     # World / episode
     world_bounds: Tuple[float, float] = (0.0, 1.0)
@@ -37,6 +37,7 @@ class EnvConfig:
 
     # Sensors
     R_obs: float = 0.5
+    R_comm: float = 0.5
 
     # Strikers
     striker_engage_range: float = 0.10

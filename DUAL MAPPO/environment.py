@@ -61,6 +61,7 @@ class StrikeEA2DEnv(EnvBase):
         min_turn_radius: float = 0.05,
         # --- sensors ---
         R_obs:        float = 0.50,
+        R_comm:       float = 0.50,
         # --- striker capabilities ---
         striker_engage_range: float = 0.12,
         striker_engage_fov: float = 60.0,
@@ -125,6 +126,7 @@ class StrikeEA2DEnv(EnvBase):
 
         # sensors
         self.R_obs       = float(R_obs)
+        self.R_comm      = float(R_comm)
         self.radar_range = float(radar_range)
 
         # shaping
@@ -345,15 +347,29 @@ class StrikeEA2DEnv(EnvBase):
         
         target_pos = torch.zeros(B, T, 2, device=self.device)
         
-        # For each batch, create an evenly distributed radar assignment for targets
+        known_radar_idx = torch.arange(self.n_known_radars, device=self.device)
+        unknown_radar_idx = torch.arange(self.n_known_radars, self.n_radars, device=self.device)
+
+        # For each batch, create radar assignments while keeping known/unknown grouped
         for b in range(B):
-            # Create cyclic radar assignment: [0, 1, ..., R-1, 0, 1, ..., R-1, ...]
-            # This ensures targets are distributed across radars, not clustered at random ones
-            radar_assignments = torch.arange(T, device=self.device) % R  # [0, 1, 0, 1, ...] for R=2
-            
-            # Shuffle the assignment to randomize which radar gets which target each episode
-            perm = torch.randperm(T, device=self.device)
-            radar_assignments = radar_assignments[perm]
+            radar_assignments = torch.zeros(T, dtype=torch.long, device=self.device)
+
+            def _assign_group(start_idx: int, count: int, group_radar_idx: torch.Tensor):
+                if count <= 0:
+                    return
+                if group_radar_idx.numel() == 0:
+                    base = torch.arange(count, device=self.device) % max(R, 1)
+                else:
+                    base_local = torch.arange(count, device=self.device) % group_radar_idx.numel()
+                    base = group_radar_idx[base_local]
+                perm_local = torch.randperm(count, device=self.device)
+                radar_assignments[start_idx:start_idx + count] = base[perm_local]
+
+            known_target_count = min(self.n_known_targets, T)
+            unknown_target_count = max(0, T - known_target_count)
+
+            _assign_group(0, known_target_count, known_radar_idx)
+            _assign_group(known_target_count, unknown_target_count, unknown_radar_idx)
             
             # Spawn each target near its assigned radar
             for t in range(T):
@@ -1280,6 +1296,10 @@ class StrikeEA2DEnv(EnvBase):
             self.agent_pos, self.agent_heading, self.agent_pos
         )  # [B,A,A], [B,A,A]
 
+        dist_agents = torch.linalg.norm(
+            self.agent_pos[:, :, None, :] - self.agent_pos[:, None, :, :], dim=-1
+        )  # [B,A,A]
+
         # Exclude self by setting diagonal to inf / 0
         eye = torch.eye(A, device=self.device, dtype=torch.bool).unsqueeze(0)  # [1,A,A]
         dist_aa  = torch.where(eye, torch.tensor(float('inf'), device=self.device), dist_aa)
@@ -1311,8 +1331,21 @@ class StrikeEA2DEnv(EnvBase):
         angle_ar_norm = angle_ar / math.pi
         jammed = (self.radar_eff_range < self.radar_range).float()          # [B,R] 1=jammed
         jammed_exp = jammed[:, None, :].expand(B, A, R)                     # [B,A,R]
+        alive_agents = self.agent_alive
+        eye_agents = torch.eye(A, dtype=torch.bool, device=self.device).unsqueeze(0).expand(B, -1, -1)
+        comm_adj = (dist_agents <= self.R_comm) & alive_agents[:, :, None] & alive_agents[:, None, :]
+        comm_reach = comm_adj | eye_agents
+        for _ in range(max(A - 1, 0)):
+            comm_reach = comm_reach | (torch.matmul(comm_reach.float(), comm_reach.float()) > 0)
+
         radar_known_mask = self.radar_known[:, None, :].expand(B, A, R)
-        radar_visible = radar_known_mask | (dist_ar <= self.R_obs)          # [B,A,R]
+        local_radar_obs = (dist_ar <= self.R_obs) & alive_agents[:, :, None]
+        unknown_radar_mask = (~self.radar_known)[:, None, :].expand(B, A, R)
+        local_unknown_radar_obs = local_radar_obs & unknown_radar_mask
+        shared_unknown_radar_obs = torch.matmul(
+            comm_reach.float(), local_unknown_radar_obs.float()
+        ) > 0
+        radar_visible = radar_known_mask | shared_unknown_radar_obs          # [B,A,R]
         radar_feat = torch.stack([dist_ar_norm, angle_ar_norm, jammed_exp], dim=-1)  # [B,A,R,3]
         radar_slots = _select_nearest_slots(
             dist=dist_ar,
@@ -1330,7 +1363,13 @@ class StrikeEA2DEnv(EnvBase):
         angle_at_norm = angle_at / math.pi
         alive_t = self.target_alive[:, None, :].expand(B, A, T).float()     # [B,A,T]
         target_known_mask = self.target_known[:, None, :].expand(B, A, T)
-        target_visible = target_known_mask | (dist_at <= self.R_obs)         # [B,A,T]
+        local_target_obs = (dist_at <= self.R_obs) & alive_agents[:, :, None] & self.target_alive[:, None, :]
+        unknown_target_mask = (~self.target_known)[:, None, :].expand(B, A, T)
+        local_unknown_target_obs = local_target_obs & unknown_target_mask
+        shared_unknown_target_obs = torch.matmul(
+            comm_reach.float(), local_unknown_target_obs.float()
+        ) > 0
+        target_visible = target_known_mask | shared_unknown_target_obs        # [B,A,T]
         target_feat = torch.stack([dist_at_norm, angle_at_norm, alive_t], dim=-1)  # [B,A,T,3]
         target_slots = _select_nearest_slots(
             dist=dist_at,
