@@ -46,6 +46,10 @@ class StrikeEA2DEnv(EnvBase):
         n_jammers:    int   = 2,
         n_targets:    int   = 2,
         n_radars:     int   = 2,
+        n_known_targets: int = 0,
+        n_unknown_targets: int = 0,
+        n_known_radars: int = 0,
+        n_unknown_radars: int = 0,
         max_steps:    int   = 200,
         dt:           float = 1.0,
         world_bounds: Tuple[float, float] = (0.0, 1.0),
@@ -86,8 +90,28 @@ class StrikeEA2DEnv(EnvBase):
         self.n_strikers = n_strikers
         self.n_jammers  = n_jammers
         self.n_agents   = n_strikers + n_jammers
-        self.n_targets  = n_targets
-        self.n_radars   = n_radars
+        if n_known_targets == 0 and n_unknown_targets == 0:
+            self.n_targets = n_targets
+            self.n_known_targets = n_targets
+            self.n_unknown_targets = 0
+        else:
+            self.n_known_targets = int(n_known_targets)
+            self.n_unknown_targets = int(n_unknown_targets)
+            self.n_targets = self.n_known_targets + self.n_unknown_targets
+
+        if n_known_radars == 0 and n_unknown_radars == 0:
+            self.n_radars = n_radars
+            self.n_known_radars = n_radars
+            self.n_unknown_radars = 0
+        else:
+            self.n_known_radars = int(n_known_radars)
+            self.n_unknown_radars = int(n_unknown_radars)
+            self.n_radars = self.n_known_radars + self.n_unknown_radars
+
+        if self.n_known_targets < 0 or self.n_unknown_targets < 0:
+            raise ValueError("n_known_targets and n_unknown_targets must be >= 0")
+        if self.n_known_radars < 0 or self.n_unknown_radars < 0:
+            raise ValueError("n_known_radars and n_unknown_radars must be >= 0")
 
         # episode / kinematics
         self.max_steps = max_steps
@@ -156,7 +180,7 @@ class StrikeEA2DEnv(EnvBase):
         self._obs_key    = (self.group, "observation")
 
         # allocate state buffers
-        B, A, T, R = num_envs, self.n_agents, n_targets, n_radars
+        B, A, T, R = num_envs, self.n_agents, self.n_targets, self.n_radars
         self.agent_pos     = torch.zeros(B, A, 2, device=self.device)
         self.agent_heading = torch.zeros(B, A,    device=self.device)
         self.agent_speed   = torch.zeros(B, A,    device=self.device)  # Current velocity magnitude
@@ -164,13 +188,15 @@ class StrikeEA2DEnv(EnvBase):
         self.agent_alive   = torch.ones(B, A,     dtype=torch.bool, device=self.device)
         self.target_pos    = torch.zeros(B, T, 2, device=self.device)
         self.target_alive  = torch.ones(B, T,     dtype=torch.bool, device=self.device)
+        self.target_known  = torch.zeros(B, T,    dtype=torch.bool, device=self.device)
         self.radar_pos     = torch.zeros(B, R, 2, device=self.device)
+        self.radar_known   = torch.zeros(B, R,    dtype=torch.bool, device=self.device)
         self.radar_eff_range = torch.full((B, R), self.radar_range, device=self.device)
         self.step_count    = torch.zeros(B, 1, dtype=torch.int64, device=self.device)
         # Previous striker→target distances for progress reward (potential-based shaping)
-        self._striker_prev_dist = torch.zeros(B, n_strikers, n_targets, device=self._device)
+        self._striker_prev_dist = torch.zeros(B, n_strikers, self.n_targets, device=self._device)
         # Previous jammer→radar distances for progress reward (potential-based shaping)
-        self._jammer_prev_dist = torch.zeros(B, n_jammers, n_radars, device=self._device)
+        self._jammer_prev_dist = torch.zeros(B, n_jammers, self.n_radars, device=self._device)
         # Running team-total reward per env for current episode (sum over agents)
         self._episode_team_reward = torch.zeros(B, device=self.device)
         # Running per-component team-total reward per env for current episode
@@ -253,8 +279,8 @@ class StrikeEA2DEnv(EnvBase):
         """
         layouts = []
         x_lo, x_hi = 0.2, 0.8
-        y_lo, y_hi = 0.6, 0.8
-        min_sep = 0.2
+        y_lo, y_hi = 0.4, 0.8
+        min_sep = 0.1
         for seed_idx in range(self.n_env_layouts):
             rng = torch.Generator()
             rng.manual_seed(seed_idx + 1000)  # Offset to avoid collision with main RNG
@@ -488,6 +514,16 @@ class StrikeEA2DEnv(EnvBase):
             target_pos_reset = self._spawn_targets_in_valid_zones(n_reset, T, R, radar_pos_reset)
             self.target_pos[reset_idx] = target_pos_reset
             self.target_alive[reset_idx] = True
+            target_known_reset = torch.zeros(n_reset, T, dtype=torch.bool, device=self.device)
+            if self.n_known_targets > 0:
+                target_known_reset[:, :self.n_known_targets] = True
+            self.target_known[reset_idx] = target_known_reset
+
+            radar_known_reset = torch.zeros(n_reset, R, dtype=torch.bool, device=self.device)
+            if self.n_known_radars > 0:
+                radar_known_reset[:, :self.n_known_radars] = True
+            self.radar_known[reset_idx] = radar_known_reset
+
             self.radar_eff_range[reset_idx] = self.radar_range
             self.step_count[reset_idx] = 0
             self._episode_team_reward[reset_idx] = 0.0
@@ -1275,7 +1311,8 @@ class StrikeEA2DEnv(EnvBase):
         angle_ar_norm = angle_ar / math.pi
         jammed = (self.radar_eff_range < self.radar_range).float()          # [B,R] 1=jammed
         jammed_exp = jammed[:, None, :].expand(B, A, R)                     # [B,A,R]
-        radar_visible = dist_ar <= self.R_obs                               # [B,A,R]
+        radar_known_mask = self.radar_known[:, None, :].expand(B, A, R)
+        radar_visible = radar_known_mask | (dist_ar <= self.R_obs)          # [B,A,R]
         radar_feat = torch.stack([dist_ar_norm, angle_ar_norm, jammed_exp], dim=-1)  # [B,A,R,3]
         radar_slots = _select_nearest_slots(
             dist=dist_ar,
@@ -1292,7 +1329,8 @@ class StrikeEA2DEnv(EnvBase):
         dist_at_norm  = dist_at / max_dist
         angle_at_norm = angle_at / math.pi
         alive_t = self.target_alive[:, None, :].expand(B, A, T).float()     # [B,A,T]
-        target_visible = dist_at <= self.R_obs                               # [B,A,T]
+        target_known_mask = self.target_known[:, None, :].expand(B, A, T)
+        target_visible = target_known_mask | (dist_at <= self.R_obs)         # [B,A,T]
         target_feat = torch.stack([dist_at_norm, angle_at_norm, alive_t], dim=-1)  # [B,A,T,3]
         target_slots = _select_nearest_slots(
             dist=dist_at,
