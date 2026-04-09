@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import gc
 import sys
 from pathlib import Path
 
@@ -184,6 +185,9 @@ def main() -> None:
         fofe=legacy_fofe_cfg,
     ).finalize()
 
+    print(f"  FOFE config: use_fofe={legacy_cfg.fofe.use_fofe}")
+    print(f"  Env config:  use_fofe={legacy_cfg.env.use_fofe}")
+
     legacy_env, legacy_policy, legacy_critic, legacy_logs, legacy_rn = train_mappo(
         legacy_cfg.env, legacy_cfg.ppo, legacy_cfg.net,
         fofe_cfg=legacy_cfg.fofe,
@@ -194,10 +198,22 @@ def main() -> None:
                      legacy_logs, legacy_rn)
     _print_final_metrics("MAPPO (Legacy)", legacy_logs)
 
+    # ── Free Phase 1 GPU resources before Phase 2 ────────────────────
+    # Move legacy artefacts to CPU so GPU VRAM is available for the
+    # (larger) FOFE networks.  We keep the objects alive for the
+    # side-by-side rollout animations at the end.
+    legacy_policy.cpu()
+    legacy_critic.cpu()
+    del legacy_env, legacy_critic, legacy_rn
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    print("  Freed Phase 1 GPU resources.\n")
+
     # ==================================================================
     # Phase 2: Train FOFE-MAPPO — use_fofe=True
     # ==================================================================
-    print("\n" + "=" * 70)
+    print("=" * 70)
     print("  Phase 2/2: Training FOFE-MAPPO  [use_fofe=True]")
     print("=" * 70)
 
@@ -208,6 +224,9 @@ def main() -> None:
         net=copy.deepcopy(net_cfg),
         fofe=fofe_fofe_cfg,
     ).finalize()
+
+    print(f"  FOFE config: use_fofe={fofe_cfg.fofe.use_fofe}")
+    print(f"  Env config:  use_fofe={fofe_cfg.env.use_fofe}")
 
     fofe_env, fofe_policy, fofe_critic, fofe_logs, fofe_rn = train_mappo(
         fofe_cfg.env, fofe_cfg.ppo, fofe_cfg.net,
@@ -239,13 +258,16 @@ def main() -> None:
         print("\n" + "=" * 70)
         print(f"  Generating {args.n_rollouts} side-by-side rollout animation(s)")
         print("=" * 70)
+        # Move legacy policy back to GPU for rollout (was moved to CPU to free VRAM)
+        rollout_device = fofe_cfg.ppo.device
+        legacy_policy.to(rollout_device)
         try:
             for r in range(args.n_rollouts):
                 seed = 999 + r
                 legacy_tester = TestRunner(legacy_policy, env_cfg=legacy_cfg.env,
-                                           device=legacy_cfg.ppo.device, seed=seed)
+                                           device=rollout_device, seed=seed)
                 fofe_tester = TestRunner(fofe_policy, env_cfg=fofe_cfg.env,
-                                         device=fofe_cfg.ppo.device, seed=seed)
+                                         device=rollout_device, seed=seed)
                 legacy_frames = legacy_tester.rollout()
                 fofe_frames = fofe_tester.rollout()
                 animate_comparison_rollout(
