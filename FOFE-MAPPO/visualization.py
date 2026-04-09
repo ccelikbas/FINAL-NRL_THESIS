@@ -515,3 +515,335 @@ def animate_rollout(frames: List[Dict[str, torch.Tensor]], env: StrikeEA2DEnv, i
     ani = animation.FuncAnimation(fig, update, frames=len(frames), init_func=init, interval=interval_ms, blit=False, repeat=False)
     plt.show()
     return ani
+
+
+# ------------------------------------------------------------------
+# Comparison Dashboard: MAPPO (Legacy) vs FOFE-MAPPO
+# ------------------------------------------------------------------
+
+_LEGACY_LABEL = "MAPPO (Legacy)"
+_FOFE_LABEL   = "FOFE-MAPPO"
+
+# Colour palette: each metric gets one hue; legacy = dashed, FOFE = solid
+_METHOD_STYLES = {
+    _LEGACY_LABEL: {"linestyle": "--", "alpha": 0.75},
+    _FOFE_LABEL:   {"linestyle": "-",  "alpha": 1.0},
+}
+
+
+def plot_comparison(
+    legacy_logs: Dict[str, List[float]],
+    fofe_logs: Dict[str, List[float]],
+) -> None:
+    """Comparison dashboard: MAPPO (Legacy) vs FOFE-MAPPO.
+
+    Layout (2×3) — same grid as the single-method dashboard:
+        Row 0: Training total reward | Combined losses | Entropy/KL/clip/EV
+        Row 1: Eval total return     | Survival+completion | Duration
+
+    Reward plots show ONLY total reward for both methods.
+    All other plots show every metric for both methods, with dashed lines
+    for Legacy and solid lines for FOFE-MAPPO.
+    """
+
+    def _plot_method(ax, series, label, color, style_dict, **extra):
+        y = np.asarray(series, dtype=float)
+        if y.size == 0:
+            return
+        x = np.arange(1, y.size + 1)
+        valid = np.isfinite(y)
+        if not np.any(valid):
+            return
+        ax.plot(
+            x[valid], y[valid],
+            marker="o", markersize=2,
+            label=label, color=color,
+            linestyle=style_dict["linestyle"],
+            alpha=style_dict["alpha"],
+            **extra,
+        )
+
+    def _dual(ax, key, metric_label, color, legacy, fofe):
+        if key in legacy:
+            _plot_method(ax, legacy[key],
+                         f"{metric_label} [{_LEGACY_LABEL}]", color,
+                         _METHOD_STYLES[_LEGACY_LABEL])
+        if key in fofe:
+            _plot_method(ax, fofe[key],
+                         f"{metric_label} [{_FOFE_LABEL}]", color,
+                         _METHOD_STYLES[_FOFE_LABEL])
+
+    fig, axes = plt.subplots(2, 3, figsize=(24, 11))
+
+    # ── Row 0, Col 0: Training Total Reward (only total) ─────────
+    ax = axes[0, 0]
+    _dual(ax, "train_mean_episode_total_reward", "Total Reward",
+          "tab:blue", legacy_logs, fofe_logs)
+    ax.set_title("Training Episode Reward")
+    ax.set_xlabel("Iteration")
+    ax.legend(fontsize=8)
+    ax.grid(True)
+
+    # ── Row 0, Col 1: Combined losses ────────────────────────────
+    ax = axes[0, 1]
+    loss_items = [
+        ("striker_loss_policy", "striker_policy_loss", "tab:blue"),
+        ("striker_loss_value",  "striker_value_loss",  "tab:orange"),
+        ("jammer_loss_policy",  "jammer_policy_loss",  "tab:green"),
+        ("jammer_loss_value",   "jammer_value_loss",   "tab:red"),
+    ]
+    for key, lbl, col in loss_items:
+        _dual(ax, key, lbl, col, legacy_logs, fofe_logs)
+    ax.set_title("Policy & Value Loss (Striker + Jammer)")
+    ax.set_xlabel("Iteration")
+    ax.legend(fontsize=6, ncol=2)
+    ax.grid(True)
+
+    # ── Row 0, Col 2: Entropy / KL / Clip / EV ──────────────────
+    ax = axes[0, 2]
+    diag_items = [
+        ("striker_entropy",            "striker_entropy",       "tab:green"),
+        ("jammer_entropy",             "jammer_entropy",        "tab:olive"),
+        ("striker_approx_kl",          "striker_kl_approx",     "tab:red"),
+        ("jammer_approx_kl",           "jammer_kl_approx",      "tab:pink"),
+        ("striker_clip_ratio",         "striker_clip_ratio",    "tab:purple"),
+        ("jammer_clip_ratio",          "jammer_clip_ratio",     "tab:brown"),
+        ("striker_explained_variance", "striker_explained_var", "tab:cyan"),
+        ("jammer_explained_variance",  "jammer_explained_var",  "tab:gray"),
+    ]
+    for key, lbl, col in diag_items:
+        _dual(ax, key, lbl, col, legacy_logs, fofe_logs)
+    ax.set_title("Entropy / KL / Clip / EV (Striker + Jammer)")
+    ax.set_xlabel("Iteration")
+    ax.legend(fontsize=5, ncol=2)
+    ax.grid(True)
+
+    # ── Row 1, Col 0: Eval Total Return (only total) ─────────────
+    ax = axes[1, 0]
+    _dual(ax, "eval_mean_episode_total_reward", "Total Return",
+          "tab:blue", legacy_logs, fofe_logs)
+    ax.set_title("Eval Episode Return")
+    ax.set_xlabel("Iteration")
+    ax.legend(fontsize=8)
+    ax.grid(True)
+
+    # ── Row 1, Col 1: Eval Survival & Completion ─────────────────
+    ax = axes[1, 1]
+    _dual(ax, "eval_survival_rate",        "survival_rate",    "tab:blue",   legacy_logs, fofe_logs)
+    _dual(ax, "eval_task_completion_rate",  "completion_rate",  "tab:orange", legacy_logs, fofe_logs)
+    ax.set_title("Eval Survival & Completion")
+    ax.set_xlabel("Iteration")
+    ax.legend(fontsize=7, ncol=2)
+    ax.grid(True)
+
+    # ── Row 1, Col 2: Eval Mission Duration ──────────────────────
+    ax = axes[1, 2]
+    _dual(ax, "eval_mean_duration", "mission_duration", "tab:blue",
+          legacy_logs, fofe_logs)
+    ax.set_title("Eval Mission Duration")
+    ax.set_xlabel("Iteration")
+    ax.legend(fontsize=8)
+    ax.grid(True)
+
+    fig.suptitle(
+        f"Comparison: {_LEGACY_LABEL}  vs  {_FOFE_LABEL}",
+        fontsize=14, fontweight="bold",
+    )
+    fig.tight_layout(rect=[0, 0, 1, 0.95])
+    plt.show()
+
+
+# ------------------------------------------------------------------
+# Side-by-side rollout animation: Legacy vs FOFE
+# ------------------------------------------------------------------
+
+def _draw_world_panel(ax, env, frames, title):
+    """Set up one world-view panel and return the drawable artists + update fn."""
+    ax.set_xlim(0, 1000)
+    ax.set_ylim(0, 1000)
+    ax.set_aspect("equal", adjustable="box")
+    ax.set_xlabel("X (km)")
+    ax.set_ylabel("Y (km)")
+    ax.set_title(title)
+
+    empty_xy = np.empty((0, 2), dtype=float)
+
+    striker_sc = ax.scatter([], [], s=60, marker="^", label="Strikers")
+    jammer_sc = ax.scatter([], [], s=60, marker="s", label="Jammers")
+    target_known_sc = ax.scatter([], [], s=80, marker="*", label="Targets (known)", color="#a65e00")
+    target_unknown_sc = ax.scatter([], [], s=80, marker="*", label="Targets (unknown)",
+                                   facecolors="none", edgecolors="#a65e00", linewidths=1.8)
+    radar_known_sc = ax.scatter([], [], s=80, marker="X", label="Radars (known)", color="#243c9b")
+    radar_unknown_sc = ax.scatter([], [], s=80, marker="X", label="Radars (unknown)",
+                                  facecolors="none", edgecolors="#243c9b", linewidths=1.8)
+
+    radar_circles = [ax.add_patch(Circle((0, 0), 0, fill=False, edgecolor="C3", alpha=0.6, lw=2))
+                     for _ in range(env.n_radars)]
+    jammer_circles = [ax.add_patch(Circle((0, 0), 0, fill=False, edgecolor="C4", alpha=0.5, lw=1.5, ls="--"))
+                      for _ in range(env.n_jammers)]
+    obs_circles = [ax.add_patch(Circle((0, 0), 0, fill=False, edgecolor="C0", alpha=0.35, lw=1.0, ls=":"))
+                   for _ in range(env.n_agents)]
+    striker_arcs = [ax.add_patch(Polygon(np.empty((0, 2)), closed=True, fc="C2", alpha=0.18, ec="C2"))
+                    for _ in range(env.n_strikers)]
+    heading_lines = [ax.plot([], [])[0] for _ in range(env.n_agents)]
+    comm_lines = [ax.plot([], [], color="black", lw=1.4, alpha=0.7)[0]
+                  for _ in range(max(env.n_agents - 1, 1))]
+    ax.plot([], [], color="black", lw=1.4, alpha=0.7, label="Comm MST")
+    ax.legend(loc="upper right", fontsize=6)
+
+    artists = {
+        "striker_sc": striker_sc, "jammer_sc": jammer_sc,
+        "target_known_sc": target_known_sc, "target_unknown_sc": target_unknown_sc,
+        "radar_known_sc": radar_known_sc, "radar_unknown_sc": radar_unknown_sc,
+        "radar_circles": radar_circles, "jammer_circles": jammer_circles,
+        "obs_circles": obs_circles, "striker_arcs": striker_arcs,
+        "heading_lines": heading_lines, "comm_lines": comm_lines,
+    }
+
+    def _update_panel(i):
+        fr = frames[min(i, len(frames) - 1)]
+        ap = fr["agent_pos"]; aa = fr["agent_alive"]; ah = fr["agent_heading"]
+        tp = fr["target_pos"]; ta = fr["target_alive"]; tk = fr["target_known"]
+        rp = fr["radar_pos"]; rk = fr["radar_known"]; rr = fr["radar_eff_range"]
+
+        ap_km, tp_km, rp_km = ap * 1000, tp * 1000, rp * 1000
+
+        s_xy = ap_km[:env.n_strikers][aa[:env.n_strikers]]
+        j_xy = ap_km[env.n_strikers:][aa[env.n_strikers:]]
+        striker_sc.set_offsets(s_xy.numpy() if s_xy.numel() else empty_xy)
+        jammer_sc.set_offsets(j_xy.numpy() if j_xy.numel() else empty_xy)
+
+        ak_t = ta & tk; au_t = ta & (~tk)
+        target_known_sc.set_offsets(tp_km[ak_t].numpy() if ak_t.any() else empty_xy)
+        target_unknown_sc.set_offsets(tp_km[au_t].numpy() if au_t.any() else empty_xy)
+        radar_known_sc.set_offsets(rp_km[rk].numpy() if rk.any() else empty_xy)
+        radar_unknown_sc.set_offsets(rp_km[~rk].numpy() if (~rk).any() else empty_xy)
+
+        for j, c in enumerate(radar_circles):
+            c.set_visible(True)
+            c.set_center((float(rp_km[j, 0]), float(rp_km[j, 1])))
+            c.set_radius(float(rr[j]) * 1000)
+        for j, jc in enumerate(jammer_circles):
+            idx = env.n_strikers + j
+            if aa[idx].item():
+                jc.set_visible(True)
+                jc.set_center((float(ap_km[idx, 0]), float(ap_km[idx, 1])))
+                jc.set_radius(env.jammer.jam_radius * 1000)
+            else:
+                jc.set_visible(False)
+        for k, oc in enumerate(obs_circles):
+            if aa[k].item():
+                oc.set_visible(True)
+                oc.set_center((float(ap_km[k, 0]), float(ap_km[k, 1])))
+                oc.set_radius(float(env.R_obs) * 1000)
+            else:
+                oc.set_visible(False)
+
+        half_fov = 0.5 * env.striker.engage_fov_deg
+        r_str = env.striker.engage_range * 1000
+        for s, sa in enumerate(striker_arcs):
+            if aa[s].item():
+                cx, cy = float(ap_km[s, 0]), float(ap_km[s, 1])
+                th1 = math.radians(math.degrees(float(ah[s])) - half_fov)
+                th2 = th1 + math.radians(2 * half_fov)
+                angles = np.linspace(th1, th2, 24)
+                verts = np.vstack(([cx, cy], np.column_stack((cx + r_str * np.cos(angles),
+                                                               cy + r_str * np.sin(angles)))))
+                sa.set_visible(True); sa.set_xy(verts)
+            else:
+                sa.set_visible(False)
+
+        for k, ln in enumerate(heading_lines):
+            if aa[k].item():
+                x, y = float(ap_km[k, 0]), float(ap_km[k, 1])
+                ln.set_data([x, x + 30 * math.cos(float(ah[k]))],
+                            [y, y + 30 * math.sin(float(ah[k]))])
+            else:
+                ln.set_data([], [])
+
+        # Communication MST
+        alive_idx = torch.where(aa)[0]
+        edges = []
+        if alive_idx.numel() > 1:
+            alive_pos_w = ap[alive_idx]; alive_pos_km = ap_km[alive_idx]
+            na = alive_idx.numel()
+            dmat = torch.cdist(alive_pos_w, alive_pos_w)
+            adj = dmat <= env.R_comm
+            visited = torch.zeros(na, dtype=torch.bool)
+            components = []
+            for start in range(na):
+                if visited[start]: continue
+                queue = [start]; visited[start] = True; comp = [start]
+                while queue:
+                    u = queue.pop(0)
+                    for v in torch.where(adj[u])[0].tolist():
+                        if not visited[v]:
+                            visited[v] = True; queue.append(v); comp.append(v)
+                components.append(comp)
+            for comp in components:
+                if len(comp) <= 1: continue
+                parent = {u: u for u in comp}
+                def _find(u, _p=parent):
+                    while _p[u] != u: _p[u] = _p[_p[u]]; u = _p[u]
+                    return u
+                def _union(u, v, _p=parent):
+                    ru, rv = _find(u), _find(v)
+                    if ru == rv: return False
+                    _p[rv] = ru; return True
+                cand = sorted(((float(dmat[comp[i], comp[j]].item()), comp[i], comp[j])
+                                for i in range(len(comp)) for j in range(i+1, len(comp))
+                                if bool(adj[comp[i], comp[j]].item())),
+                               key=lambda x: x[0])
+                added = 0
+                for _w, u, v in cand:
+                    if _union(u, v):
+                        p1, p2 = alive_pos_km[u], alive_pos_km[v]
+                        edges.append((float(p1[0]), float(p1[1]), float(p2[0]), float(p2[1])))
+                        added += 1
+                        if added == len(comp) - 1: break
+
+        for li, line in enumerate(comm_lines):
+            if li < len(edges):
+                x1, y1, x2, y2 = edges[li]
+                line.set_data([x1, x2], [y1, y2])
+            else:
+                line.set_data([], [])
+
+        ax.set_xlabel(f"t={i} | Agents: {int(aa.sum().item())}/{env.n_agents} "
+                       f"| Targets: {int(ta.sum().item())}/{env.n_targets}")
+
+    return artists, _update_panel
+
+
+def animate_comparison_rollout(
+    legacy_frames: List[Dict[str, torch.Tensor]],
+    fofe_frames: List[Dict[str, torch.Tensor]],
+    legacy_env: StrikeEA2DEnv,
+    fofe_env: StrikeEA2DEnv,
+    interval_ms: int = 70,
+):
+    """Side-by-side rollout animation: MAPPO (Legacy) vs FOFE-MAPPO."""
+    fig, (ax_l, ax_f) = plt.subplots(1, 2, figsize=(22, 9))
+
+    _, update_legacy = _draw_world_panel(ax_l, legacy_env, legacy_frames, _LEGACY_LABEL)
+    _, update_fofe   = _draw_world_panel(ax_f, fofe_env,   fofe_frames,   _FOFE_LABEL)
+
+    n_frames = max(len(legacy_frames), len(fofe_frames))
+
+    def _init():
+        return []
+
+    def _update(i):
+        update_legacy(i)
+        update_fofe(i)
+        return []
+
+    fig.suptitle(f"Rollout Comparison: {_LEGACY_LABEL}  vs  {_FOFE_LABEL}",
+                 fontsize=13, fontweight="bold")
+    fig.tight_layout(rect=[0, 0, 1, 0.95])
+
+    ani = animation.FuncAnimation(fig, _update, frames=n_frames,
+                                  init_func=_init, interval=interval_ms,
+                                  blit=False, repeat=False)
+    plt.show()
+    return ani
