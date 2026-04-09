@@ -73,7 +73,7 @@ class FOFEConfig:
     critic_fusion_mlp_dims : tuple of int
         Fusion MLP dims for critic.
     """
-    use_fofe: bool = False
+    use_fofe: bool = True
 
     # --- Actor FOFE dims ---
     agents_see_dims:   Tuple[int, ...] = (96, 128)
@@ -143,8 +143,14 @@ class EnvConfig:
     border_thresh: float = 0.05
     reward_config: RewardConfig = field(default_factory=RewardConfig)
 
-    # FOFE mode (set by ExperimentConfig.finalize)
-    use_fofe: bool = True
+    # Internal: propagated from FOFEConfig.use_fofe by ExperimentConfig.finalize().
+    # Do NOT set directly — change FOFEConfig.use_fofe instead.
+    _use_fofe: bool = field(default=False, repr=False)
+
+    @property
+    def use_fofe(self) -> bool:
+        """Read-only accessor — always reflects FOFEConfig.use_fofe after finalize()."""
+        return self._use_fofe
 
     def __post_init__(self):
         self.n_known_targets = int(self.n_known_targets)
@@ -220,5 +226,5 @@ class ExperimentConfig:
         if self.ppo.frames_per_batch is None:
             self.ppo.frames_per_batch = int(self.ppo.num_envs * self.env.max_steps)
         # Propagate FOFE flag into EnvConfig so the env knows to emit FOFE obs
-        self.env.use_fofe = self.fofe.use_fofe
+        self.env._use_fofe = self.fofe.use_fofe
         return self
