@@ -28,6 +28,7 @@ def build_parser() -> argparse.ArgumentParser:
     env_defaults = EnvConfig()
     ppo_defaults = PPOConfig()
     net_defaults = NetworkConfig()
+    fofe_defaults = FOFEConfig()
     reward_defaults = RewardConfig()
 
     p = argparse.ArgumentParser(description="FOFE-MAPPO for Strike-EA")
@@ -56,9 +57,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--actor_hidden", type=int, default=net_defaults.actor_hidden)
     p.add_argument("--critic_hidden", type=int, default=net_defaults.critic_hidden)
     p.add_argument("--depth", type=int, default=net_defaults.depth)
-    # FOFE toggle
-    p.add_argument("--use_fofe", action="store_true", default=False,
-                   help="Enable FOFE observation encoding (default: legacy flat MLP)")
+    # FOFE toggle (default follows FOFEConfig)
+    p.add_argument(
+        "--use_fofe",
+        action=argparse.BooleanOptionalAction,
+        default=fofe_defaults.use_fofe,
+        help="Enable/disable FOFE observation encoding (default from FOFEConfig.use_fofe)",
+    )
     # Reward weights
     p.add_argument("--target_destroyed", type=float, default=reward_defaults.target_destroyed)
     p.add_argument("--agent_destroyed", type=float, default=reward_defaults.agent_destroyed)
