@@ -100,9 +100,9 @@ class EnvConfig:
     # Team composition
     n_strikers: int = 1
     n_jammers: int = 1
-    n_known_targets: int = 2
+    n_known_targets: int = 1
     n_unknown_targets: int = 0
-    n_known_radars: int = 2
+    n_known_radars: int = 1
     n_unknown_radars: int = 0
     n_targets: int = 0
     n_radars: int = 0
@@ -110,7 +110,7 @@ class EnvConfig:
     # World / episode
     world_bounds: Tuple[float, float] = (0.0, 1.0)
     dt: float = 1.0
-    max_steps: int = 150
+    max_steps: int = 100
     n_env_layouts: int = 0
     target_spawn_angle_range: Tuple[float, float] = (0, 360)
 
@@ -182,7 +182,7 @@ class EnvConfig:
 class PPOConfig:
     """Shared PPO hyperparameters for both striker and jammer MAPPO."""
     num_envs: int = 512
-    n_iters: int = 200
+    n_iters: int = 20
     frames_per_batch: Optional[int] = None
     num_epochs: int = 10
     minibatch_size: int = 2048

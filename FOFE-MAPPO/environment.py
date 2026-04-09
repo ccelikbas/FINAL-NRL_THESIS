@@ -1503,7 +1503,7 @@ class StrikeEA2DEnv(EnvBase):
 
         # ---- Agents channel: [B, A, A, 4] + mask [B, A, A] ----
         dist_aa, angle_aa = self._relative_polar(self.agent_pos, self.agent_heading, self.agent_pos)
-        dist_aa = torch.where(eye, torch.tensor(float('inf'), device=self.device), dist_aa)
+        dist_aa = torch.where(eye, torch.tensor(10.0, device=self.device), dist_aa)
         angle_aa = torch.where(eye, torch.zeros(1, device=self.device), angle_aa)
         agents_visible = (dist_aa <= self.R_obs) & self.agent_alive[:, None, :] & ~eye
 
@@ -1514,6 +1514,7 @@ class StrikeEA2DEnv(EnvBase):
             role[:, None, :].expand(B, A, A),
         ], dim=-1)  # [B, A, A, 4]
         agents_feat = agents_feat * agents_visible.unsqueeze(-1).float()
+        agents_feat = torch.nan_to_num(agents_feat, nan=0.0)
 
         # ---- Radars channel: [B, A, R, 3] + mask [B, A, R] ----
         dist_ar, angle_ar = self._relative_polar(self.agent_pos, self.agent_heading, self.radar_pos)
@@ -1528,6 +1529,7 @@ class StrikeEA2DEnv(EnvBase):
 
         radars_feat = torch.stack([dist_ar / max_dist, angle_ar / math.pi, jammed], dim=-1)
         radars_feat = radars_feat * radars_visible.unsqueeze(-1).float()
+        radars_feat = torch.nan_to_num(radars_feat, nan=0.0)
 
         # ---- Targets channel: [B, A, T, 3] + mask [B, A, T] ----
         dist_at, angle_at = self._relative_polar(self.agent_pos, self.agent_heading, self.target_pos)
@@ -1541,6 +1543,7 @@ class StrikeEA2DEnv(EnvBase):
 
         targets_feat = torch.stack([dist_at / max_dist, angle_at / math.pi, alive_t], dim=-1)
         targets_feat = targets_feat * targets_visible.unsqueeze(-1).float()
+        targets_feat = torch.nan_to_num(targets_feat, nan=0.0)
 
         return {
             "obs_self":          obs_self,

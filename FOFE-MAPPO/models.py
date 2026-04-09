@@ -155,7 +155,7 @@ class SEELayer(nn.Module):
 
         # ---- Eq. 29: concatenate separated + aggregated ----
         out = torch.cat([x_sep, x_agg], dim=-1)  # [*, n, 2*h]
-        out = out * mask.unsqueeze(-1).float()    # zero masked rows
+        out = torch.where(mask.unsqueeze(-1), out, torch.zeros_like(out))  # zero masked rows (avoids NaN * 0 = NaN)
         return out
 
 
@@ -200,6 +200,8 @@ class FOFEBlock(nn.Module):
         mask : [*, n]          True = visible
         Returns [*, D_fofe]
         """
+        # Ensure masked rows are exactly zero (guards against residual NaN from inf*0)
+        x = torch.where(mask.unsqueeze(-1), x, torch.zeros_like(x))
         for see in self.see_layers:
             x = see(x, mask)
         x = self.entity_mlp(x)                              # [*, n, D_fofe]
