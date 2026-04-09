@@ -26,7 +26,7 @@ FOFE Critic pipeline (same structure, different weights & entity dims):
 
 from __future__ import annotations
 
-from typing import Tuple
+from typing import Dict, Tuple
 
 import torch
 import torch.nn as nn
@@ -264,6 +264,9 @@ class FOFEPolicyNet(nn.Module):
         # ---- Action head ----
         self.action_head = nn.Linear(cur, act_dim * n_choices)
 
+        # Diagnostic cache (populated each forward, detached, zero cost when unused)
+        self._diag_cache: Dict[str, torch.Tensor] = {}
+
     def forward(self, obs_self, agents_feat, agents_mask,
                 targets_feat, targets_mask, radars_feat, radars_mask):
         """
@@ -285,6 +288,13 @@ class FOFEPolicyNet(nn.Module):
         x_agents = self.fofe_agents(af, am)  # [B*A, D_fofe]
         x_targets = self.fofe_targets(tf, tm)
         x_radars = self.fofe_radars(rf, rm)
+
+        # Cache per-channel outputs for diagnostics (detached = no graph impact)
+        self._diag_cache = {
+            "x_agents": x_agents.detach(),
+            "x_targets": x_targets.detach(),
+            "x_radars": x_radars.detach(),
+        }
 
         # ---- Fuse & predict ----
         x = torch.cat([x_self, x_agents, x_targets, x_radars], dim=-1)
@@ -339,6 +349,9 @@ class FOFEValueNet(nn.Module):
         # ---- Value head: one scalar per role-agent ----
         self.value_head = nn.Linear(cur, n_role_agents)
 
+        # Diagnostic cache (populated each forward, detached, zero cost when unused)
+        self._diag_cache: Dict[str, torch.Tensor] = {}
+
     def forward(self, agent_feat, agent_mask, target_feat, target_mask,
                 radar_feat, radar_mask, time_feat):
         """
@@ -349,6 +362,13 @@ class FOFEValueNet(nn.Module):
         x_a = self.fofe_agents(agent_feat, agent_mask)    # [B, D_fofe]
         x_t = self.fofe_targets(target_feat, target_mask)  # [B, D_fofe]
         x_r = self.fofe_radars(radar_feat, radar_mask)     # [B, D_fofe]
+
+        # Cache per-channel outputs for diagnostics
+        self._diag_cache = {
+            "x_agents": x_a.detach(),
+            "x_targets": x_t.detach(),
+            "x_radars": x_r.detach(),
+        }
 
         x = torch.cat([x_a, x_t, x_r, time_feat], dim=-1)  # [B, 3*D_fofe+1]
         x = self.fusion_mlp(x)

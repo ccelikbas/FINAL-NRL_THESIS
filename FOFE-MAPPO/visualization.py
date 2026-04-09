@@ -153,6 +153,121 @@ def plot_training(logs: Dict[str, List[float]]) -> None:
     fig.tight_layout(rect=[0, 0, 1, 0.95])
     plt.show()
 
+    # Show FOFE diagnostics if FOFE log keys have finite data
+    _plot_fofe_diagnostics(logs)
+
+
+def _plot_fofe_diagnostics(logs: Dict[str, List[float]]) -> None:
+    """Optional FOFE KPI diagnostics dashboard (2x3 grid).
+
+    Only displays if the logs contain FOFE keys with at least some finite data.
+    Backward-compatible: silently returns if keys are missing.
+
+    Layout:
+        Row 0: Channel Dominance (Striker) | Channel Dominance (Jammer) | Collapse Fraction
+        Row 1: Visible Entity Counts       | All-Masked Fraction        | SEE Gradient Norms
+    """
+    # Check if any FOFE data exists
+    test_key = "fofe_striker_dominance_agents"
+    if test_key not in logs:
+        return
+    y = np.asarray(logs[test_key], dtype=float)
+    if y.size == 0 or not np.any(np.isfinite(y)):
+        return
+
+    def _plot_valid(ax, series, label, **kwargs):
+        y = np.asarray(series, dtype=float)
+        if y.size == 0:
+            return
+        x = np.arange(1, y.size + 1)
+        valid = np.isfinite(y)
+        if not np.any(valid):
+            return
+        ax.plot(x[valid], y[valid], marker="o", markersize=2, label=label, **kwargs)
+
+    def _safe(key):
+        return logs.get(key, [])
+
+    fig, axes = plt.subplots(2, 3, figsize=(22, 10))
+
+    # ── Row 0, Col 0: Channel Dominance (Striker) ────────────────
+    ax = axes[0, 0]
+    _plot_valid(ax, _safe("fofe_striker_dominance_agents"),  "agents",  color="tab:blue")
+    _plot_valid(ax, _safe("fofe_striker_dominance_targets"), "targets", color="tab:orange")
+    _plot_valid(ax, _safe("fofe_striker_dominance_radars"),  "radars",  color="tab:green")
+    ax.set_title("Channel Dominance (Striker)")
+    ax.set_xlabel("Iteration")
+    ax.set_ylabel("Norm share")
+    ax.set_ylim(-0.05, 1.05)
+    ax.legend(fontsize=8)
+    ax.grid(True)
+
+    # ── Row 0, Col 1: Channel Dominance (Jammer) ─────────────────
+    ax = axes[0, 1]
+    _plot_valid(ax, _safe("fofe_jammer_dominance_agents"),  "agents",  color="tab:blue")
+    _plot_valid(ax, _safe("fofe_jammer_dominance_targets"), "targets", color="tab:orange")
+    _plot_valid(ax, _safe("fofe_jammer_dominance_radars"),  "radars",  color="tab:green")
+    ax.set_title("Channel Dominance (Jammer)")
+    ax.set_xlabel("Iteration")
+    ax.set_ylabel("Norm share")
+    ax.set_ylim(-0.05, 1.05)
+    ax.legend(fontsize=8)
+    ax.grid(True)
+
+    # ── Row 0, Col 2: Collapse Fraction ──────────────────────────
+    ax = axes[0, 2]
+    for role, ls in [("striker", "-"), ("jammer", "--")]:
+        for ch, col in [("agents", "tab:blue"), ("targets", "tab:orange"), ("radars", "tab:green")]:
+            _plot_valid(ax, _safe(f"fofe_{role}_collapse_{ch}"),
+                        f"{role[0].upper()}_{ch}", color=col, linestyle=ls)
+    ax.set_title("Collapse Fraction (norm < eps)")
+    ax.set_xlabel("Iteration")
+    ax.set_ylabel("Fraction")
+    ax.set_ylim(-0.05, 1.05)
+    ax.legend(fontsize=6, ncol=2)
+    ax.grid(True)
+
+    # ── Row 1, Col 0: Visible Entity Counts ──────────────────────
+    ax = axes[1, 0]
+    for role, ls in [("striker", "-"), ("jammer", "--")]:
+        for ch, col in [("agents", "tab:blue"), ("targets", "tab:orange"), ("radars", "tab:green")]:
+            _plot_valid(ax, _safe(f"fofe_{role}_visible_{ch}_mean"),
+                        f"{role[0].upper()}_{ch}", color=col, linestyle=ls)
+    ax.set_title("Visible Entity Counts (mean)")
+    ax.set_xlabel("Iteration")
+    ax.set_ylabel("Count")
+    ax.legend(fontsize=6, ncol=2)
+    ax.grid(True)
+
+    # ── Row 1, Col 1: All-Masked Fraction ────────────────────────
+    ax = axes[1, 1]
+    for role, ls in [("striker", "-"), ("jammer", "--")]:
+        for ch, col in [("agents", "tab:blue"), ("targets", "tab:orange"), ("radars", "tab:green")]:
+            _plot_valid(ax, _safe(f"fofe_{role}_all_masked_{ch}"),
+                        f"{role[0].upper()}_{ch}", color=col, linestyle=ls)
+    ax.set_title("All-Masked Fraction")
+    ax.set_xlabel("Iteration")
+    ax.set_ylabel("Fraction")
+    ax.set_ylim(-0.05, 1.05)
+    ax.legend(fontsize=6, ncol=2)
+    ax.grid(True)
+
+    # ── Row 1, Col 2: SEE Gradient Norms ─────────────────────────
+    ax = axes[1, 2]
+    _plot_valid(ax, _safe("fofe_striker_actor_see_grad_norm"),  "S_actor",  color="tab:blue")
+    _plot_valid(ax, _safe("fofe_striker_critic_see_grad_norm"), "S_critic", color="tab:orange")
+    _plot_valid(ax, _safe("fofe_jammer_actor_see_grad_norm"),  "J_actor",  color="tab:green")
+    _plot_valid(ax, _safe("fofe_jammer_critic_see_grad_norm"), "J_critic", color="tab:red")
+    ax.set_title("SEE Gradient Norms (post-clip)")
+    ax.set_xlabel("Iteration")
+    ax.set_ylabel("L2 norm")
+    ax.legend(fontsize=8)
+    ax.grid(True)
+
+    fig.suptitle("FOFE Diagnostics Dashboard", fontsize=14, fontweight="bold")
+    fig.tight_layout(rect=[0, 0, 1, 0.95])
+    plt.show()
+
 
 # ------------------------------------------------------------------
 # Test Runner & Animation (same as original, adapted for CombinedPolicy)

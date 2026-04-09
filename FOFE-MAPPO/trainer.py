@@ -229,6 +229,136 @@ def _index_fofe_dict(d: Dict[str, torch.Tensor], idx: torch.Tensor) -> Dict[str,
 
 
 # ------------------------------------------------------------------
+# FOFE diagnostic KPI helpers
+# ------------------------------------------------------------------
+
+# Canonical list of FOFE log keys — initialised to [] in the logs dict,
+# appended to every iteration (NaN when use_fofe=False).
+_FOFE_CHANNELS = ("agents", "targets", "radars")
+_FOFE_ROLES = ("striker", "jammer")
+
+FOFE_LOG_KEYS: Tuple[str, ...] = tuple(
+    f"fofe_{role}_{metric}"
+    for role in _FOFE_ROLES
+    for metric in (
+        # per-channel output norm mean/std (actor)
+        *[f"actor_{ch}_mean" for ch in _FOFE_CHANNELS],
+        *[f"actor_{ch}_std" for ch in _FOFE_CHANNELS],
+        # per-channel output norm mean/std (critic)
+        *[f"critic_{ch}_mean" for ch in _FOFE_CHANNELS],
+        *[f"critic_{ch}_std" for ch in _FOFE_CHANNELS],
+        # collapse fraction (actor)
+        *[f"collapse_{ch}" for ch in _FOFE_CHANNELS],
+        # channel dominance (actor)
+        *[f"dominance_{ch}" for ch in _FOFE_CHANNELS],
+        # visible entity counts from masks (actor)
+        *[f"visible_{ch}_mean" for ch in _FOFE_CHANNELS],
+        # all-masked fraction (actor)
+        *[f"all_masked_{ch}" for ch in _FOFE_CHANNELS],
+        # SEE gradient norms
+        "actor_see_grad_norm",
+        "critic_see_grad_norm",
+    )
+)
+
+
+@torch.no_grad()
+def _channel_mean_std(x: torch.Tensor) -> Tuple[float, float]:
+    """Mean and std of L2 norms across samples.  x: [N, D]."""
+    norms = x.norm(dim=-1)
+    return float(norms.mean().item()), float(norms.std().item())
+
+
+@torch.no_grad()
+def _collapse_fraction(x: torch.Tensor, eps: float = 1e-6) -> float:
+    """Fraction of samples where channel output L2 norm < eps."""
+    return float((x.norm(dim=-1) < eps).float().mean().item())
+
+
+@torch.no_grad()
+def _channel_dominance(cache: Dict[str, torch.Tensor]) -> Tuple[float, float, float]:
+    """Normalised share of each channel's mean norm.  Returns (a, t, r) summing to ~1."""
+    na = cache["x_agents"].norm(dim=-1).mean()
+    nt = cache["x_targets"].norm(dim=-1).mean()
+    nr = cache["x_radars"].norm(dim=-1).mean()
+    total = na + nt + nr + 1e-12
+    return float(na / total), float(nt / total), float(nr / total)
+
+
+@torch.no_grad()
+def _visible_entity_stats(mask: torch.Tensor) -> Tuple[float, float]:
+    """mask: [N, n_role, E] bool.  Returns (mean_visible, all_masked_frac)."""
+    visible = mask.float().sum(dim=-1)          # [N, n_role]
+    mean_vis = float(visible.mean().item())
+    all_masked = float((~mask.any(dim=-1)).float().mean().item())
+    return mean_vis, all_masked
+
+
+def _see_grad_norm(fofe_net) -> float:
+    """Total L2 grad norm across all SEE layer params in all three FOFE blocks."""
+    total_sq = 0.0
+    for block_name in ("fofe_agents", "fofe_targets", "fofe_radars"):
+        block = getattr(fofe_net, block_name, None)
+        if block is None:
+            continue
+        for see in block.see_layers:
+            for p in see.parameters():
+                if p.grad is not None:
+                    total_sq += float(p.grad.data.norm(2).item() ** 2)
+    return math.sqrt(total_sq)
+
+
+def _collect_fofe_kpis(
+    actor_cache: Dict[str, torch.Tensor],
+    critic_cache: Dict[str, torch.Tensor],
+    mb_fofe: Dict[str, torch.Tensor],
+    actor_net,
+    critic_net,
+) -> Dict[str, float]:
+    """Collect all FOFE KPIs for one role from a single minibatch."""
+    d: Dict[str, float] = {}
+
+    # -- actor per-channel output stats --
+    for ch in _FOFE_CHANNELS:
+        key = f"x_{ch}"
+        m, s = _channel_mean_std(actor_cache[key])
+        d[f"actor_{ch}_mean"] = m
+        d[f"actor_{ch}_std"] = s
+        d[f"collapse_{ch}"] = _collapse_fraction(actor_cache[key])
+
+    # -- critic per-channel output stats --
+    for ch in _FOFE_CHANNELS:
+        key = f"x_{ch}"
+        m, s = _channel_mean_std(critic_cache[key])
+        d[f"critic_{ch}_mean"] = m
+        d[f"critic_{ch}_std"] = s
+
+    # -- channel dominance (actor) --
+    dom_a, dom_t, dom_r = _channel_dominance(actor_cache)
+    d["dominance_agents"] = dom_a
+    d["dominance_targets"] = dom_t
+    d["dominance_radars"] = dom_r
+
+    # -- visibility from masks --
+    for ch, mask_key in [("agents", "obs_agents_mask"),
+                         ("targets", "obs_targets_mask"),
+                         ("radars", "obs_radars_mask")]:
+        if mask_key in mb_fofe:
+            vis, am = _visible_entity_stats(mb_fofe[mask_key])
+            d[f"visible_{ch}_mean"] = vis
+            d[f"all_masked_{ch}"] = am
+        else:
+            d[f"visible_{ch}_mean"] = float("nan")
+            d[f"all_masked_{ch}"] = float("nan")
+
+    # -- SEE gradient norms (read after backward + clip, before step) --
+    d["actor_see_grad_norm"] = _see_grad_norm(actor_net)
+    d["critic_see_grad_norm"] = _see_grad_norm(critic_net)
+
+    return d
+
+
+# ------------------------------------------------------------------
 # Evaluation
 # ------------------------------------------------------------------
 
@@ -433,6 +563,8 @@ def train_mappo(
     for comp_key in EVAL_REWARD_COMPONENT_KEYS:
         logs[f"train_component_{comp_key}"] = []
         logs[f"eval_component_{comp_key}"] = []
+    for fk in FOFE_LOG_KEYS:
+        logs[fk] = []
 
     # ==================================================================
     # MAIN TRAINING LOOP
@@ -557,6 +689,9 @@ def train_mappo(
         s_pol_acc = s_val_acc = s_ent_acc = s_kl_acc = s_clip_acc = 0.0
         j_pol_acc = j_val_acc = j_ent_acc = j_kl_acc = j_clip_acc = 0.0
         n_updates = 0
+        # FOFE KPI snapshot (overwritten each minibatch; last MB is kept)
+        _fofe_kpi_s: Dict[str, float] = {}
+        _fofe_kpi_j: Dict[str, float] = {}
 
         for _ in range(ppo_cfg.num_epochs):
             perm = torch.randperm(n_samples, device=device)
@@ -602,6 +737,15 @@ def train_mappo(
                 striker_actor_optim.zero_grad(set_to_none=True)
                 s_loss_info["loss_total"].backward()
                 nn.utils.clip_grad_norm_(policy.striker_policy.parameters(), ppo_cfg.max_grad_norm)
+
+                # -- FOFE KPI snapshot (striker): read grads before step --
+                if use_fofe:
+                    _fofe_kpi_s = _collect_fofe_kpis(
+                        policy.striker_policy._diag_cache,
+                        critic.striker_critic._diag_cache,
+                        mb_s_fofe, policy.striker_policy, critic.striker_critic,
+                    )
+
                 striker_actor_optim.step()
 
                 striker_critic_optim.zero_grad(set_to_none=True)
@@ -649,6 +793,15 @@ def train_mappo(
                 jammer_actor_optim.zero_grad(set_to_none=True)
                 j_loss_info["loss_total"].backward()
                 nn.utils.clip_grad_norm_(policy.jammer_policy.parameters(), ppo_cfg.max_grad_norm)
+
+                # -- FOFE KPI snapshot (jammer): read grads before step --
+                if use_fofe:
+                    _fofe_kpi_j = _collect_fofe_kpis(
+                        policy.jammer_policy._diag_cache,
+                        critic.jammer_critic._diag_cache,
+                        mb_j_fofe, policy.jammer_policy, critic.jammer_critic,
+                    )
+
                 jammer_actor_optim.step()
 
                 jammer_critic_optim.zero_grad(set_to_none=True)
@@ -728,6 +881,16 @@ def train_mappo(
         for comp_key in EVAL_REWARD_COMPONENT_KEYS:
             logs[f"train_component_{comp_key}"].append(train_component_means[comp_key])
 
+        # ── Record FOFE KPIs ──────────────────────────────────────────
+        if use_fofe and _fofe_kpi_s and _fofe_kpi_j:
+            for metric_key, val in _fofe_kpi_s.items():
+                logs[f"fofe_striker_{metric_key}"].append(val)
+            for metric_key, val in _fofe_kpi_j.items():
+                logs[f"fofe_jammer_{metric_key}"].append(val)
+        else:
+            for fk in FOFE_LOG_KEYS:
+                logs[fk].append(float("nan"))
+
         # ── Evaluation ───────────────────────────────────────────────
         do_eval = bool(ppo_cfg.log_every) and ((it + 1) % ppo_cfg.log_every == 0)
         if do_eval:
@@ -751,10 +914,10 @@ def train_mappo(
             norm_log = ""
             if bool(ppo_cfg.normalize_rewards):
                 norm_log = (
-                    f" | raw_σ {norm_stats['raw_reward_std']:.4f}"
-                    f" | norm_σ {norm_stats['normalized_reward_std']:.4f}"
+                    f" | raw_s {norm_stats['raw_reward_std']:.4f}"
+                    f" | norm_s {norm_stats['normalized_reward_std']:.4f}"
                     f" | ret_std {norm_stats['running_std']:.4f}"
-                    f" | ret_μ {norm_stats['running_mean']:.4f}"
+                    f" | ret_m {norm_stats['running_mean']:.4f}"
                 )
             print(
                 f"Iter {it + 1:4d}/{ppo_cfg.n_iters} | "
@@ -763,16 +926,32 @@ def train_mappo(
                 f"comp {logs['eval_task_completion_rate'][-1]:.2f} | "
                 f"surv {logs['eval_survival_rate'][-1]:.2f} | "
                 f"dur {logs['eval_mean_duration'][-1]:.1f} | "
-                f"S[π {logs['striker_loss_policy'][-1]:.4f} "
+                f"S[pi {logs['striker_loss_policy'][-1]:.4f} "
                 f"V {logs['striker_loss_value'][-1]:.4f} "
                 f"H {logs['striker_entropy'][-1]:.4f} "
                 f"ev {logs['striker_explained_variance'][-1]:.4f}] | "
-                f"J[π {logs['jammer_loss_policy'][-1]:.4f} "
+                f"J[pi {logs['jammer_loss_policy'][-1]:.4f} "
                 f"V {logs['jammer_loss_value'][-1]:.4f} "
                 f"H {logs['jammer_entropy'][-1]:.4f} "
                 f"ev {logs['jammer_explained_variance'][-1]:.4f}]"
                 f"{norm_log}"
             )
+            if use_fofe and _fofe_kpi_s and _fofe_kpi_j:
+                print(
+                    f"  FOFE["
+                    f"S a/t/r dom {_fofe_kpi_s.get('dominance_agents',0):.2f}/"
+                    f"{_fofe_kpi_s.get('dominance_targets',0):.2f}/"
+                    f"{_fofe_kpi_s.get('dominance_radars',0):.2f} "
+                    f"col_t {_fofe_kpi_s.get('collapse_targets',0):.3f} "
+                    f"vis_t {_fofe_kpi_s.get('visible_targets_mean',0):.1f} "
+                    f"grad {_fofe_kpi_s.get('actor_see_grad_norm',0):.4f} | "
+                    f"J a/t/r dom {_fofe_kpi_j.get('dominance_agents',0):.2f}/"
+                    f"{_fofe_kpi_j.get('dominance_targets',0):.2f}/"
+                    f"{_fofe_kpi_j.get('dominance_radars',0):.2f} "
+                    f"col_t {_fofe_kpi_j.get('collapse_targets',0):.3f} "
+                    f"vis_t {_fofe_kpi_j.get('visible_targets_mean',0):.1f} "
+                    f"grad {_fofe_kpi_j.get('actor_see_grad_norm',0):.4f}]"
+                )
 
         if it + 1 >= ppo_cfg.n_iters:
             break
