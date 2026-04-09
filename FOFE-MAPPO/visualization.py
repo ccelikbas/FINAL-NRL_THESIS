@@ -639,10 +639,33 @@ def animate_rollout(frames: List[Dict[str, torch.Tensor]], env: StrikeEA2DEnv, i
 _LEGACY_LABEL = "MAPPO (Legacy)"
 _FOFE_LABEL   = "FOFE-MAPPO"
 
-# Colour palette: each metric gets one hue; legacy = dashed, FOFE = solid
+# Keep a restrained palette and rely on strong per-method styling.
+_CLR_BLUE = "#1f77b4"
+_CLR_ORANGE = "#ff7f0e"
+_CLR_GREEN = "#2ca02c"
+_CLR_PURPLE = "#9467bd"
+
+# Method styling: combine line pattern + marker shape + width for readability.
 _METHOD_STYLES = {
-    _LEGACY_LABEL: {"linestyle": "--", "alpha": 0.75},
-    _FOFE_LABEL:   {"linestyle": "-",  "alpha": 1.0},
+    _LEGACY_LABEL: {
+        "linestyle": (0, (6, 2, 1.2, 2)),
+        "linewidth": 2.1,
+        "alpha": 0.9,
+        "marker": "X",
+        "markersize": 5,
+        "markevery": 10,
+        "markeredgewidth": 0.9,
+    },
+    _FOFE_LABEL: {
+        "linestyle": "-",
+        "linewidth": 2.8,
+        "alpha": 1.0,
+        "marker": "o",
+        "markersize": 4,
+        "markevery": 10,
+        "markeredgewidth": 1.0,
+        "markerfacecolor": "white",
+    },
 }
 
 
@@ -671,10 +694,15 @@ def plot_comparison(
             return
         ax.plot(
             x[valid], y[valid],
-            marker="o", markersize=2,
             label=label, color=color,
-            linestyle=style_dict["linestyle"],
-            alpha=style_dict["alpha"],
+            linestyle=style_dict.get("linestyle", "-"),
+            linewidth=style_dict.get("linewidth", 2.0),
+            alpha=style_dict.get("alpha", 1.0),
+            marker=style_dict.get("marker", "o"),
+            markersize=style_dict.get("markersize", 3),
+            markevery=style_dict.get("markevery", None),
+            markeredgewidth=style_dict.get("markeredgewidth", 0.8),
+            markerfacecolor=style_dict.get("markerfacecolor", None),
             **extra,
         )
 
@@ -693,7 +721,7 @@ def plot_comparison(
     # ── Row 0, Col 0: Training Total Reward (only total) ─────────
     ax = axes[0, 0]
     _dual(ax, "train_mean_episode_total_reward", "Total Reward",
-          "tab:blue", legacy_logs, fofe_logs)
+            _CLR_BLUE, legacy_logs, fofe_logs)
     ax.set_title("Training Episode Reward")
     ax.set_xlabel("Iteration")
     ax.legend(fontsize=8)
@@ -702,10 +730,10 @@ def plot_comparison(
     # ── Row 0, Col 1: Combined losses ────────────────────────────
     ax = axes[0, 1]
     loss_items = [
-        ("striker_loss_policy", "striker_policy_loss", "tab:blue"),
-        ("striker_loss_value",  "striker_value_loss",  "tab:orange"),
-        ("jammer_loss_policy",  "jammer_policy_loss",  "tab:green"),
-        ("jammer_loss_value",   "jammer_value_loss",   "tab:red"),
+        ("striker_loss_policy", "striker_policy_loss", _CLR_BLUE),
+        ("striker_loss_value",  "striker_value_loss",  _CLR_ORANGE),
+        ("jammer_loss_policy",  "jammer_policy_loss",  _CLR_GREEN),
+        ("jammer_loss_value",   "jammer_value_loss",   _CLR_PURPLE),
     ]
     for key, lbl, col in loss_items:
         _dual(ax, key, lbl, col, legacy_logs, fofe_logs)
@@ -717,14 +745,14 @@ def plot_comparison(
     # ── Row 0, Col 2: Entropy / KL / Clip / EV ──────────────────
     ax = axes[0, 2]
     diag_items = [
-        ("striker_entropy",            "striker_entropy",       "tab:green"),
-        ("jammer_entropy",             "jammer_entropy",        "tab:olive"),
-        ("striker_approx_kl",          "striker_kl_approx",     "tab:red"),
-        ("jammer_approx_kl",           "jammer_kl_approx",      "tab:pink"),
-        ("striker_clip_ratio",         "striker_clip_ratio",    "tab:purple"),
-        ("jammer_clip_ratio",          "jammer_clip_ratio",     "tab:brown"),
-        ("striker_explained_variance", "striker_explained_var", "tab:cyan"),
-        ("jammer_explained_variance",  "jammer_explained_var",  "tab:gray"),
+        ("striker_entropy",            "striker_entropy",       _CLR_GREEN),
+        ("jammer_entropy",             "jammer_entropy",        _CLR_GREEN),
+        ("striker_approx_kl",          "striker_kl_approx",     _CLR_ORANGE),
+        ("jammer_approx_kl",           "jammer_kl_approx",      _CLR_ORANGE),
+        ("striker_clip_ratio",         "striker_clip_ratio",    _CLR_BLUE),
+        ("jammer_clip_ratio",          "jammer_clip_ratio",     _CLR_BLUE),
+        ("striker_explained_variance", "striker_explained_var", _CLR_PURPLE),
+        ("jammer_explained_variance",  "jammer_explained_var",  _CLR_PURPLE),
     ]
     for key, lbl, col in diag_items:
         _dual(ax, key, lbl, col, legacy_logs, fofe_logs)
@@ -735,7 +763,7 @@ def plot_comparison(
 
     # ── Row 1, Col 0: Time per Iteration ─────────────────────────
     ax = axes[1, 0]
-    _dual(ax, "iter_time_s", "iter_time_s", "tab:blue", legacy_logs, fofe_logs)
+    _dual(ax, "iter_time_s", "iter_time_s", _CLR_BLUE, legacy_logs, fofe_logs)
     ax.set_title("Time per Iteration (s)")
     ax.set_xlabel("Iteration")
     ax.set_ylabel("seconds")
@@ -744,8 +772,8 @@ def plot_comparison(
 
     # ── Row 1, Col 1: Eval Survival & Completion ─────────────────
     ax = axes[1, 1]
-    _dual(ax, "eval_survival_rate",        "survival_rate",    "tab:blue",   legacy_logs, fofe_logs)
-    _dual(ax, "eval_task_completion_rate",  "completion_rate",  "tab:orange", legacy_logs, fofe_logs)
+    _dual(ax, "eval_survival_rate",        "survival_rate",    _CLR_BLUE,   legacy_logs, fofe_logs)
+    _dual(ax, "eval_task_completion_rate",  "completion_rate",  _CLR_ORANGE, legacy_logs, fofe_logs)
     ax.set_title("Eval Survival & Completion")
     ax.set_xlabel("Iteration")
     ax.legend(fontsize=7, ncol=2)
@@ -753,7 +781,7 @@ def plot_comparison(
 
     # ── Row 1, Col 2: Eval Mission Duration ──────────────────────
     ax = axes[1, 2]
-    _dual(ax, "eval_mean_duration", "mission_duration", "tab:blue",
+    _dual(ax, "eval_mean_duration", "mission_duration", _CLR_BLUE,
           legacy_logs, fofe_logs)
     ax.set_title("Eval Mission Duration")
     ax.set_xlabel("Iteration")
