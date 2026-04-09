@@ -12,12 +12,13 @@ from .rewards import RewardConfig
 @dataclass
 class EnvConfig:
     # Team composition
-    n_strikers: int = 1
-    n_jammers: int = 1
-    n_known_targets: int = 1
+    n_strikers: int = 2
+    n_jammers: int = 2
+    n_known_targets: int = 2
     n_unknown_targets: int = 1
-    n_known_radars: int = 1
+    n_known_radars: int = 2
     n_unknown_radars: int = 1
+    # Not used 
     n_targets: int = 0
     n_radars: int = 0
 

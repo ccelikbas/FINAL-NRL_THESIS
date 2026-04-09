@@ -100,17 +100,17 @@ class EnvConfig:
     # Team composition
     n_strikers: int = 1
     n_jammers: int = 1
-    n_known_targets: int = 1
-    n_unknown_targets: int = 1
-    n_known_radars: int = 1
-    n_unknown_radars: int = 1
+    n_known_targets: int = 2
+    n_unknown_targets: int = 0
+    n_known_radars: int = 2
+    n_unknown_radars: int = 0
     n_targets: int = 0
     n_radars: int = 0
 
     # World / episode
     world_bounds: Tuple[float, float] = (0.0, 1.0)
     dt: float = 1.0
-    max_steps: int = 150
+    max_steps: int = 100
     n_env_layouts: int = 0
     target_spawn_angle_range: Tuple[float, float] = (0, 360)
 
@@ -144,7 +144,7 @@ class EnvConfig:
     reward_config: RewardConfig = field(default_factory=RewardConfig)
 
     # FOFE mode (set by ExperimentConfig.finalize)
-    use_fofe: bool = False
+    use_fofe: bool = True
 
     def __post_init__(self):
         self.n_known_targets = int(self.n_known_targets)
