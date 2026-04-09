@@ -733,12 +733,12 @@ def plot_comparison(
     ax.legend(fontsize=5, ncol=2)
     ax.grid(True)
 
-    # ── Row 1, Col 0: Eval Total Return (only total) ─────────────
+    # ── Row 1, Col 0: Time per Iteration ─────────────────────────
     ax = axes[1, 0]
-    _dual(ax, "eval_mean_episode_total_reward", "Total Return",
-          "tab:blue", legacy_logs, fofe_logs)
-    ax.set_title("Eval Episode Return")
+    _dual(ax, "iter_time_s", "iter_time_s", "tab:blue", legacy_logs, fofe_logs)
+    ax.set_title("Time per Iteration (s)")
     ax.set_xlabel("Iteration")
+    ax.set_ylabel("seconds")
     ax.legend(fontsize=8)
     ax.grid(True)
 

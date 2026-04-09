@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextlib
 import math
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
@@ -367,7 +368,7 @@ def evaluate_current_policy(
     policy: CombinedPolicy,
     env_cfg: EnvConfig,
     ppo_cfg: PPOConfig,
-    n_eval_episodes: int = 30,
+    n_eval_episodes: int = 50,
 ) -> Dict[str, float]:
     eval_env = StrikeEA2DEnv(
         num_envs=1,
@@ -559,6 +560,7 @@ def train_mappo(
         "reward_norm_running_mean": [], "reward_norm_running_std": [],
         "raw_reward_mean": [], "raw_reward_std": [],
         "normalized_reward_mean": [], "normalized_reward_std": [],
+        "iter_time_s": [],
     }
     for comp_key in EVAL_REWARD_COMPONENT_KEYS:
         logs[f"train_component_{comp_key}"] = []
@@ -570,6 +572,7 @@ def train_mappo(
     # MAIN TRAINING LOOP
     # ==================================================================
     for it, td in enumerate(collector):
+        _iter_t0 = time.perf_counter()
         td = td.to(device)
 
         # ── Reward normalization ─────────────────────────────────────
@@ -908,6 +911,8 @@ def train_mappo(
             logs["eval_task_completion_rate"].append(float("nan"))
             for comp_key in EVAL_REWARD_COMPONENT_KEYS:
                 logs[f"eval_component_{comp_key}"].append(float("nan"))
+
+        logs["iter_time_s"].append(time.perf_counter() - _iter_t0)
 
         # ── Print ────────────────────────────────────────────────────
         if do_eval:
