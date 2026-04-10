@@ -600,6 +600,8 @@ class StrikeEA2DEnv(EnvBase):
             else:
                 self._jammer_prev_dist[reset_idx] = 0.0
 
+        self._update_geometry_cache()
+        self._update_comm_cache()
         td = TensorDict({}, batch_size=[B], device=self.device)
         td.set(self._obs_key, self._build_local_obs())
         td.set("state",       self._build_global_state())
