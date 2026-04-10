@@ -375,7 +375,7 @@ def animate_rollout(frames: List[Dict[str, torch.Tensor]], env: StrikeEA2DEnv, i
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlabel("X (km)")
     ax.set_ylabel("Y (km)")
-    ax.set_title("Dual-MAPPO Rollout")
+    ax.set_title(f"Dual-MAPPO Rollout | R_obs={env.R_obs:.2f}, R_comm={env.R_comm:.2f}")
 
     striker_sc = ax.scatter([], [], s=60, marker="^", label="Strikers")
     jammer_sc = ax.scatter([], [], s=60, marker="s", label="Jammers")
@@ -387,10 +387,13 @@ def animate_rollout(frames: List[Dict[str, torch.Tensor]], env: StrikeEA2DEnv, i
     radar_circles = [ax.add_patch(Circle((0, 0), 0, fill=False, edgecolor="C3", alpha=0.6, lw=2)) for _ in range(env.n_radars)]
     jammer_circles = [ax.add_patch(Circle((0, 0), 0, fill=False, edgecolor="C4", alpha=0.5, lw=1.5, ls="--")) for _ in range(env.n_jammers)]
     obs_circles = [ax.add_patch(Circle((0, 0), 0, fill=False, edgecolor="C0", alpha=0.35, lw=1.0, ls=":")) for _ in range(env.n_agents)]
+    comm_circles = [ax.add_patch(Circle((0, 0), 0, fill=False, edgecolor="black", alpha=0.18, lw=0.9, ls="-.")) for _ in range(env.n_agents)]
     striker_arcs = [ax.add_patch(Polygon(np.empty((0, 2)), closed=True, fc="C2", alpha=0.18, ec="C2")) for _ in range(env.n_strikers)]
     heading_lines = [ax.plot([], [])[0] for _ in range(env.n_agents)]
     comm_lines = [ax.plot([], [], color="black", lw=1.4, alpha=0.7)[0] for _ in range(max(env.n_agents - 1, 1))]
-    ax.plot([], [], color="black", lw=1.4, alpha=0.7, label="Comm MST")
+    ax.plot([], [], color="black", lw=1.4, alpha=0.7, label="Comm MST (<= R_comm)")
+    ax.plot([], [], color="black", lw=0.9, ls="-.", alpha=0.35, label="R_comm")
+    ax.plot([], [], color="C0", lw=1.0, ls=":", alpha=0.45, label="R_obs")
     ax.legend(loc="upper right")
 
     ax_rew.set_xlabel("Timestep")
@@ -420,7 +423,7 @@ def animate_rollout(frames: List[Dict[str, torch.Tensor]], env: StrikeEA2DEnv, i
         target_unknown_sc.set_offsets(empty_xy)
         radar_known_sc.set_offsets(empty_xy)
         radar_unknown_sc.set_offsets(empty_xy)
-        for c in [*radar_circles, *jammer_circles, *obs_circles]:
+        for c in [*radar_circles, *jammer_circles, *obs_circles, *comm_circles]:
             c.set_visible(False)
         for a in striker_arcs:
             a.set_visible(False)
@@ -439,6 +442,7 @@ def animate_rollout(frames: List[Dict[str, torch.Tensor]], env: StrikeEA2DEnv, i
             *radar_circles,
             *jammer_circles,
             *obs_circles,
+            *comm_circles,
             *striker_arcs,
             *heading_lines,
             *comm_lines,
@@ -513,6 +517,14 @@ def animate_rollout(frames: List[Dict[str, torch.Tensor]], env: StrikeEA2DEnv, i
                 oc.set_radius(float(env.R_obs) * 1000)
             else:
                 oc.set_visible(False)
+
+        for k, cc in enumerate(comm_circles):
+            if aa[k].item():
+                cc.set_visible(True)
+                cc.set_center((float(ap_km[k, 0]), float(ap_km[k, 1])))
+                cc.set_radius(float(env.R_comm) * 1000)
+            else:
+                cc.set_visible(False)
 
         half_fov = 0.5 * env.striker.engage_fov_deg
         r_str = env.striker.engage_range * 1000
@@ -813,7 +825,7 @@ def _draw_world_panel(ax, env, frames, title):
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlabel("X (km)")
     ax.set_ylabel("Y (km)")
-    ax.set_title(title)
+    ax.set_title(f"{title} | R_obs={env.R_obs:.2f}, R_comm={env.R_comm:.2f}")
 
     empty_xy = np.empty((0, 2), dtype=float)
 
@@ -832,12 +844,16 @@ def _draw_world_panel(ax, env, frames, title):
                       for _ in range(env.n_jammers)]
     obs_circles = [ax.add_patch(Circle((0, 0), 0, fill=False, edgecolor="C0", alpha=0.35, lw=1.0, ls=":"))
                    for _ in range(env.n_agents)]
+    comm_circles = [ax.add_patch(Circle((0, 0), 0, fill=False, edgecolor="black", alpha=0.18, lw=0.9, ls="-."))
+                    for _ in range(env.n_agents)]
     striker_arcs = [ax.add_patch(Polygon(np.empty((0, 2)), closed=True, fc="C2", alpha=0.18, ec="C2"))
                     for _ in range(env.n_strikers)]
     heading_lines = [ax.plot([], [])[0] for _ in range(env.n_agents)]
     comm_lines = [ax.plot([], [], color="black", lw=1.4, alpha=0.7)[0]
                   for _ in range(max(env.n_agents - 1, 1))]
-    ax.plot([], [], color="black", lw=1.4, alpha=0.7, label="Comm MST")
+    ax.plot([], [], color="black", lw=1.4, alpha=0.7, label="Comm MST (<= R_comm)")
+    ax.plot([], [], color="black", lw=0.9, ls="-.", alpha=0.35, label="R_comm")
+    ax.plot([], [], color="C0", lw=1.0, ls=":", alpha=0.45, label="R_obs")
     ax.legend(loc="upper right", fontsize=6)
 
     artists = {
@@ -845,7 +861,8 @@ def _draw_world_panel(ax, env, frames, title):
         "target_known_sc": target_known_sc, "target_unknown_sc": target_unknown_sc,
         "radar_known_sc": radar_known_sc, "radar_unknown_sc": radar_unknown_sc,
         "radar_circles": radar_circles, "jammer_circles": jammer_circles,
-        "obs_circles": obs_circles, "striker_arcs": striker_arcs,
+        "obs_circles": obs_circles, "comm_circles": comm_circles,
+        "striker_arcs": striker_arcs,
         "heading_lines": heading_lines, "comm_lines": comm_lines,
     }
 
@@ -887,6 +904,14 @@ def _draw_world_panel(ax, env, frames, title):
                 oc.set_radius(float(env.R_obs) * 1000)
             else:
                 oc.set_visible(False)
+
+        for k, cc in enumerate(comm_circles):
+            if aa[k].item():
+                cc.set_visible(True)
+                cc.set_center((float(ap_km[k, 0]), float(ap_km[k, 1])))
+                cc.set_radius(float(env.R_comm) * 1000)
+            else:
+                cc.set_visible(False)
 
         half_fov = 0.5 * env.striker.engage_fov_deg
         r_str = env.striker.engage_range * 1000

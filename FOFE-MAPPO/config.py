@@ -76,19 +76,19 @@ class FOFEConfig:
     use_fofe: bool = True
 
     # --- Actor FOFE dims ---
-    agents_see_dims:   Tuple[int, ...] = (96, 128)
-    targets_see_dims:  Tuple[int, ...] = (96, 128)
-    radars_see_dims:   Tuple[int, ...] = (96, 128)
+    agents_see_dims:   Tuple[int, ...] = (96,) # one SEE layer
+    targets_see_dims:  Tuple[int, ...] = (96,)
+    radars_see_dims:   Tuple[int, ...] = (96,)
     fofe_mlp_dims:     Tuple[int, ...] = (128, 64)
     self_mlp_dims:     Tuple[int, ...] = (64, 64)
-    fusion_mlp_dims:   Tuple[int, ...] = (128, 128) # reduced from 256
+    fusion_mlp_dims:   Tuple[int, ...] = (256, 256) # reduced from 256
 
     # --- Critic FOFE dims (default = same as actor) ---
-    critic_agents_see_dims:   Tuple[int, ...] = (96, 128)
-    critic_targets_see_dims:  Tuple[int, ...] = (96, 128)
-    critic_radars_see_dims:   Tuple[int, ...] = (96, 128)
+    critic_agents_see_dims:   Tuple[int, ...] = (96,)
+    critic_targets_see_dims:  Tuple[int, ...] = (96,)
+    critic_radars_see_dims:   Tuple[int, ...] = (96,)
     critic_fofe_mlp_dims:     Tuple[int, ...] = (128, 64)
-    critic_fusion_mlp_dims:   Tuple[int, ...] = (128, 128) # reduced from 256
+    critic_fusion_mlp_dims:   Tuple[int, ...] = (256, 256) # reduced from 256
 
 
 # ======================================================================
@@ -101,9 +101,9 @@ class EnvConfig:
     n_strikers: int = 2
     n_jammers: int = 2
     n_known_targets: int = 2
-    n_unknown_targets: int = 0
+    n_unknown_targets: int = 2
     n_known_radars: int = 2
-    n_unknown_radars: int = 0
+    n_unknown_radars: int = 2
     n_targets: int = 0
     n_radars: int = 0
 
@@ -123,7 +123,7 @@ class EnvConfig:
 
     # Sensors
     R_obs: float = 0.4
-    R_comm: float = 0.6
+    R_comm: float = 0.4
 
     # Strikers
     striker_engage_range: float = 0.10
@@ -182,7 +182,7 @@ class EnvConfig:
 class PPOConfig:
     """Shared PPO hyperparameters for both striker and jammer MAPPO."""
     num_envs: int = 512
-    n_iters: int = 100
+    n_iters: int = 50
     frames_per_batch: Optional[int] = None
     num_epochs: int = 10
     minibatch_size: int = 2048
