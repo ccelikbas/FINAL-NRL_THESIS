@@ -572,8 +572,17 @@ def train_mappo(
     # MAIN TRAINING LOOP
     # ==================================================================
     _PROFILE_ITERS = 3   # print per-phase timing for the first N iterations
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    _t_iter_start = time.perf_counter()   # true start of iter 0 = before collector first blocks
+
     for it, td in enumerate(collector):
-        _iter_t0 = time.perf_counter()
+        # Sync GPU so the clock is read after all pending ops have finished,
+        # then record when the batch was delivered by the collector.
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        _t_batch_ready = time.perf_counter()
+        _t_rollout_s = _t_batch_ready - _t_iter_start   # time collector spent on rollout
         _timed_out = False
         td = td.to(device)
 
@@ -708,10 +717,10 @@ def train_mappo(
                 if idx.numel() == 0:
                     continue
                 if (ppo_cfg.max_iter_time_s is not None
-                        and (time.perf_counter() - _iter_t0) > ppo_cfg.max_iter_time_s):
+                        and (time.perf_counter() - _t_batch_ready) > ppo_cfg.max_iter_time_s):
                     _timed_out = True
                     print(
-                        f"  [TIMEOUT] Iter {it + 1}: {time.perf_counter() - _iter_t0:.1f}s elapsed "
+                        f"  [TIMEOUT] Iter {it + 1}: {time.perf_counter() - _t_batch_ready:.1f}s in PPO updates "
                         f"> {ppo_cfg.max_iter_time_s}s limit — skipping remaining minibatches "
                         f"({n_updates} updates completed)."
                     )
@@ -930,24 +939,38 @@ def train_mappo(
             for comp_key in EVAL_REWARD_COMPONENT_KEYS:
                 logs[f"eval_component_{comp_key}"].append(float("nan"))
 
-        _iter_total_s = time.perf_counter() - _iter_t0
-        _t_ppo_s = _t_post_start - _t_ppo_start
-        _t_post_s = _iter_total_s - (_t_ppo_start - _iter_t0) - _t_ppo_s
+        # Sync GPU so all remaining async ops finish before we read the clock.
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        _t_iter_end = time.perf_counter()
+
+        # ── True wall-clock breakdown ─────────────────────────────────
+        # rollout : collector blocking (before this iteration's body ran)
+        # prep    : td.to(device) + norm + critic inference + GAE + reshape
+        # ppo     : all forward/backward passes across epochs/minibatches
+        # post    : EV + episode stats + eval + logging
+        _t_prep_s    = _t_ppo_start  - _t_batch_ready
+        _t_ppo_s     = _t_post_start - _t_ppo_start
         _t_eval_s_val = _t_eval_s if do_eval else 0.0
+        _t_post_s    = _t_iter_end   - _t_post_start
+        _iter_total_s = _t_iter_end  - _t_iter_start   # true wall time incl. rollout
         logs["iter_time_s"].append(_iter_total_s)
 
         # ── Profile print (first _PROFILE_ITERS iterations) ──────────
         if it < _PROFILE_ITERS:
-            _t_prep_s = _t_ppo_start - _iter_t0
             print(
                 f"  [PROFILE iter {it + 1}] "
                 f"total={_iter_total_s:.2f}s | "
-                f"prep(rollout+GAE+reshape)={_t_prep_s:.2f}s | "
+                f"rollout={_t_rollout_s:.2f}s | "
+                f"prep(norm+critic+GAE+reshape)={_t_prep_s:.2f}s | "
                 f"ppo_updates={_t_ppo_s:.2f}s | "
-                f"post(EV+stats+logging)={_t_post_s - _t_eval_s_val:.2f}s | "
-                f"eval={'N/A' if not do_eval else f'{_t_eval_s_val:.2f}s'}"
+                f"post(EV+stats+eval+log)={_t_post_s:.2f}s"
+                + (f" [eval={_t_eval_s_val:.2f}s]" if do_eval else "")
                 + (" [TIMED OUT]" if _timed_out else "")
             )
+
+        # ── Reset iteration start for next iteration ──────────────────
+        _t_iter_start = _t_iter_end
 
         # ── Print ────────────────────────────────────────────────────
         if do_eval:
