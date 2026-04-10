@@ -98,8 +98,8 @@ class FOFEConfig:
 @dataclass
 class EnvConfig:
     # Team composition
-    n_strikers: int = 1
-    n_jammers: int = 1
+    n_strikers: int = 2
+    n_jammers: int = 2
     n_known_targets: int = 2
     n_unknown_targets: int = 0
     n_known_radars: int = 2
@@ -198,7 +198,7 @@ class PPOConfig:
     max_grad_norm: float = 1.0
 
     seed: int = 0
-    log_every: int = 5
+    log_every: int = 10
     device: torch.device = field(default_factory=lambda: torch.device("cuda" if torch.cuda.is_available() else "cpu"))
 
     def __post_init__(self):
