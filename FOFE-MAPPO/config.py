@@ -100,9 +100,9 @@ class EnvConfig:
     # Team composition
     n_strikers: int = 2
     n_jammers: int = 2
-    n_known_targets: int = 2
+    n_known_targets: int = 4
     n_unknown_targets: int = 0
-    n_known_radars: int = 2
+    n_known_radars: int = 4
     n_unknown_radars: int = 0
     n_targets: int = 0
     n_radars: int = 0
@@ -196,6 +196,7 @@ class PPOConfig:
     actor_lr: float = 3e-4
     critic_lr: float = 3e-4
     max_grad_norm: float = 1.0
+    max_iter_time_s: Optional[float] = 250.0   # safety timeout per iteration (None = disabled)
 
     seed: int = 0
     log_every: int = 10

@@ -571,8 +571,10 @@ def train_mappo(
     # ==================================================================
     # MAIN TRAINING LOOP
     # ==================================================================
+    _PROFILE_ITERS = 3   # print per-phase timing for the first N iterations
     for it, td in enumerate(collector):
         _iter_t0 = time.perf_counter()
+        _timed_out = False
         td = td.to(device)
 
         # ── Reward normalization ─────────────────────────────────────
@@ -689,6 +691,7 @@ def train_mappo(
         n_samples = s_obs_f.shape[0]
 
         # ── PPO update for each role ─────────────────────────────────
+        _t_ppo_start = time.perf_counter()
         s_pol_acc = s_val_acc = s_ent_acc = s_kl_acc = s_clip_acc = 0.0
         j_pol_acc = j_val_acc = j_ent_acc = j_kl_acc = j_clip_acc = 0.0
         n_updates = 0
@@ -697,11 +700,22 @@ def train_mappo(
         _fofe_kpi_j: Dict[str, float] = {}
 
         for _ in range(ppo_cfg.num_epochs):
+            if _timed_out:
+                break
             perm = torch.randperm(n_samples, device=device)
             for start in range(0, n_samples, ppo_cfg.minibatch_size):
                 idx = perm[start : start + ppo_cfg.minibatch_size]
                 if idx.numel() == 0:
                     continue
+                if (ppo_cfg.max_iter_time_s is not None
+                        and (time.perf_counter() - _iter_t0) > ppo_cfg.max_iter_time_s):
+                    _timed_out = True
+                    print(
+                        f"  [TIMEOUT] Iter {it + 1}: {time.perf_counter() - _iter_t0:.1f}s elapsed "
+                        f"> {ppo_cfg.max_iter_time_s}s limit — skipping remaining minibatches "
+                        f"({n_updates} updates completed)."
+                    )
+                    break
 
                 # ── Striker PPO update ───────────────────────────────
                 mb_s_act = s_act_f[idx]
@@ -826,6 +840,8 @@ def train_mappo(
         except Exception:
             print("policy weight update failed (continuing)")
 
+        _t_post_start = time.perf_counter()
+
         # ── Compute explained variance per role ──────────────────────
         s_ev = compute_explained_variance(s_ret_f, s_val_f)
         j_ev = compute_explained_variance(j_ret_f, j_val_f)
@@ -897,7 +913,9 @@ def train_mappo(
         # ── Evaluation ───────────────────────────────────────────────
         do_eval = bool(ppo_cfg.log_every) and ((it + 1) % ppo_cfg.log_every == 0)
         if do_eval:
+            _t_eval_start = time.perf_counter()
             eval_metrics = evaluate_current_policy(policy, env_cfg, ppo_cfg)
+            _t_eval_s = time.perf_counter() - _t_eval_start
             logs["eval_mean_episode_total_reward"].append(eval_metrics["eval_mean_episode_total_reward"])
             logs["eval_survival_rate"].append(eval_metrics["eval_survival_rate"])
             logs["eval_mean_duration"].append(eval_metrics["eval_mean_duration"])
@@ -912,7 +930,24 @@ def train_mappo(
             for comp_key in EVAL_REWARD_COMPONENT_KEYS:
                 logs[f"eval_component_{comp_key}"].append(float("nan"))
 
-        logs["iter_time_s"].append(time.perf_counter() - _iter_t0)
+        _iter_total_s = time.perf_counter() - _iter_t0
+        _t_ppo_s = _t_post_start - _t_ppo_start
+        _t_post_s = _iter_total_s - (_t_ppo_start - _iter_t0) - _t_ppo_s
+        _t_eval_s_val = _t_eval_s if do_eval else 0.0
+        logs["iter_time_s"].append(_iter_total_s)
+
+        # ── Profile print (first _PROFILE_ITERS iterations) ──────────
+        if it < _PROFILE_ITERS:
+            _t_prep_s = _t_ppo_start - _iter_t0
+            print(
+                f"  [PROFILE iter {it + 1}] "
+                f"total={_iter_total_s:.2f}s | "
+                f"prep(rollout+GAE+reshape)={_t_prep_s:.2f}s | "
+                f"ppo_updates={_t_ppo_s:.2f}s | "
+                f"post(EV+stats+logging)={_t_post_s - _t_eval_s_val:.2f}s | "
+                f"eval={'N/A' if not do_eval else f'{_t_eval_s_val:.2f}s'}"
+                + (" [TIMED OUT]" if _timed_out else "")
+            )
 
         # ── Print ────────────────────────────────────────────────────
         if do_eval:
