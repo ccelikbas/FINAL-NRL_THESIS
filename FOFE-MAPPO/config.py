@@ -79,7 +79,7 @@ class FOFEConfig:
     agents_see_dims:   Tuple[int, ...] = (96, 128)
     targets_see_dims:  Tuple[int, ...] = (96, 128)
     radars_see_dims:   Tuple[int, ...] = (96, 128)
-    fofe_mlp_dims:     Tuple[int, ...] = (512, 96)
+    fofe_mlp_dims:     Tuple[int, ...] = (128, 64)
     self_mlp_dims:     Tuple[int, ...] = (64, 64)
     fusion_mlp_dims:   Tuple[int, ...] = (256, 256)
 
@@ -87,7 +87,7 @@ class FOFEConfig:
     critic_agents_see_dims:   Tuple[int, ...] = (96, 128)
     critic_targets_see_dims:  Tuple[int, ...] = (96, 128)
     critic_radars_see_dims:   Tuple[int, ...] = (96, 128)
-    critic_fofe_mlp_dims:     Tuple[int, ...] = (512, 96)
+    critic_fofe_mlp_dims:     Tuple[int, ...] = (128, 64)
     critic_fusion_mlp_dims:   Tuple[int, ...] = (256, 256)
 
 
@@ -100,9 +100,9 @@ class EnvConfig:
     # Team composition
     n_strikers: int = 2
     n_jammers: int = 2
-    n_known_targets: int = 4
+    n_known_targets: int = 2
     n_unknown_targets: int = 0
-    n_known_radars: int = 4
+    n_known_radars: int = 2
     n_unknown_radars: int = 0
     n_targets: int = 0
     n_radars: int = 0

@@ -554,8 +554,8 @@ def make_combined_policy(env: StrikeEA2DEnv, hidden=256, depth=3,
     use_fofe = fofe_cfg is not None and fofe_cfg.use_fofe
 
     if use_fofe:
-        striker_net = FOFEPolicyNet(fofe_cfg, env.n_strikers, env.act_dim, env.n_choices).to(env.device)
-        jammer_net = FOFEPolicyNet(fofe_cfg, env.n_jammers, env.act_dim, env.n_choices).to(env.device)
+        striker_net = torch.compile(FOFEPolicyNet(fofe_cfg, env.n_strikers, env.act_dim, env.n_choices).to(env.device))
+        jammer_net = torch.compile(FOFEPolicyNet(fofe_cfg, env.n_jammers, env.act_dim, env.n_choices).to(env.device))
     else:
         striker_net = RolePolicyNet(env.obs_dim, env.act_dim, env.n_choices, env.n_strikers, hidden, depth).to(env.device)
         jammer_net = RolePolicyNet(env.obs_dim, env.act_dim, env.n_choices, env.n_jammers, hidden, depth).to(env.device)
@@ -575,8 +575,8 @@ def make_combined_critic(env: StrikeEA2DEnv, hidden=256, depth=3,
         #   agents: 7 (x,y,v,ψ,ω,role,alive)
         #   targets: 3 (x,y,alive)
         #   radars: 4 (x,y,active,eff_range)
-        striker_critic = FOFEValueNet(fofe_cfg, env.n_strikers, d_agents=7, d_targets=3, d_radars=4).to(env.device)
-        jammer_critic = FOFEValueNet(fofe_cfg, env.n_jammers, d_agents=7, d_targets=3, d_radars=4).to(env.device)
+        striker_critic = torch.compile(FOFEValueNet(fofe_cfg, env.n_strikers, d_agents=7, d_targets=3, d_radars=4).to(env.device))
+        jammer_critic = torch.compile(FOFEValueNet(fofe_cfg, env.n_jammers, d_agents=7, d_targets=3, d_radars=4).to(env.device))
     else:
         striker_critic = RoleValueNet(env.state_dim, env.n_strikers, hidden, depth).to(env.device)
         jammer_critic = RoleValueNet(env.state_dim, env.n_jammers, hidden, depth).to(env.device)
