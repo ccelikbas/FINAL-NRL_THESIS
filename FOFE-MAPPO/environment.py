@@ -230,6 +230,19 @@ class StrikeEA2DEnv(EnvBase):
 
         self._make_specs()
 
+        # Pairwise geometry cache — populated by _update_geometry_cache /
+        # _update_comm_cache every step and consumed by reward + obs builders.
+        self._c_rel_ar:    Optional[torch.Tensor] = None  # [B, A, R, 2]
+        self._c_dist_ar:   Optional[torch.Tensor] = None  # [B, A, R]
+        self._c_angle_ar:  Optional[torch.Tensor] = None  # [B, A, R]
+        self._c_rel_at:    Optional[torch.Tensor] = None  # [B, A, T, 2]
+        self._c_dist_at:   Optional[torch.Tensor] = None  # [B, A, T]
+        self._c_angle_at:  Optional[torch.Tensor] = None  # [B, A, T]
+        self._c_rel_aa:    Optional[torch.Tensor] = None  # [B, A, A, 2]
+        self._c_dist_aa:   Optional[torch.Tensor] = None  # [B, A, A]
+        self._c_angle_aa:  Optional[torch.Tensor] = None  # [B, A, A]
+        self._c_comm_reach: Optional[torch.Tensor] = None  # [B, A, A]
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -651,13 +664,14 @@ class StrikeEA2DEnv(EnvBase):
         dx = self.agent_speed * torch.cos(self.agent_heading) * self.dt
         dy = self.agent_speed * torch.sin(self.agent_heading) * self.dt
         self.agent_pos = (self.agent_pos + torch.stack([dx, dy], dim=-1)).clamp(self.low, self.high)
+        self._update_geometry_cache()
 
         # ---- EA / jamming: Jammers automatically jam radars within range ----
         radar_eff_range = torch.full((B, self.n_radars), self.radar_range, device=self.device)
         jammer_idx = torch.arange(self.n_strikers, self.n_agents, device=self.device)
 
         if jammer_idx.numel() > 0:
-            rel_jr     = self.radar_pos[:, None, :, :] - self.agent_pos[:, jammer_idx, None, :]  # [B,nj,R,2]
+            rel_jr     = self._c_rel_ar[:, self.n_strikers:, :, :]  # [B,nj,R,2] from cache
             jam_mask   = self.jammer.jams_radar(rel_jr) & alive[:, jammer_idx, None]  # [B,nj,R]
             any_jam    = jam_mask.any(dim=1)                                           # [B,R]
             jam_active = jam_mask.any(dim=2)                                           # [B,nj] per-jammer: actively jamming?
@@ -672,8 +686,7 @@ class StrikeEA2DEnv(EnvBase):
         self.radar_eff_range = radar_eff_range.clone()
 
         # ---- radar kills own agents (probabilistic) ----
-        rel_ar = self.radar_pos[:, None, :, :] - self.agent_pos[:, :, None, :]   # [B,A,R,2]
-        dist_ar = torch.linalg.norm(rel_ar, dim=-1)                               # [B,A,R]
+        dist_ar = self._c_dist_ar                                                  # [B,A,R]
         in_radar = dist_ar <= radar_eff_range[:, None, :]                         # [B,A,R]
         
         kill_samples = torch.rand(B, A, self.n_radars, device=self.device, generator=self._rng)
@@ -792,8 +805,7 @@ class StrikeEA2DEnv(EnvBase):
         # ------------------------------------------------------------------
         striker_approach_full = torch.zeros(B, A, device=self.device)
         if striker_idx.numel() > 0 and self.n_targets > 0:
-            rel_st_all = self.target_pos[:, None, :, :] - self.agent_pos[:, :self.n_strikers, None, :]
-            dist_st    = torch.linalg.norm(rel_st_all, dim=-1)            # [B, ns, T]
+            dist_st = self._c_dist_at[:, :self.n_strikers, :]            # [B, ns, T] from cache
             mask_t     = self.target_alive[:, None, :].expand(-1, self.n_strikers, -1)  # [B, ns, T]
 
             if rp.striker_nearest_only:
@@ -844,8 +856,7 @@ class StrikeEA2DEnv(EnvBase):
         # ------------------------------------------------------------------
         jammer_approach_full = torch.zeros(B, A, device=self.device)
         if jammer_idx.numel() > 0 and self.n_radars > 0:
-            rel_jr_all = self.radar_pos[:, None, :, :] - self.agent_pos[:, self.n_strikers:, None, :]
-            dist_jr    = torch.linalg.norm(rel_jr_all, dim=-1)            # [B, nj, R]
+            dist_jr = self._c_dist_ar[:, self.n_strikers:, :]            # [B, nj, R] from cache
             jammer_alive_f = alive[:, self.n_strikers:].float()
 
             # Compute shaping value per jammer-radar pair
@@ -884,10 +895,6 @@ class StrikeEA2DEnv(EnvBase):
         jammer_progress_full  = torch.zeros(B, A, device=self.device)
         jammer_jam_bonus_full = torch.zeros(B, A, device=self.device)
         if jammer_idx.numel() > 0 and self.n_radars > 0:
-            # Reuse dist_jr computed in section 6 (or compute if jammer approach was skipped)
-            if 'dist_jr' not in dir():
-                rel_jr_all = self.radar_pos[:, None, :, :] - self.agent_pos[:, self.n_strikers:, None, :]
-                dist_jr = torch.linalg.norm(rel_jr_all, dim=-1)
             jammer_alive_f = alive[:, self.n_strikers:].float()
 
             if float(rp.jammer_progress_scale) > 0:
@@ -907,11 +914,6 @@ class StrikeEA2DEnv(EnvBase):
 
         striker_progress_full = torch.zeros(B, A, device=self.device)
         if striker_idx.numel() > 0 and self.n_targets > 0:
-            # Reuse dist_st computed in section 5 (or compute if striker approach was skipped)
-            if 'dist_st' not in dir():
-                rel_st_all = self.target_pos[:, None, :, :] - self.agent_pos[:, :self.n_strikers, None, :]
-                dist_st = torch.linalg.norm(rel_st_all, dim=-1)
-
             if float(rp.striker_progress_scale) > 0:
                 mask_t_p  = self.target_alive[:, None, :].expand(-1, self.n_strikers, -1)
                 any_alive_p = mask_t_p.any(dim=-1)
@@ -1107,6 +1109,7 @@ class StrikeEA2DEnv(EnvBase):
         next_td.set(self._reward_key, reward)
         next_td.set("done",       done.to(torch.bool))
         next_td.set("terminated", terminated.to(torch.bool))
+        self._update_comm_cache()
         next_td.set(self._obs_key, self._build_local_obs())
         next_td.set("state",       self._build_global_state())
         # ---- FOFE: emit structured per-channel observations ----
@@ -1265,6 +1268,54 @@ class StrikeEA2DEnv(EnvBase):
 
         return dist, rel_angle
 
+    def _update_geometry_cache(self) -> None:
+        """Compute all pairwise geometry tensors once after positions are updated.
+
+        Stores results in self._c_* attributes. Called at the top of _step()
+        immediately after agent_pos is updated so that every downstream consumer
+        (_step reward terms, _build_local_obs, _build_fofe_obs) can read from
+        the cache instead of recomputing the same [B, A, E, 2] allocations.
+        """
+        # ---- Agent → Radar  [B, A, R, *] ----
+        self._c_rel_ar   = self.radar_pos[:, None, :, :] - self.agent_pos[:, :, None, :]
+        self._c_dist_ar  = torch.linalg.norm(self._c_rel_ar, dim=-1).clamp_min(1e-8)
+        _abs_ar          = torch.atan2(self._c_rel_ar[..., 1], self._c_rel_ar[..., 0])
+        _hdg_ar          = self.agent_heading[:, :, None].expand_as(_abs_ar)
+        self._c_angle_ar = torch.atan2(torch.sin(_abs_ar - _hdg_ar), torch.cos(_abs_ar - _hdg_ar))
+
+        # ---- Agent → Target  [B, A, T, *] ----
+        self._c_rel_at   = self.target_pos[:, None, :, :] - self.agent_pos[:, :, None, :]
+        self._c_dist_at  = torch.linalg.norm(self._c_rel_at, dim=-1).clamp_min(1e-8)
+        _abs_at          = torch.atan2(self._c_rel_at[..., 1], self._c_rel_at[..., 0])
+        _hdg_at          = self.agent_heading[:, :, None].expand_as(_abs_at)
+        self._c_angle_at = torch.atan2(torch.sin(_abs_at - _hdg_at), torch.cos(_abs_at - _hdg_at))
+
+        # ---- Agent → Agent  [B, A, A, *] ----
+        self._c_rel_aa   = self.agent_pos[:, None, :, :] - self.agent_pos[:, :, None, :]
+        self._c_dist_aa  = torch.linalg.norm(self._c_rel_aa, dim=-1).clamp_min(1e-8)
+        _abs_aa          = torch.atan2(self._c_rel_aa[..., 1], self._c_rel_aa[..., 0])
+        _hdg_aa          = self.agent_heading[:, :, None].expand_as(_abs_aa)
+        self._c_angle_aa = torch.atan2(torch.sin(_abs_aa - _hdg_aa), torch.cos(_abs_aa - _hdg_aa))
+
+    def _update_comm_cache(self) -> None:
+        """Compute transitive communication reachability from cached distances.
+
+        Must be called AFTER kill updates so agent_alive reflects casualties.
+        Result stored in self._c_comm_reach [B, A, A].
+        """
+        A = self.n_agents
+        B = self.num_envs
+        eye = torch.eye(A, dtype=torch.bool, device=self.device).unsqueeze(0).expand(B, -1, -1)
+        comm_adj = (
+            (self._c_dist_aa <= self.R_comm)
+            & self.agent_alive[:, :, None]
+            & self.agent_alive[:, None, :]
+        )
+        comm_reach = comm_adj | eye
+        for _ in range(max(A - 1, 0)):
+            comm_reach = comm_reach | (torch.matmul(comm_reach.float(), comm_reach.float()) > 0)
+        self._c_comm_reach = comm_reach
+
     def _build_local_obs(self) -> torch.Tensor:
         """Ego-centric relative observation per agent with fixed slot counts.
 
@@ -1331,18 +1382,9 @@ class StrikeEA2DEnv(EnvBase):
         role = role[None, :].expand(B, A)  # [B, A]
 
         # --- Other agents (relative distance + relative angle + heading + role) ---
-        dist_aa, angle_aa = self._relative_polar(
-            self.agent_pos, self.agent_heading, self.agent_pos
-        )  # [B,A,A], [B,A,A]
-
-        dist_agents = torch.linalg.norm(
-            self.agent_pos[:, :, None, :] - self.agent_pos[:, None, :, :], dim=-1
-        )  # [B,A,A]
-
-        # Exclude self by setting diagonal to inf / 0
         eye = torch.eye(A, device=self.device, dtype=torch.bool).unsqueeze(0)  # [1,A,A]
-        dist_aa  = torch.where(eye, torch.tensor(float('inf'), device=self.device), dist_aa)
-        angle_aa = torch.where(eye, torch.zeros(1, device=self.device), angle_aa)
+        dist_aa  = torch.where(eye, torch.tensor(float('inf'), device=self.device), self._c_dist_aa)
+        angle_aa = torch.where(eye, torch.zeros(1, device=self.device), self._c_angle_aa)
 
         # Visibility mask: within R_obs AND alive
         visible = (dist_aa <= self.R_obs) & self.agent_alive[:, None, :]  # [B,A,A]
@@ -1363,27 +1405,15 @@ class StrikeEA2DEnv(EnvBase):
         other_obs = other_slots.reshape(B, A, -1)  # [B,A,3*4]
 
         # --- Radars (relative distance + relative angle + jammed flag) ---
-        dist_ar, angle_ar = self._relative_polar(
-            self.agent_pos, self.agent_heading, self.radar_pos
-        )  # [B,A,R]
+        dist_ar       = self._c_dist_ar                                      # [B,A,R]
         dist_ar_norm  = dist_ar / max_dist
-        angle_ar_norm = angle_ar / math.pi
+        angle_ar_norm = self._c_angle_ar / math.pi
         jammed = (self.radar_eff_range < self.radar_range).float()          # [B,R] 1=jammed
         jammed_exp = jammed[:, None, :].expand(B, A, R)                     # [B,A,R]
 
-        # ------------------------------------------------------------------
-        # Communication graph over alive agents (per env in batch)
-        #   comm_adj[b, i, j]  = edge(i,j) in G_t   iff dist(i,j) <= R_comm
-        #   comm_reach         = transitive closure of G_t (multi-hop reachability)
-        # This implements subset-based sharing: agents in same connected component
-        # share unknown detections with each other at this timestep.
-        # ------------------------------------------------------------------
+        # Communication reachability — pre-computed by _update_comm_cache
         alive_agents = self.agent_alive
-        eye_agents = torch.eye(A, dtype=torch.bool, device=self.device).unsqueeze(0).expand(B, -1, -1)
-        comm_adj = (dist_agents <= self.R_comm) & alive_agents[:, :, None] & alive_agents[:, None, :]
-        comm_reach = comm_adj | eye_agents
-        for _ in range(max(A - 1, 0)):
-            comm_reach = comm_reach | (torch.matmul(comm_reach.float(), comm_reach.float()) > 0)
+        comm_reach   = self._c_comm_reach
 
         # ------------------------------------------------------------------
         # Radar visibility sets
@@ -1412,11 +1442,9 @@ class StrikeEA2DEnv(EnvBase):
         radar_obs = radar_slots.reshape(B, A, -1)                           # [B,A,2*3]
 
         # --- Targets (relative distance + relative angle + alive flag) ---
-        dist_at, angle_at = self._relative_polar(
-            self.agent_pos, self.agent_heading, self.target_pos
-        )  # [B,A,T]
+        dist_at       = self._c_dist_at                                      # [B,A,T]
         dist_at_norm  = dist_at / max_dist
-        angle_at_norm = angle_at / math.pi
+        angle_at_norm = self._c_angle_at / math.pi
         alive_t = self.target_alive[:, None, :].expand(B, A, T).float()     # [B,A,T]
 
         # ------------------------------------------------------------------
@@ -1491,20 +1519,13 @@ class StrikeEA2DEnv(EnvBase):
         role[:self.n_strikers] = 1.0
         role = role[None, :].expand(B, A)
 
-        # ---- Communication graph (same as _build_local_obs) ----
-        dist_agents = torch.linalg.norm(
-            self.agent_pos[:, :, None, :] - self.agent_pos[:, None, :, :], dim=-1
-        )
-        eye = torch.eye(A, dtype=torch.bool, device=self.device).unsqueeze(0).expand(B, -1, -1)
-        comm_adj = (dist_agents <= self.R_comm) & self.agent_alive[:, :, None] & self.agent_alive[:, None, :]
-        comm_reach = comm_adj | eye
-        for _ in range(max(A - 1, 0)):
-            comm_reach = comm_reach | (torch.matmul(comm_reach.float(), comm_reach.float()) > 0)
+        # ---- Communication reachability — pre-computed by _update_comm_cache ----
+        eye       = torch.eye(A, dtype=torch.bool, device=self.device).unsqueeze(0).expand(B, -1, -1)
+        comm_reach = self._c_comm_reach
 
         # ---- Agents channel: [B, A, A, 4] + mask [B, A, A] ----
-        dist_aa, angle_aa = self._relative_polar(self.agent_pos, self.agent_heading, self.agent_pos)
-        dist_aa = torch.where(eye, torch.tensor(10.0, device=self.device), dist_aa)
-        angle_aa = torch.where(eye, torch.zeros(1, device=self.device), angle_aa)
+        dist_aa  = torch.where(eye, torch.tensor(10.0, device=self.device), self._c_dist_aa)
+        angle_aa = torch.where(eye, torch.zeros(1, device=self.device), self._c_angle_aa)
         agents_visible = (dist_aa <= self.R_obs) & self.agent_alive[:, None, :] & ~eye
 
         agents_feat = torch.stack([
@@ -1517,7 +1538,8 @@ class StrikeEA2DEnv(EnvBase):
         agents_feat = torch.nan_to_num(agents_feat, nan=0.0)
 
         # ---- Radars channel: [B, A, R, 3] + mask [B, A, R] ----
-        dist_ar, angle_ar = self._relative_polar(self.agent_pos, self.agent_heading, self.radar_pos)
+        dist_ar  = self._c_dist_ar
+        angle_ar = self._c_angle_ar
         jammed = (self.radar_eff_range < self.radar_range).float()[:, None, :].expand(B, A, R)
 
         # Known/unknown visibility with communication sharing
@@ -1532,7 +1554,8 @@ class StrikeEA2DEnv(EnvBase):
         radars_feat = torch.nan_to_num(radars_feat, nan=0.0)
 
         # ---- Targets channel: [B, A, T, 3] + mask [B, A, T] ----
-        dist_at, angle_at = self._relative_polar(self.agent_pos, self.agent_heading, self.target_pos)
+        dist_at  = self._c_dist_at
+        angle_at = self._c_angle_at
         alive_t = self.target_alive[:, None, :].expand(B, A, T).float()
 
         target_known_mask = self.target_known[:, None, :].expand(B, A, T)
