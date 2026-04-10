@@ -81,14 +81,14 @@ class FOFEConfig:
     radars_see_dims:   Tuple[int, ...] = (96, 128)
     fofe_mlp_dims:     Tuple[int, ...] = (128, 64)
     self_mlp_dims:     Tuple[int, ...] = (64, 64)
-    fusion_mlp_dims:   Tuple[int, ...] = (256, 256)
+    fusion_mlp_dims:   Tuple[int, ...] = (128, 128) # reduced from 256
 
     # --- Critic FOFE dims (default = same as actor) ---
     critic_agents_see_dims:   Tuple[int, ...] = (96, 128)
     critic_targets_see_dims:  Tuple[int, ...] = (96, 128)
     critic_radars_see_dims:   Tuple[int, ...] = (96, 128)
     critic_fofe_mlp_dims:     Tuple[int, ...] = (128, 64)
-    critic_fusion_mlp_dims:   Tuple[int, ...] = (256, 256)
+    critic_fusion_mlp_dims:   Tuple[int, ...] = (128, 128) # reduced from 256
 
 
 # ======================================================================
