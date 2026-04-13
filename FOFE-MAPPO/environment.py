@@ -1128,6 +1128,7 @@ class StrikeEA2DEnv(EnvBase):
                     tgt_frac = float((~self.target_alive[b]).float().mean().item())
                     surv_frac = float(self.agent_alive[b].float().mean().item())
                     self._completed_episodes.append({
+                        "env_idx": b,
                         "mission_complete": bool(all_targets_done[b, 0].item()),
                         "targets_frac": tgt_frac,
                         "survival_frac": surv_frac,

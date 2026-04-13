@@ -11,8 +11,11 @@ architecture allows the same weight matrix to handle variable S/J/T/R counts.
 
 Usage
 -----
-    python -m FOFE-MAPPO.run_generalisation --checkpoint runs/fofe_mappo.pt
-    python -m FOFE-MAPPO.run_generalisation --checkpoint runs/fofe_mappo.pt --n_eval_episodes 100
+    .\.venv\Scripts\python.exe -m FOFE-MAPPO.run_generalisation --checkpoint runs/fofe_mappo.pt
+    .\.venv\Scripts\python.exe -m FOFE-MAPPO.run_generalisation --checkpoint runs/fofe_mappo.pt --n_eval_episodes 100
+
+If the virtual environment is already activated, you can use:
+    python.exe -m FOFE-MAPPO.run_generalisation --checkpoint runs/fofe_mappo.pt
 
 Editing test configurations
 ----------------------------

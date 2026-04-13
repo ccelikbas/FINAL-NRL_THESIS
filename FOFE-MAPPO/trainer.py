@@ -370,8 +370,12 @@ def evaluate_current_policy(
     ppo_cfg: PPOConfig,
     n_eval_episodes: int = 30,
 ) -> Dict[str, float]:
+    # Run all episodes in parallel: num_envs = n_eval_episodes so every env
+    # completes exactly one episode, each with a different random layout.
+    # This is ~n_eval_episodes× faster than the old single-env sequential loop.
+    n_eval_episodes = max(1, int(n_eval_episodes))
     eval_env = StrikeEA2DEnv(
-        num_envs=1,
+        num_envs=n_eval_episodes,
         max_steps=env_cfg.max_steps,
         device=ppo_cfg.device,
         seed=ppo_cfg.seed + 10_000,
@@ -419,41 +423,59 @@ def evaluate_current_policy(
         key: [] for key in EVAL_REWARD_COMPONENT_KEYS
     }
 
-    for _ in range(max(1, int(n_eval_episodes))):
-        td = eval_env.reset()
-        episode_component_sums = {key: 0.0 for key in EVAL_REWARD_COMPONENT_KEYS}
+    # Track which envs have already finished so we stop stepping them.
+    # done_mask[b] = True once env b has emitted a done signal.
+    done_mask = torch.zeros(n_eval_episodes, dtype=torch.bool, device=ppo_cfg.device)
+    # Accumulate per-component rewards per env across steps.
+    component_sums: Dict[str, torch.Tensor] = {
+        key: torch.zeros(n_eval_episodes, device=ppo_cfg.device)
+        for key in EVAL_REWARD_COMPONENT_KEYS
+    }
 
-        for _step in range(env_cfg.max_steps):
-            td = policy(td)
-            td_next = eval_env.step(td)
+    td = eval_env.reset()
 
-            for comp_key in EVAL_REWARD_COMPONENT_KEYS:
-                comp_tensor = eval_env.last_reward_components[comp_key]
-                episode_component_sums[comp_key] += float(comp_tensor[0].sum().item())
+    for _ in range(env_cfg.max_steps):
+        td = policy(td)
+        td_next = eval_env.step(td)
 
-            done = bool(td_next.get(("next", "done"))[0, 0].item())
-            if done:
-                break
-            td = td_next.get("next")
+        # Accumulate component rewards for envs still running
+        for comp_key in EVAL_REWARD_COMPONENT_KEYS:
+            comp_tensor = eval_env.last_reward_components[comp_key]  # [B, A, 1] or [B]
+            # Sum over agents/dims to get a scalar per env
+            per_env = comp_tensor.reshape(n_eval_episodes, -1).sum(dim=-1)
+            component_sums[comp_key] += per_env * (~done_mask).float()
 
-        stats = eval_env.pop_episode_stats()
-        if stats:
-            if len(stats) > 1:
-                print(f"WARNING evaluate_current_policy: multiple episodes ({len(stats)}) detected; using first")
-            s = stats[0]
+        # Update done mask: an env is done once it fires done=True for the first time
+        step_done = td_next.get(("next", "done"))  # [B, 1] or [B]
+        step_done = step_done.reshape(n_eval_episodes).bool()
+        done_mask = done_mask | step_done
+
+        if done_mask.all():
+            break
+        td = td_next.get("next")
+
+    # Collect episode stats that the env pushed during this rollout
+    stats = eval_env.pop_episode_stats()
+    stats_by_env: Dict[int, Any] = {}
+    for s in stats:
+        env_idx = int(s.get("env_idx", -1))
+        if env_idx >= 0:
+            stats_by_env[env_idx] = s
+
+    for b in range(n_eval_episodes):
+        s = stats_by_env.get(b)
+        if s is not None:
             ep_total_rewards.append(float(s.get("episode_total_reward", float("nan"))))
             ep_survival.append(float(s.get("survival_frac", float("nan"))))
             ep_duration.append(float(s.get("duration", float("nan"))))
             ep_completion.append(1.0 if bool(s.get("mission_complete", False)) else 0.0)
-            for comp_key in EVAL_REWARD_COMPONENT_KEYS:
-                ep_component_rewards[comp_key].append(episode_component_sums[comp_key])
         else:
             ep_total_rewards.append(float("nan"))
             ep_survival.append(float("nan"))
             ep_duration.append(float("nan"))
             ep_completion.append(float("nan"))
-            for comp_key in EVAL_REWARD_COMPONENT_KEYS:
-                ep_component_rewards[comp_key].append(float("nan"))
+        for comp_key in EVAL_REWARD_COMPONENT_KEYS:
+            ep_component_rewards[comp_key].append(float(component_sums[comp_key][b].item()))
 
     policy.deterministic = False
     if was_training:
