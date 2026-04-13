@@ -350,22 +350,30 @@ def run_generalisation(
     configs_to_eval: List[Dict[str, Any]] = list(test_configs)
 
     if include_baseline:
+        # Compare on TOTAL counts (n_targets = known + unknown) so the check
+        # works regardless of whether the user specifies n_known_* or n_targets.
+        def _total_targets(c: Dict[str, Any]) -> int:
+            if "n_known_targets" in c or "n_unknown_targets" in c:
+                return c.get("n_known_targets", 0) + c.get("n_unknown_targets", 0)
+            return c.get("n_targets", 0)
+
+        def _total_radars(c: Dict[str, Any]) -> int:
+            if "n_known_radars" in c or "n_unknown_radars" in c:
+                return c.get("n_known_radars", 0) + c.get("n_unknown_radars", 0)
+            return c.get("n_radars", 0)
+
         baseline_key = (
             base_env_cfg.n_strikers,
             base_env_cfg.n_jammers,
-            base_env_cfg.n_known_targets,
-            base_env_cfg.n_unknown_targets,
-            base_env_cfg.n_known_radars,
-            base_env_cfg.n_unknown_radars,
+            base_env_cfg.n_targets,   # total = known + unknown
+            base_env_cfg.n_radars,
         )
         already_present = any(
             (
                 c["n_strikers"],
                 c["n_jammers"],
-                c.get("n_known_targets", 0),
-                c.get("n_unknown_targets", 0),
-                c.get("n_known_radars", 0),
-                c.get("n_unknown_radars", 0),
+                _total_targets(c),
+                _total_radars(c),
             ) == baseline_key
             for c in configs_to_eval
         )

@@ -361,7 +361,7 @@ class StrikeEA2DEnv(EnvBase):
         unconstrained_range = self.radar_range
         
         # Target spawn distance: 90% of detection range (safe annulus)
-        spawn_distance = 0.9 * unconstrained_range
+        spawn_distance = 0.7 * unconstrained_range
         
         target_pos = torch.zeros(B, T, 2, device=self.device)
         

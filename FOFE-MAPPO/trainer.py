@@ -433,6 +433,7 @@ def evaluate_current_policy(
     }
 
     td = eval_env.reset()
+    stats_by_env: Dict[int, Any] = {}
 
     for _ in range(env_cfg.max_steps):
         td = policy(td)
@@ -441,26 +442,28 @@ def evaluate_current_policy(
         # Accumulate component rewards for envs still running
         for comp_key in EVAL_REWARD_COMPONENT_KEYS:
             comp_tensor = eval_env.last_reward_components[comp_key]  # [B, A, 1] or [B]
-            # Sum over agents/dims to get a scalar per env
             per_env = comp_tensor.reshape(n_eval_episodes, -1).sum(dim=-1)
             component_sums[comp_key] += per_env * (~done_mask).float()
 
-        # Update done mask: an env is done once it fires done=True for the first time
+        # Determine which envs just fired done for the first time this step
         step_done = td_next.get(("next", "done"))  # [B, 1] or [B]
         step_done = step_done.reshape(n_eval_episodes).bool()
+        newly_done = step_done & ~done_mask
         done_mask = done_mask | step_done
+
+        # Collect stats immediately for newly-done envs.
+        # The env pushes stats inside _step then zeroes reward accumulators.
+        # If we wait until the end, re-stepping done envs fires the stat again
+        # with reward=0 and an inflated step_count, overwriting the real values.
+        if newly_done.any():
+            for s in eval_env.pop_episode_stats():
+                env_idx = int(s.get("env_idx", -1))
+                if env_idx >= 0 and newly_done[env_idx] and env_idx not in stats_by_env:
+                    stats_by_env[env_idx] = s
 
         if done_mask.all():
             break
         td = td_next.get("next")
-
-    # Collect episode stats that the env pushed during this rollout
-    stats = eval_env.pop_episode_stats()
-    stats_by_env: Dict[int, Any] = {}
-    for s in stats:
-        env_idx = int(s.get("env_idx", -1))
-        if env_idx >= 0:
-            stats_by_env[env_idx] = s
 
     for b in range(n_eval_episodes):
         s = stats_by_env.get(b)

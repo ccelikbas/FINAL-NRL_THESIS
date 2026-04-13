@@ -73,7 +73,7 @@ class FOFEConfig:
     critic_fusion_mlp_dims : tuple of int
         Fusion MLP dims for critic.
     """
-    use_fofe: bool = True
+    use_fofe: bool = False
 
     # --- Actor FOFE dims ---
     agents_see_dims:   Tuple[int, ...] = (96,) # one SEE layer
@@ -98,8 +98,8 @@ class FOFEConfig:
 @dataclass
 class EnvConfig:
     # Team composition
-    n_strikers: int = 2
-    n_jammers: int = 2
+    n_strikers: int = 1
+    n_jammers: int = 1
     n_known_targets: int = 2
     n_unknown_targets: int = 0
     n_known_radars: int = 2
@@ -182,7 +182,7 @@ class EnvConfig:
 class PPOConfig:
     """Shared PPO hyperparameters for both striker and jammer MAPPO."""
     num_envs: int = 512
-    n_iters: int = 50
+    n_iters: int = 200
     frames_per_batch: Optional[int] = None
     num_epochs: int = 10
     minibatch_size: int = 2048
@@ -199,7 +199,7 @@ class PPOConfig:
     max_iter_time_s: Optional[float] = 250.0   # safety timeout per iteration (None = disabled)
 
     seed: int = 0
-    log_every: int = 10
+    log_every: int = 20
     device: torch.device = field(default_factory=lambda: torch.device("cuda" if torch.cuda.is_available() else "cpu"))
 
     def __post_init__(self):
