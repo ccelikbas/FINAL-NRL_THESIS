@@ -585,7 +585,9 @@ def train_mappo(
         "reward_norm_running_mean": [], "reward_norm_running_std": [],
         "raw_reward_mean": [], "raw_reward_std": [],
         "normalized_reward_mean": [], "normalized_reward_std": [],
-        "iter_time_s": [],
+        "iter_time_s": [],           # total wall time per iteration (incl. eval)
+        "iter_time_excl_eval_s": [], # training-only time per iteration (eval subtracted)
+        "eval_time_s": [],           # time spent inside evaluate_current_policy (0 on non-eval iters)
     }
     for comp_key in EVAL_REWARD_COMPONENT_KEYS:
         logs[f"train_component_{comp_key}"] = []
@@ -597,6 +599,7 @@ def train_mappo(
     # MAIN TRAINING LOOP
     # ==================================================================
     _PROFILE_ITERS = 3   # print per-phase timing for the first N iterations
+    _first_eval_profiled = False  # also print profile on the first eval iteration
     if torch.cuda.is_available():
         torch.cuda.synchronize()
     _t_iter_start = time.perf_counter()   # true start of iter 0 = before collector first blocks
@@ -973,24 +976,32 @@ def train_mappo(
         # rollout : collector blocking (before this iteration's body ran)
         # prep    : td.to(device) + norm + critic inference + GAE + reshape
         # ppo     : all forward/backward passes across epochs/minibatches
-        # post    : EV + episode stats + eval + logging
-        _t_prep_s    = _t_ppo_start  - _t_batch_ready
-        _t_ppo_s     = _t_post_start - _t_ppo_start
+        # post    : EV + episode stats + logging  (NOT eval — eval tracked separately)
+        # eval    : evaluate_current_policy (0 s on non-eval iterations)
+        _t_prep_s     = _t_ppo_start  - _t_batch_ready
+        _t_ppo_s      = _t_post_start - _t_ppo_start
         _t_eval_s_val = _t_eval_s if do_eval else 0.0
-        _t_post_s    = _t_iter_end   - _t_post_start
-        _iter_total_s = _t_iter_end  - _t_iter_start   # true wall time incl. rollout
+        _t_post_s     = _t_iter_end   - _t_post_start - _t_eval_s_val
+        _iter_total_s = _t_iter_end   - _t_iter_start   # true wall time incl. rollout + eval
         logs["iter_time_s"].append(_iter_total_s)
+        logs["iter_time_excl_eval_s"].append(_iter_total_s - _t_eval_s_val)
+        logs["eval_time_s"].append(_t_eval_s_val)
 
-        # ── Profile print (first _PROFILE_ITERS iterations) ──────────
-        if it < _PROFILE_ITERS:
+        # ── Profile print ─────────────────────────────────────────────
+        # Print for the first _PROFILE_ITERS iterations AND for the first
+        # eval iteration (so both non-eval and eval timings appear in the log).
+        _do_profile = (it < _PROFILE_ITERS) or (do_eval and not _first_eval_profiled)
+        if _do_profile:
+            if do_eval:
+                _first_eval_profiled = True
             print(
                 f"  [PROFILE iter {it + 1}] "
                 f"total={_iter_total_s:.2f}s | "
                 f"rollout={_t_rollout_s:.2f}s | "
                 f"prep(norm+critic+GAE+reshape)={_t_prep_s:.2f}s | "
                 f"ppo_updates={_t_ppo_s:.2f}s | "
-                f"post(EV+stats+eval+log)={_t_post_s:.2f}s"
-                + (f" [eval={_t_eval_s_val:.2f}s]" if do_eval else "")
+                f"post(EV+stats+log)={_t_post_s:.2f}s"
+                + (f" | eval={_t_eval_s_val:.2f}s" if do_eval else "")
                 + (" [TIMED OUT]" if _timed_out else "")
             )
 

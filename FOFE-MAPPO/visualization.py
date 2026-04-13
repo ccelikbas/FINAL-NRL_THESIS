@@ -109,24 +109,22 @@ def plot_training(logs: Dict[str, List[float]]) -> None:
     ax.legend(fontsize=7)
     ax.grid(True)
 
-    # --- Row 1, Col 0: Eval Episode Return ---
+    # --- Row 1, Col 0: Time per Iteration ---
     ax = axes[1, 0]
-    if "eval_mean_episode_total_reward" in logs:
-        _plot_valid(ax, logs["eval_mean_episode_total_reward"], "eval_ep_return_total")
-    for key in sorted(logs.keys()):
-        if not key.startswith("eval_component_"):
-            continue
-        y = np.asarray(logs[key], dtype=float)
-        if y.size == 0:
-            continue
-        valid = np.isfinite(y)
-        if not np.any(valid) or np.nanmax(np.abs(y[valid])) <= 1e-12:
-            continue
-        label = key.replace("eval_component_", "")
-        _plot_valid(ax, logs[key], label)
-    ax.set_title("Eval Episode Return")
+    if "iter_time_s" in logs:
+        _plot_valid(ax, logs["iter_time_s"], "total (incl. eval)", color="tab:blue")
+    if "iter_time_excl_eval_s" in logs:
+        y_excl = np.asarray(logs["iter_time_excl_eval_s"], dtype=float)
+        if y_excl.size > 0 and np.any(np.isfinite(y_excl)):
+            _plot_valid(ax, logs["iter_time_excl_eval_s"], "training only", color="tab:orange")
+    if "eval_time_s" in logs:
+        y_eval = np.asarray(logs["eval_time_s"], dtype=float)
+        if y_eval.size > 0 and np.nanmax(np.where(np.isfinite(y_eval), y_eval, 0.0)) > 1e-6:
+            _plot_valid(ax, logs["eval_time_s"], "eval only", color="tab:green", linestyle="--")
+    ax.set_title("Time per Iteration (s)")
     ax.set_xlabel("Iteration")
-    ax.legend(fontsize=6)
+    ax.set_ylabel("seconds")
+    ax.legend(fontsize=7)
     ax.grid(True)
 
     # --- Row 1, Col 1: Eval Survival & Completion ---
