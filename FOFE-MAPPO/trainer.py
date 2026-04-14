@@ -598,7 +598,8 @@ def train_mappo(
     # ==================================================================
     # MAIN TRAINING LOOP
     # ==================================================================
-    _PROFILE_ITERS = 3   # print per-phase timing for the first N iterations
+    _PROFILE_ITERS = int(getattr(ppo_cfg, "profile_iters", 3))
+    _ITER_OFFSET = int(getattr(ppo_cfg, "iteration_offset", 0))
     _first_eval_profiled = False  # also print profile on the first eval iteration
     if torch.cuda.is_available():
         torch.cuda.synchronize()
@@ -948,7 +949,8 @@ def train_mappo(
                 logs[fk].append(float("nan"))
 
         # ── Evaluation ───────────────────────────────────────────────
-        do_eval = bool(ppo_cfg.log_every) and ((it + 1) % ppo_cfg.log_every == 0)
+        global_iter_1based = _ITER_OFFSET + it + 1
+        do_eval = bool(ppo_cfg.log_every) and (global_iter_1based % ppo_cfg.log_every == 0)
         if do_eval:
             _t_eval_start = time.perf_counter()
             eval_metrics = evaluate_current_policy(policy, env_cfg, ppo_cfg)
@@ -990,12 +992,12 @@ def train_mappo(
         # ── Profile print ─────────────────────────────────────────────
         # Print for the first _PROFILE_ITERS iterations AND for the first
         # eval iteration (so both non-eval and eval timings appear in the log).
-        _do_profile = (it < _PROFILE_ITERS) or (do_eval and not _first_eval_profiled)
+        _do_profile = ((_ITER_OFFSET + it) < _PROFILE_ITERS) or (do_eval and not _first_eval_profiled)
         if _do_profile:
             if do_eval:
                 _first_eval_profiled = True
             print(
-                f"  [PROFILE iter {it + 1}] "
+                f"  [PROFILE iter {global_iter_1based}] "
                 f"total={_iter_total_s:.2f}s | "
                 f"rollout={_t_rollout_s:.2f}s | "
                 f"prep(norm+critic+GAE+reshape)={_t_prep_s:.2f}s | "
@@ -1019,7 +1021,7 @@ def train_mappo(
                     f" | ret_m {norm_stats['running_mean']:.4f}"
                 )
             print(
-                f"Iter {it + 1:4d}/{ppo_cfg.n_iters} | "
+                f"Iter {global_iter_1based:4d} | "
                 f"train_ret {logs['train_mean_episode_total_reward'][-1]: .3f} | "
                 f"eval_ret {logs['eval_mean_episode_total_reward'][-1]: .3f} | "
                 f"comp {logs['eval_task_completion_rate'][-1]:.2f} | "

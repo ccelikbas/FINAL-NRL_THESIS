@@ -553,6 +553,8 @@ def main() -> None:
             seed=ppo_template.seed + global_it,
             log_every=ppo_template.log_every,
         )
+        iter_ppo_cfg.iteration_offset = global_it
+        iter_ppo_cfg.profile_iters = 0
         iter_exp_cfg = ExperimentConfig(
             env=iter_env_cfg, ppo=iter_ppo_cfg,
             net=net_cfg, fofe=fofe_cfg,
