@@ -56,6 +56,7 @@ from .config import EnvConfig, ExperimentConfig, FOFEConfig, NetworkConfig, PPOC
 from .models import make_combined_critic, make_combined_policy
 from .rewards import RewardConfig
 from .trainer import build_env, evaluate_current_policy, train_mappo
+from . import trainer as trainer_module
 from .visualization import TestRunner, animate_rollout, plot_training
 
 
@@ -434,6 +435,9 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = build_parser().parse_args()
 
+    # run_random-specific speedup: skip expensive env spec checks each outer iteration
+    trainer_module._safe_check = lambda _env: None
+
     # ── Validate bounds ───────────────────────────────────────────────
     for lo, hi, name in [
         (args.min_strikers, args.max_strikers, "strikers"),
@@ -562,10 +566,12 @@ def main() -> None:
                 net_cfg, fofe_cfg,
             )
 
-        print(
-            f"\n[{global_it + 1:4d}/{total_iters}] {phase_label} | "
-            f"S={ns} J={nj} T={nt} R={nr}"
-        )
+        # Keep iteration headers aligned with the evaluation cadence only.
+        if args.log_every > 0 and ((global_it + 1) % args.log_every == 0):
+            print(
+                f"\n[{global_it + 1:4d}/{total_iters}] {phase_label} | "
+                f"S={ns} J={nj} T={nt} R={nr}"
+            )
 
         _, policy, critic, iter_logs, reward_normalizer = train_mappo(
             iter_exp_cfg.env,
