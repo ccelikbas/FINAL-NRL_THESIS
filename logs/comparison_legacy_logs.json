@@ -1,0 +1,497 @@
+{
+  "run_name": "mappo_legacy",
+  "env_cfg": {
+    "n_strikers": 2,
+    "n_jammers": 2,
+    "n_known_targets": 2,
+    "n_unknown_targets": 0,
+    "n_known_radars": 2,
+    "n_unknown_radars": 0,
+    "n_targets": 2,
+    "n_radars": 2,
+    "world_bounds": [
+      0.0,
+      1.0
+    ],
+    "dt": 1.0,
+    "max_steps": 20,
+    "n_env_layouts": 0,
+    "target_spawn_angle_range": [
+      0,
+      360
+    ],
+    "v_max": 0.02,
+    "accel_magnitude": 0.01,
+    "dpsi_max": 0.20943951023931956,
+    "h_accel_magnitude_fraction": 0.1,
+    "min_turn_radius": 0.001,
+    "R_obs": 0.4,
+    "R_comm": 0.4,
+    "striker_engage_range": 0.1,
+    "striker_engage_fov": 60.0,
+    "striker_v_min": 0.005,
+    "jammer_jam_radius": 0.35,
+    "jammer_jam_effect": 0.15,
+    "jammer_v_min": 0.005,
+    "radar_range": 0.2,
+    "radar_kill_probability": 1,
+    "border_thresh": 0.05,
+    "reward_config": {
+      "target_destroyed": 3,
+      "terminal_bonus": 1,
+      "timestep_penalty": -0.01,
+      "agent_destroyed": -3,
+      "team_spirit": 0.5,
+      "border_d_max": 0.05,
+      "border_w_lin": 0.05,
+      "border_w_exp": 0,
+      "border_d_knee": 0,
+      "border_alpha": 0,
+      "radar_avoid_w_lin": 0.05,
+      "radar_avoid_w_exp": 0,
+      "radar_avoid_d_max": 0.1,
+      "radar_avoid_d_knee": 0,
+      "radar_avoid_alpha": 0,
+      "striker_approach_w_lin": 0.1,
+      "striker_approach_w_exp": 0,
+      "striker_approach_d_max": 1,
+      "striker_approach_d_knee": 0,
+      "striker_approach_alpha": 0,
+      "striker_nearest_only": true,
+      "jammer_approach_w_lin": 0,
+      "jammer_approach_w_exp": 0,
+      "jammer_approach_d_max": 0,
+      "jammer_approach_d_knee": 0,
+      "jammer_approach_alpha": 0,
+      "jammer_nearest_only": false,
+      "striker_progress_scale": 0,
+      "jammer_progress_scale": 0,
+      "jammer_jam_bonus": 0,
+      "striker_formation_scale": 0,
+      "striker_formation_ref_dist": 0,
+      "jammer_formation_scale": 0.1,
+      "jammer_formation_ref_dist": 0.5,
+      "use_paper_mission_reward": false,
+      "mission_reward_weight": 0.02,
+      "striker_sep_d_max": 0.1,
+      "striker_sep_d_knee": 0.0,
+      "striker_sep_w_lin": 0.05,
+      "striker_sep_w_exp": 0.0,
+      "striker_sep_alpha": 0.0,
+      "jammer_sep_d_max": 0.1,
+      "jammer_sep_d_knee": 0.0,
+      "jammer_sep_w_lin": 0.05,
+      "jammer_sep_w_exp": 0.0,
+      "jammer_sep_alpha": 0.0,
+      "accel_effort_scale": 0.01,
+      "angular_effort_scale": 0.01
+    },
+    "_use_fofe": false
+  },
+  "ppo_cfg": {
+    "num_envs": 8,
+    "n_iters": 1,
+    "frames_per_batch": 160,
+    "num_epochs": 10,
+    "minibatch_size": 2048,
+    "gamma": 0.99,
+    "lmbda": 0.95,
+    "clip_eps": 0.2,
+    "entropy_coef": 0.01,
+    "normalize_rewards": true,
+    "actor_lr": 0.0003,
+    "critic_lr": 0.0003,
+    "max_grad_norm": 1.0,
+    "max_iter_time_s": 250.0,
+    "seed": 0,
+    "log_every": 5,
+    "device": "cuda"
+  },
+  "net_cfg": {
+    "actor_hidden": 256,
+    "critic_hidden": 256,
+    "depth": 3
+  },
+  "fofe_cfg": {
+    "use_fofe": false,
+    "agents_see_dims": [
+      96
+    ],
+    "targets_see_dims": [
+      96
+    ],
+    "radars_see_dims": [
+      96
+    ],
+    "fofe_mlp_dims": [
+      128,
+      64
+    ],
+    "self_mlp_dims": [
+      64,
+      64
+    ],
+    "fusion_mlp_dims": [
+      256,
+      256
+    ],
+    "critic_agents_see_dims": [
+      96
+    ],
+    "critic_targets_see_dims": [
+      96
+    ],
+    "critic_radars_see_dims": [
+      96
+    ],
+    "critic_fofe_mlp_dims": [
+      128,
+      64
+    ],
+    "critic_fusion_mlp_dims": [
+      256,
+      256
+    ]
+  },
+  "logs": {
+    "train_mean_episode_total_reward": [
+      -5.863639295101166
+    ],
+    "striker_loss_policy": [
+      -0.014751102621666946
+    ],
+    "striker_loss_value": [
+      5006.982373046875
+    ],
+    "striker_entropy": [
+      3.8884294986724854
+    ],
+    "striker_approx_kl": [
+      0.000365113549778473
+    ],
+    "striker_clip_ratio": [
+      0.0046875002328306435
+    ],
+    "striker_explained_variance": [
+      -4.4465065002441406e-05
+    ],
+    "jammer_loss_policy": [
+      -0.013877465059049498
+    ],
+    "jammer_loss_value": [
+      1195.5208984375
+    ],
+    "jammer_entropy": [
+      3.8879486083984376
+    ],
+    "jammer_approx_kl": [
+      -0.002354891489958355
+    ],
+    "jammer_clip_ratio": [
+      0.020000000670552253
+    ],
+    "jammer_explained_variance": [
+      0.0001251697540283203
+    ],
+    "loss_policy": [
+      -0.014314283840358221
+    ],
+    "loss_value": [
+      3101.2516357421873
+    ],
+    "entropy": [
+      3.8881890535354615
+    ],
+    "clip_ratio": [
+      0.012343750451691449
+    ],
+    "explained_variance": [
+      4.035234451293945e-05
+    ],
+    "eval_mean_episode_total_reward": [
+      NaN
+    ],
+    "eval_survival_rate": [
+      NaN
+    ],
+    "eval_mean_duration": [
+      NaN
+    ],
+    "eval_task_completion_rate": [
+      NaN
+    ],
+    "reward_norm_running_mean": [
+      -0.07329543679952621
+    ],
+    "reward_norm_running_std": [
+      0.01467748824506998
+    ],
+    "raw_reward_mean": [
+      -0.0732954889535904
+    ],
+    "raw_reward_std": [
+      0.03086240217089653
+    ],
+    "normalized_reward_mean": [
+      -6.835369110107422
+    ],
+    "normalized_reward_std": [
+      3.237647771835327
+    ],
+    "iter_time_s": [
+      0.31783059996087104
+    ],
+    "iter_time_excl_eval_s": [
+      0.31783059996087104
+    ],
+    "eval_time_s": [
+      0.0
+    ],
+    "train_component_target_destroyed": [
+      0.0
+    ],
+    "eval_component_target_destroyed": [
+      NaN
+    ],
+    "train_component_terminal_bonus": [
+      0.0
+    ],
+    "eval_component_terminal_bonus": [
+      NaN
+    ],
+    "train_component_border_penalty": [
+      0.0
+    ],
+    "eval_component_border_penalty": [
+      NaN
+    ],
+    "train_component_timestep_penalty": [
+      -0.8000000715255737
+    ],
+    "eval_component_timestep_penalty": [
+      NaN
+    ],
+    "train_component_radar_avoidance": [
+      0.0
+    ],
+    "eval_component_radar_avoidance": [
+      NaN
+    ],
+    "train_component_striker_approach": [
+      -2.149395689368248
+    ],
+    "eval_component_striker_approach": [
+      NaN
+    ],
+    "train_component_jammer_approach": [
+      0.0
+    ],
+    "eval_component_jammer_approach": [
+      NaN
+    ],
+    "train_component_striker_progress": [
+      0.0
+    ],
+    "eval_component_striker_progress": [
+      NaN
+    ],
+    "train_component_jammer_progress": [
+      0.0
+    ],
+    "eval_component_jammer_progress": [
+      NaN
+    ],
+    "train_component_jammer_jam_bonus": [
+      0.0
+    ],
+    "eval_component_jammer_jam_bonus": [
+      NaN
+    ],
+    "train_component_formation": [
+      -0.44446030631661415
+    ],
+    "eval_component_formation": [
+      NaN
+    ],
+    "train_component_agent_destroyed": [
+      0.0
+    ],
+    "eval_component_agent_destroyed": [
+      NaN
+    ],
+    "train_component_paper_mission": [
+      0.0
+    ],
+    "eval_component_paper_mission": [
+      NaN
+    ],
+    "train_component_separation_penalty": [
+      -1.8839958757162094
+    ],
+    "eval_component_separation_penalty": [
+      NaN
+    ],
+    "train_component_control_effort": [
+      -0.5857874974608421
+    ],
+    "eval_component_control_effort": [
+      NaN
+    ],
+    "fofe_striker_actor_agents_mean": [
+      NaN
+    ],
+    "fofe_striker_actor_targets_mean": [
+      NaN
+    ],
+    "fofe_striker_actor_radars_mean": [
+      NaN
+    ],
+    "fofe_striker_actor_agents_std": [
+      NaN
+    ],
+    "fofe_striker_actor_targets_std": [
+      NaN
+    ],
+    "fofe_striker_actor_radars_std": [
+      NaN
+    ],
+    "fofe_striker_critic_agents_mean": [
+      NaN
+    ],
+    "fofe_striker_critic_targets_mean": [
+      NaN
+    ],
+    "fofe_striker_critic_radars_mean": [
+      NaN
+    ],
+    "fofe_striker_critic_agents_std": [
+      NaN
+    ],
+    "fofe_striker_critic_targets_std": [
+      NaN
+    ],
+    "fofe_striker_critic_radars_std": [
+      NaN
+    ],
+    "fofe_striker_collapse_agents": [
+      NaN
+    ],
+    "fofe_striker_collapse_targets": [
+      NaN
+    ],
+    "fofe_striker_collapse_radars": [
+      NaN
+    ],
+    "fofe_striker_dominance_agents": [
+      NaN
+    ],
+    "fofe_striker_dominance_targets": [
+      NaN
+    ],
+    "fofe_striker_dominance_radars": [
+      NaN
+    ],
+    "fofe_striker_visible_agents_mean": [
+      NaN
+    ],
+    "fofe_striker_visible_targets_mean": [
+      NaN
+    ],
+    "fofe_striker_visible_radars_mean": [
+      NaN
+    ],
+    "fofe_striker_all_masked_agents": [
+      NaN
+    ],
+    "fofe_striker_all_masked_targets": [
+      NaN
+    ],
+    "fofe_striker_all_masked_radars": [
+      NaN
+    ],
+    "fofe_striker_actor_see_grad_norm": [
+      NaN
+    ],
+    "fofe_striker_critic_see_grad_norm": [
+      NaN
+    ],
+    "fofe_jammer_actor_agents_mean": [
+      NaN
+    ],
+    "fofe_jammer_actor_targets_mean": [
+      NaN
+    ],
+    "fofe_jammer_actor_radars_mean": [
+      NaN
+    ],
+    "fofe_jammer_actor_agents_std": [
+      NaN
+    ],
+    "fofe_jammer_actor_targets_std": [
+      NaN
+    ],
+    "fofe_jammer_actor_radars_std": [
+      NaN
+    ],
+    "fofe_jammer_critic_agents_mean": [
+      NaN
+    ],
+    "fofe_jammer_critic_targets_mean": [
+      NaN
+    ],
+    "fofe_jammer_critic_radars_mean": [
+      NaN
+    ],
+    "fofe_jammer_critic_agents_std": [
+      NaN
+    ],
+    "fofe_jammer_critic_targets_std": [
+      NaN
+    ],
+    "fofe_jammer_critic_radars_std": [
+      NaN
+    ],
+    "fofe_jammer_collapse_agents": [
+      NaN
+    ],
+    "fofe_jammer_collapse_targets": [
+      NaN
+    ],
+    "fofe_jammer_collapse_radars": [
+      NaN
+    ],
+    "fofe_jammer_dominance_agents": [
+      NaN
+    ],
+    "fofe_jammer_dominance_targets": [
+      NaN
+    ],
+    "fofe_jammer_dominance_radars": [
+      NaN
+    ],
+    "fofe_jammer_visible_agents_mean": [
+      NaN
+    ],
+    "fofe_jammer_visible_targets_mean": [
+      NaN
+    ],
+    "fofe_jammer_visible_radars_mean": [
+      NaN
+    ],
+    "fofe_jammer_all_masked_agents": [
+      NaN
+    ],
+    "fofe_jammer_all_masked_targets": [
+      NaN
+    ],
+    "fofe_jammer_all_masked_radars": [
+      NaN
+    ],
+    "fofe_jammer_actor_see_grad_norm": [
+      NaN
+    ],
+    "fofe_jammer_critic_see_grad_norm": [
+      NaN
+    ]
+  }
+}

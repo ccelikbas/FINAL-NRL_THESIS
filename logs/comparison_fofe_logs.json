@@ -1,0 +1,497 @@
+{
+  "run_name": "fofe_mappo",
+  "env_cfg": {
+    "n_strikers": 2,
+    "n_jammers": 2,
+    "n_known_targets": 2,
+    "n_unknown_targets": 0,
+    "n_known_radars": 2,
+    "n_unknown_radars": 0,
+    "n_targets": 2,
+    "n_radars": 2,
+    "world_bounds": [
+      0.0,
+      1.0
+    ],
+    "dt": 1.0,
+    "max_steps": 20,
+    "n_env_layouts": 0,
+    "target_spawn_angle_range": [
+      0,
+      360
+    ],
+    "v_max": 0.02,
+    "accel_magnitude": 0.01,
+    "dpsi_max": 0.20943951023931956,
+    "h_accel_magnitude_fraction": 0.1,
+    "min_turn_radius": 0.001,
+    "R_obs": 0.4,
+    "R_comm": 0.4,
+    "striker_engage_range": 0.1,
+    "striker_engage_fov": 60.0,
+    "striker_v_min": 0.005,
+    "jammer_jam_radius": 0.35,
+    "jammer_jam_effect": 0.15,
+    "jammer_v_min": 0.005,
+    "radar_range": 0.2,
+    "radar_kill_probability": 1,
+    "border_thresh": 0.05,
+    "reward_config": {
+      "target_destroyed": 3,
+      "terminal_bonus": 1,
+      "timestep_penalty": -0.01,
+      "agent_destroyed": -3,
+      "team_spirit": 0.5,
+      "border_d_max": 0.05,
+      "border_w_lin": 0.05,
+      "border_w_exp": 0,
+      "border_d_knee": 0,
+      "border_alpha": 0,
+      "radar_avoid_w_lin": 0.05,
+      "radar_avoid_w_exp": 0,
+      "radar_avoid_d_max": 0.1,
+      "radar_avoid_d_knee": 0,
+      "radar_avoid_alpha": 0,
+      "striker_approach_w_lin": 0.1,
+      "striker_approach_w_exp": 0,
+      "striker_approach_d_max": 1,
+      "striker_approach_d_knee": 0,
+      "striker_approach_alpha": 0,
+      "striker_nearest_only": true,
+      "jammer_approach_w_lin": 0,
+      "jammer_approach_w_exp": 0,
+      "jammer_approach_d_max": 0,
+      "jammer_approach_d_knee": 0,
+      "jammer_approach_alpha": 0,
+      "jammer_nearest_only": false,
+      "striker_progress_scale": 0,
+      "jammer_progress_scale": 0,
+      "jammer_jam_bonus": 0,
+      "striker_formation_scale": 0,
+      "striker_formation_ref_dist": 0,
+      "jammer_formation_scale": 0.1,
+      "jammer_formation_ref_dist": 0.5,
+      "use_paper_mission_reward": false,
+      "mission_reward_weight": 0.02,
+      "striker_sep_d_max": 0.1,
+      "striker_sep_d_knee": 0.0,
+      "striker_sep_w_lin": 0.05,
+      "striker_sep_w_exp": 0.0,
+      "striker_sep_alpha": 0.0,
+      "jammer_sep_d_max": 0.1,
+      "jammer_sep_d_knee": 0.0,
+      "jammer_sep_w_lin": 0.05,
+      "jammer_sep_w_exp": 0.0,
+      "jammer_sep_alpha": 0.0,
+      "accel_effort_scale": 0.01,
+      "angular_effort_scale": 0.01
+    },
+    "_use_fofe": true
+  },
+  "ppo_cfg": {
+    "num_envs": 8,
+    "n_iters": 1,
+    "frames_per_batch": 160,
+    "num_epochs": 10,
+    "minibatch_size": 2048,
+    "gamma": 0.99,
+    "lmbda": 0.95,
+    "clip_eps": 0.2,
+    "entropy_coef": 0.01,
+    "normalize_rewards": true,
+    "actor_lr": 0.0003,
+    "critic_lr": 0.0003,
+    "max_grad_norm": 1.0,
+    "max_iter_time_s": 250.0,
+    "seed": 0,
+    "log_every": 5,
+    "device": "cuda"
+  },
+  "net_cfg": {
+    "actor_hidden": 256,
+    "critic_hidden": 256,
+    "depth": 3
+  },
+  "fofe_cfg": {
+    "use_fofe": true,
+    "agents_see_dims": [
+      96
+    ],
+    "targets_see_dims": [
+      96
+    ],
+    "radars_see_dims": [
+      96
+    ],
+    "fofe_mlp_dims": [
+      128,
+      64
+    ],
+    "self_mlp_dims": [
+      64,
+      64
+    ],
+    "fusion_mlp_dims": [
+      256,
+      256
+    ],
+    "critic_agents_see_dims": [
+      96
+    ],
+    "critic_targets_see_dims": [
+      96
+    ],
+    "critic_radars_see_dims": [
+      96
+    ],
+    "critic_fofe_mlp_dims": [
+      128,
+      64
+    ],
+    "critic_fusion_mlp_dims": [
+      256,
+      256
+    ]
+  },
+  "logs": {
+    "train_mean_episode_total_reward": [
+      -5.700504004955292
+    ],
+    "striker_loss_policy": [
+      -0.005180281971115619
+    ],
+    "striker_loss_value": [
+      3934.133203125
+    ],
+    "striker_entropy": [
+      3.8894643783569336
+    ],
+    "striker_approx_kl": [
+      -0.0012627326970687136
+    ],
+    "striker_clip_ratio": [
+      0.0
+    ],
+    "striker_explained_variance": [
+      -0.00011646747589111328
+    ],
+    "jammer_loss_policy": [
+      -0.0046754688001238165
+    ],
+    "jammer_loss_value": [
+      1414.4625122070313
+    ],
+    "jammer_entropy": [
+      3.889599561691284
+    ],
+    "jammer_approx_kl": [
+      0.0014653753623133537
+    ],
+    "jammer_clip_ratio": [
+      0.0
+    ],
+    "jammer_explained_variance": [
+      -0.00018417835235595703
+    ],
+    "loss_policy": [
+      -0.0049278753856197175
+    ],
+    "loss_value": [
+      2674.2978576660157
+    ],
+    "entropy": [
+      3.889531970024109
+    ],
+    "clip_ratio": [
+      0.0
+    ],
+    "explained_variance": [
+      -0.00015032291412353516
+    ],
+    "eval_mean_episode_total_reward": [
+      NaN
+    ],
+    "eval_survival_rate": [
+      NaN
+    ],
+    "eval_mean_duration": [
+      NaN
+    ],
+    "eval_task_completion_rate": [
+      NaN
+    ],
+    "reward_norm_running_mean": [
+      -0.07125625759363174
+    ],
+    "reward_norm_running_std": [
+      0.016000820323824883
+    ],
+    "raw_reward_mean": [
+      -0.07125630229711533
+    ],
+    "raw_reward_std": [
+      0.026917550712823868
+    ],
+    "normalized_reward_mean": [
+      -6.513658046722412
+    ],
+    "normalized_reward_std": [
+      2.982228994369507
+    ],
+    "iter_time_s": [
+      0.6550104999914765
+    ],
+    "iter_time_excl_eval_s": [
+      0.6550104999914765
+    ],
+    "eval_time_s": [
+      0.0
+    ],
+    "train_component_target_destroyed": [
+      0.0
+    ],
+    "eval_component_target_destroyed": [
+      NaN
+    ],
+    "train_component_terminal_bonus": [
+      0.0
+    ],
+    "eval_component_terminal_bonus": [
+      NaN
+    ],
+    "train_component_border_penalty": [
+      0.0
+    ],
+    "eval_component_border_penalty": [
+      NaN
+    ],
+    "train_component_timestep_penalty": [
+      -0.8000000715255737
+    ],
+    "eval_component_timestep_penalty": [
+      NaN
+    ],
+    "train_component_radar_avoidance": [
+      0.0
+    ],
+    "eval_component_radar_avoidance": [
+      NaN
+    ],
+    "train_component_striker_approach": [
+      -1.9822205007076263
+    ],
+    "eval_component_striker_approach": [
+      NaN
+    ],
+    "train_component_jammer_approach": [
+      0.0
+    ],
+    "eval_component_jammer_approach": [
+      NaN
+    ],
+    "train_component_striker_progress": [
+      0.0
+    ],
+    "eval_component_striker_progress": [
+      NaN
+    ],
+    "train_component_jammer_progress": [
+      0.0
+    ],
+    "eval_component_jammer_progress": [
+      NaN
+    ],
+    "train_component_jammer_jam_bonus": [
+      0.0
+    ],
+    "eval_component_jammer_jam_bonus": [
+      NaN
+    ],
+    "train_component_formation": [
+      -0.43617094308137894
+    ],
+    "eval_component_formation": [
+      NaN
+    ],
+    "train_component_agent_destroyed": [
+      0.0
+    ],
+    "eval_component_agent_destroyed": [
+      NaN
+    ],
+    "train_component_paper_mission": [
+      0.0
+    ],
+    "eval_component_paper_mission": [
+      NaN
+    ],
+    "train_component_separation_penalty": [
+      -1.872237578034401
+    ],
+    "eval_component_separation_penalty": [
+      NaN
+    ],
+    "train_component_control_effort": [
+      -0.6098749861121178
+    ],
+    "eval_component_control_effort": [
+      NaN
+    ],
+    "fofe_striker_actor_agents_mean": [
+      0.4464561939239502
+    ],
+    "fofe_striker_actor_targets_mean": [
+      0.4584806561470032
+    ],
+    "fofe_striker_actor_radars_mean": [
+      0.3019302189350128
+    ],
+    "fofe_striker_actor_agents_std": [
+      0.0429946668446064
+    ],
+    "fofe_striker_actor_targets_std": [
+      0.024290023371577263
+    ],
+    "fofe_striker_actor_radars_std": [
+      0.010003415867686272
+    ],
+    "fofe_striker_critic_agents_mean": [
+      0.3653726577758789
+    ],
+    "fofe_striker_critic_targets_mean": [
+      0.40095624327659607
+    ],
+    "fofe_striker_critic_radars_mean": [
+      0.5520874857902527
+    ],
+    "fofe_striker_critic_agents_std": [
+      0.006643671076744795
+    ],
+    "fofe_striker_critic_targets_std": [
+      0.010991078801453114
+    ],
+    "fofe_striker_critic_radars_std": [
+      0.018773458898067474
+    ],
+    "fofe_striker_collapse_agents": [
+      0.0
+    ],
+    "fofe_striker_collapse_targets": [
+      0.0
+    ],
+    "fofe_striker_collapse_radars": [
+      0.0
+    ],
+    "fofe_striker_dominance_agents": [
+      0.36992987990379333
+    ],
+    "fofe_striker_dominance_targets": [
+      0.3798932433128357
+    ],
+    "fofe_striker_dominance_radars": [
+      0.2501768469810486
+    ],
+    "fofe_striker_visible_agents_mean": [
+      3.0
+    ],
+    "fofe_striker_visible_targets_mean": [
+      2.0
+    ],
+    "fofe_striker_visible_radars_mean": [
+      2.0
+    ],
+    "fofe_striker_all_masked_agents": [
+      0.0
+    ],
+    "fofe_striker_all_masked_targets": [
+      0.0
+    ],
+    "fofe_striker_all_masked_radars": [
+      0.0
+    ],
+    "fofe_striker_actor_see_grad_norm": [
+      0.0007135632135570988
+    ],
+    "fofe_striker_critic_see_grad_norm": [
+      0.011810797242235088
+    ],
+    "fofe_jammer_actor_agents_mean": [
+      0.4440353810787201
+    ],
+    "fofe_jammer_actor_targets_mean": [
+      0.4379863440990448
+    ],
+    "fofe_jammer_actor_radars_mean": [
+      0.3579610288143158
+    ],
+    "fofe_jammer_actor_agents_std": [
+      0.018880313262343407
+    ],
+    "fofe_jammer_actor_targets_std": [
+      0.005589116830378771
+    ],
+    "fofe_jammer_actor_radars_std": [
+      0.009918319061398506
+    ],
+    "fofe_jammer_critic_agents_mean": [
+      0.42360731959342957
+    ],
+    "fofe_jammer_critic_targets_mean": [
+      0.4736713469028473
+    ],
+    "fofe_jammer_critic_radars_mean": [
+      0.564037024974823
+    ],
+    "fofe_jammer_critic_agents_std": [
+      0.015503283590078354
+    ],
+    "fofe_jammer_critic_targets_std": [
+      0.0178708303719759
+    ],
+    "fofe_jammer_critic_radars_std": [
+      0.007091596722602844
+    ],
+    "fofe_jammer_collapse_agents": [
+      0.0
+    ],
+    "fofe_jammer_collapse_targets": [
+      0.0
+    ],
+    "fofe_jammer_collapse_radars": [
+      0.0
+    ],
+    "fofe_jammer_dominance_agents": [
+      0.35809803009033203
+    ],
+    "fofe_jammer_dominance_targets": [
+      0.3532197177410126
+    ],
+    "fofe_jammer_dominance_radars": [
+      0.2886822819709778
+    ],
+    "fofe_jammer_visible_agents_mean": [
+      3.0
+    ],
+    "fofe_jammer_visible_targets_mean": [
+      2.0
+    ],
+    "fofe_jammer_visible_radars_mean": [
+      2.0
+    ],
+    "fofe_jammer_all_masked_agents": [
+      0.0
+    ],
+    "fofe_jammer_all_masked_targets": [
+      0.0
+    ],
+    "fofe_jammer_all_masked_radars": [
+      0.0
+    ],
+    "fofe_jammer_actor_see_grad_norm": [
+      0.0005458009410193407
+    ],
+    "fofe_jammer_critic_see_grad_norm": [
+      0.013187620028643033
+    ]
+  }
+}

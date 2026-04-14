@@ -16,6 +16,7 @@ import copy
 import gc
 import json
 import sys
+from dataclasses import asdict, is_dataclass
 from pathlib import Path
 
 if __package__ in (None, ""):
@@ -161,6 +162,8 @@ def _save_policy(path, policy) -> None:
 
 
 def _to_jsonable(obj):
+    if is_dataclass(obj):
+        return _to_jsonable(asdict(obj))
     if isinstance(obj, dict):
         return {str(k): _to_jsonable(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
@@ -169,6 +172,12 @@ def _to_jsonable(obj):
         return str(obj)
     if isinstance(obj, torch.device):
         return str(obj)
+    if isinstance(obj, torch.dtype):
+        return str(obj)
+    if isinstance(obj, torch.Tensor):
+        if obj.numel() == 1:
+            return obj.item()
+        return obj.detach().cpu().tolist()
     return obj
 
 
