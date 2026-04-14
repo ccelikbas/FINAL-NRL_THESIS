@@ -182,7 +182,7 @@ class EnvConfig:
 class PPOConfig:
     """Shared PPO hyperparameters for both striker and jammer MAPPO."""
     num_envs: int = 512
-    n_iters: int = 20
+    n_iters: int = 300
     frames_per_batch: Optional[int] = None
     num_epochs: int = 10
     minibatch_size: int = 2048
@@ -199,7 +199,7 @@ class PPOConfig:
     max_iter_time_s: Optional[float] = 250.0   # safety timeout per iteration (None = disabled)
 
     seed: int = 0
-    log_every: int = 5
+    log_every: int = 20
     device: torch.device = field(default_factory=lambda: torch.device("cuda" if torch.cuda.is_available() else "cpu"))
 
     def __post_init__(self):
