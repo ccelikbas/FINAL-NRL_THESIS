@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import copy
 import gc
+import json
 import sys
 from pathlib import Path
 
@@ -86,6 +87,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--jammer_jam_bonus", type=float, default=reward_defaults.jammer_jam_bonus)
     # Save / display
     p.add_argument("--save_dir", type=str, default="runs")
+    p.add_argument("--logs_dir", type=str, default="logs")
     p.add_argument("--no_plot", action="store_true")
     p.add_argument("--no_animate", action="store_true")
     p.add_argument("--n_rollouts", type=int, default=5,
@@ -153,6 +155,38 @@ def _save_checkpoint(path, policy, critic, cfg, logs, reward_normalizer):
     print(f"  Saved checkpoint to: {path}")
 
 
+def _save_policy(path, policy) -> None:
+    torch.save({"policy_state_dict": policy.state_dict()}, path)
+    print(f"  Saved policy to: {path}")
+
+
+def _to_jsonable(obj):
+    if isinstance(obj, dict):
+        return {str(k): _to_jsonable(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_to_jsonable(v) for v in obj]
+    if isinstance(obj, Path):
+        return str(obj)
+    if isinstance(obj, torch.device):
+        return str(obj)
+    return obj
+
+
+def _save_run_logs(path: Path, run_name: str, cfg: ExperimentConfig, logs: dict) -> None:
+    payload = {
+        "run_name": run_name,
+        "env_cfg": _to_jsonable(vars(cfg.env)),
+        "ppo_cfg": _to_jsonable(vars(cfg.ppo)),
+        "net_cfg": _to_jsonable(vars(cfg.net)),
+        "fofe_cfg": _to_jsonable(vars(cfg.fofe)),
+        "logs": _to_jsonable(logs),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+    print(f"  Saved logs to: {path}")
+
+
 def _print_final_metrics(label, logs):
     if not logs["eval_mean_episode_total_reward"]:
         return
@@ -168,7 +202,9 @@ def main() -> None:
     args = build_parser().parse_args()
     env_cfg, ppo_cfg, net_cfg = _build_configs(args)
     save_dir = Path(args.save_dir)
+    logs_dir = Path(args.logs_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
+    logs_dir.mkdir(parents=True, exist_ok=True)
 
     # ==================================================================
     # Phase 1: Train MAPPO (Legacy) — use_fofe=False
@@ -196,6 +232,8 @@ def main() -> None:
     _save_checkpoint(save_dir / "comparison_legacy.pt",
                      legacy_policy, legacy_critic, legacy_cfg,
                      legacy_logs, legacy_rn)
+    _save_policy(save_dir / "comparison_legacy_policy.pt", legacy_policy)
+    _save_run_logs(logs_dir / "comparison_legacy_logs.json", "mappo_legacy", legacy_cfg, legacy_logs)
     _print_final_metrics("MAPPO (Legacy)", legacy_logs)
 
     # ── Free Phase 1 GPU resources before Phase 2 ────────────────────
@@ -236,6 +274,8 @@ def main() -> None:
     _save_checkpoint(save_dir / "comparison_fofe.pt",
                      fofe_policy, fofe_critic, fofe_cfg,
                      fofe_logs, fofe_rn)
+    _save_policy(save_dir / "comparison_fofe_policy.pt", fofe_policy)
+    _save_run_logs(logs_dir / "comparison_fofe_logs.json", "fofe_mappo", fofe_cfg, fofe_logs)
     _print_final_metrics("FOFE-MAPPO", fofe_logs)
 
     # ==================================================================
