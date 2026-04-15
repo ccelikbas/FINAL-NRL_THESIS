@@ -55,6 +55,10 @@ if __package__ in (None, ""):
     __package__ = _CHECKPOINT_PKG_ALIAS
 
 import torch
+try:
+    import matplotlib.pyplot as plt
+except Exception:  # pragma: no cover - optional plotting dependency
+    plt = None
 
 from .config import EnvConfig, ExperimentConfig, FOFEConfig, NetworkConfig, PPOConfig
 from .models import make_combined_critic, make_combined_policy
@@ -125,7 +129,7 @@ EVAL_CONFIGS: List[Dict[str, Any]] = [
     },
 ]
 
-N_EVAL_EPISODES = 200   # episodes per eval config (runs fully in parallel)
+N_EVAL_EPISODES = 100   # episodes per eval config (runs fully in parallel)
 
 # ======================================================================
 
@@ -259,10 +263,12 @@ def _run_eval(
     net_cfg: NetworkConfig,
     fofe_cfg: FOFEConfig,
     n_eval_episodes: int,
+    title: str = "Post-training evaluation",
+    print_table: bool = True,
 ) -> List[Dict[str, Any]]:
     """Evaluate the frozen policy on each fixed eval config, return result rows."""
     print(f"\n{'─' * 60}")
-    print(f"  Post-training evaluation  ({n_eval_episodes} episodes per config)")
+    print(f"  {title}  ({n_eval_episodes} episodes per config)")
     print(f"{'─' * 60}")
 
     results: List[Dict[str, Any]] = []
@@ -328,8 +334,59 @@ def _run_eval(
             f"time={results[-1]['mean_duration']:.1f}"
         )
 
-    _print_eval_table(results, n_eval_episodes)
+    if print_table:
+        _print_eval_table(results, n_eval_episodes)
     return results
+
+
+def _mean_metric(rows: List[Dict[str, Any]], key: str) -> float:
+    if not rows:
+        return float("nan")
+    vals = [float(r.get(key, float("nan"))) for r in rows]
+    finite = [v for v in vals if v == v]
+    if not finite:
+        return float("nan")
+    return float(sum(finite) / len(finite))
+
+
+def _plot_eval_history_per_config(
+    history: Dict[str, Dict[str, List[float]]],
+    n_eval_episodes: int,
+    log_every: int,
+) -> None:
+    """Plot completion and survival lines over training iteration, per config label."""
+    if plt is None:
+        print("Per-config eval plot skipped: matplotlib is not available.")
+        return
+    if not history:
+        print("Per-config eval plot skipped: no eval history collected.")
+        return
+
+    fig, axes = plt.subplots(2, 1, figsize=(13, 9), sharex=True)
+
+    ax_c = axes[0]
+    for label, series in history.items():
+        if series["iters"]:
+            ax_c.plot(series["iters"], series["completion"], marker="o", label=label)
+    ax_c.set_title(f"Per-Config Completion Rate (eval every {log_every} iters, n={n_eval_episodes})")
+    ax_c.set_ylabel("Completion rate")
+    ax_c.set_ylim(0.0, 1.0)
+    ax_c.grid(True, alpha=0.3)
+    ax_c.legend(fontsize=8, ncol=2)
+
+    ax_s = axes[1]
+    for label, series in history.items():
+        if series["iters"]:
+            ax_s.plot(series["iters"], series["survival"], marker="o", label=label)
+    ax_s.set_title(f"Per-Config Survival Rate (eval every {log_every} iters, n={n_eval_episodes})")
+    ax_s.set_xlabel("Training iteration")
+    ax_s.set_ylabel("Survival rate")
+    ax_s.set_ylim(0.0, 1.0)
+    ax_s.grid(True, alpha=0.3)
+    ax_s.legend(fontsize=8, ncol=2)
+
+    fig.tight_layout()
+    plt.show()
 
 
 def _print_eval_table(rows: List[Dict[str, Any]], n_eval_episodes: int) -> None:
@@ -395,7 +452,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Enable warm-up phase before random training (default: disabled)")
     p.add_argument("--warmup_iters",    type=int, default=WARMUP_ITERS,
                    help=f"Fixed warm-up iterations on {WARMUP_CONFIG} (default: {WARMUP_ITERS})")
-    p.add_argument("--n_random_iters",  type=int, default=500,
+    p.add_argument("--n_random_iters",  type=int, default=10,
                    help="Number of random-config iterations after warm-up (default: 500)")
 
     # ── Randomisation bounds ──────────────────────────────────────────
@@ -555,6 +612,10 @@ def main() -> None:
 
     all_logs: Dict[str, List[float]] = {}
     sampled_configs: List[Tuple[int, int, int, int]] = []
+    eval_history_per_config: Dict[str, Dict[str, List[float]]] = {
+        cfg["label"]: {"iters": [], "completion": [], "survival": []}
+        for cfg in EVAL_CONFIGS
+    }
     last_env_cfg  = None
     last_policy   = None
     last_critic   = None
@@ -586,7 +647,7 @@ def main() -> None:
             entropy_coef=ppo_template.entropy_coef,
             normalize_rewards=ppo_template.normalize_rewards,
             seed=ppo_template.seed + global_it,
-            log_every=ppo_template.log_every,
+            log_every=0,
         )
         iter_ppo_cfg.iteration_offset = global_it
         iter_ppo_cfg.profile_iters = 0
@@ -603,8 +664,10 @@ def main() -> None:
                 net_cfg, fofe_cfg,
             )
 
+        do_eval_this_iter = args.log_every > 0 and ((global_it + 1) % args.log_every == 0)
+
         # Keep iteration headers aligned with the evaluation cadence only.
-        if args.log_every > 0 and ((global_it + 1) % args.log_every == 0):
+        if do_eval_this_iter:
             print(
                 f"\n[{global_it + 1:4d}/{total_iters}] {phase_label} | "
                 f"S={ns} J={nj} T={nt} R={nr}"
@@ -627,6 +690,36 @@ def main() -> None:
                 reward_normalizer.state_dict() if reward_normalizer is not None else None
             ),
         }
+
+        # Multi-config periodic evaluation during training
+        if do_eval_this_iter and incoming_checkpoint is not None:
+            eval_rows = _run_eval(
+                checkpoint=incoming_checkpoint,
+                eval_configs=EVAL_CONFIGS,
+                base_env_cfg=base_env_cfg,
+                reward_cfg=reward_cfg,
+                ppo_template=ppo_template,
+                net_cfg=net_cfg,
+                fofe_cfg=fofe_cfg,
+                n_eval_episodes=args.n_eval_episodes,
+                title=f"Training evaluation @ iter {global_it + 1}",
+                print_table=False,
+            )
+
+            for row in eval_rows:
+                lbl = row["label"]
+                if lbl not in eval_history_per_config:
+                    eval_history_per_config[lbl] = {"iters": [], "completion": [], "survival": []}
+                eval_history_per_config[lbl]["iters"].append(global_it + 1)
+                eval_history_per_config[lbl]["completion"].append(float(row["completion_rate"]))
+                eval_history_per_config[lbl]["survival"].append(float(row["survival_rate"]))
+
+            # Keep aggregate eval logs as mean across prescribed eval configs
+            all_logs["eval_task_completion_rate"][-1] = _mean_metric(eval_rows, "completion_rate")
+            all_logs["eval_survival_rate"][-1] = _mean_metric(eval_rows, "survival_rate")
+            all_logs["eval_mean_duration"][-1] = _mean_metric(eval_rows, "mean_duration")
+            all_logs["eval_mean_episode_total_reward"][-1] = _mean_metric(eval_rows, "mean_reward")
+
         last_env_cfg = iter_exp_cfg.env
         last_policy  = policy
         last_critic  = critic
@@ -664,6 +757,7 @@ def main() -> None:
             ),
             "sampled_configs":  sampled_configs,
             "eval_results":     eval_results,
+            "eval_history_per_config": eval_history_per_config,
             "bounds":           bounds,
         },
         save_path,
@@ -676,6 +770,14 @@ def main() -> None:
             plot_training(all_logs)
         except Exception as exc:
             print(f"plot_training warning (continuing): {type(exc).__name__}: {exc}")
+        try:
+            _plot_eval_history_per_config(
+                eval_history_per_config,
+                n_eval_episodes=args.n_eval_episodes,
+                log_every=args.log_every,
+            )
+        except Exception as exc:
+            print(f"per-config eval plot warning (continuing): {type(exc).__name__}: {exc}")
 
     # ── Rollout animations ────────────────────────────────────────────
     if not args.no_animate and last_policy is not None and last_env_cfg is not None:
