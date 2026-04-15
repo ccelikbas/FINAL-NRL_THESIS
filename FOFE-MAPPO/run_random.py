@@ -37,18 +37,22 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+_THIS_DIR = Path(__file__).resolve().parent
+_CHECKPOINT_PKG_ALIAS = "fofe_mappo"
+DEFAULT_RANDOM_START_CHECKPOINT = (
+    r"C:\Users\celikbas\Documents\REPO GIT NLR\runs\saved_runs\3x3_FOFE_14_04.pt"
+)
+
 if __package__ in (None, ""):
     import types
-    _this_dir = Path(__file__).resolve().parent
-    sys.path.insert(0, str(_this_dir.parent))
-    _pkg_name = "fofe_mappo"
-    if _pkg_name not in sys.modules:
-        _pkg = types.ModuleType(_pkg_name)
-        _pkg.__path__ = [str(_this_dir)]
-        _pkg.__package__ = _pkg_name
-        _pkg.__file__ = str(_this_dir / "__init__.py")
-        sys.modules[_pkg_name] = _pkg
-    __package__ = _pkg_name
+    sys.path.insert(0, str(_THIS_DIR.parent))
+    if _CHECKPOINT_PKG_ALIAS not in sys.modules:
+        _pkg = types.ModuleType(_CHECKPOINT_PKG_ALIAS)
+        _pkg.__path__ = [str(_THIS_DIR)]
+        _pkg.__package__ = _CHECKPOINT_PKG_ALIAS
+        _pkg.__file__ = str(_THIS_DIR / "__init__.py")
+        sys.modules[_CHECKPOINT_PKG_ALIAS] = _pkg
+    __package__ = _CHECKPOINT_PKG_ALIAS
 
 import torch
 
@@ -227,6 +231,25 @@ def _merge_logs(dst: Dict[str, List[float]], src: Dict[str, List[float]]) -> Non
         dst[key].extend(values)
 
 
+def _ensure_checkpoint_import_aliases() -> None:
+    """Expose module aliases expected by checkpoints saved as fofe_mappo.*."""
+    import types
+
+    if _CHECKPOINT_PKG_ALIAS not in sys.modules:
+        alias_pkg = types.ModuleType(_CHECKPOINT_PKG_ALIAS)
+        alias_pkg.__path__ = [str(_THIS_DIR)]
+        alias_pkg.__package__ = _CHECKPOINT_PKG_ALIAS
+        alias_pkg.__file__ = str(_THIS_DIR / "__init__.py")
+        sys.modules[_CHECKPOINT_PKG_ALIAS] = alias_pkg
+
+    config_module = sys.modules.get(EnvConfig.__module__)
+    rewards_module = sys.modules.get(RewardConfig.__module__)
+    if config_module is not None:
+        sys.modules.setdefault(f"{_CHECKPOINT_PKG_ALIAS}.config", config_module)
+    if rewards_module is not None:
+        sys.modules.setdefault(f"{_CHECKPOINT_PKG_ALIAS}.rewards", rewards_module)
+
+
 def _run_eval(
     checkpoint: Dict[str, Any],
     eval_configs: List[Dict[str, Any]],
@@ -368,6 +391,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     # ── Randomisation schedule ────────────────────────────────────────
+    p.add_argument("--use_warmup", action=argparse.BooleanOptionalAction, default=False,
+                   help="Enable warm-up phase before random training (default: disabled)")
     p.add_argument("--warmup_iters",    type=int, default=WARMUP_ITERS,
                    help=f"Fixed warm-up iterations on {WARMUP_CONFIG} (default: {WARMUP_ITERS})")
     p.add_argument("--n_random_iters",  type=int, default=500,
@@ -421,7 +446,8 @@ def build_parser() -> argparse.ArgumentParser:
     # ── Save / load ───────────────────────────────────────────────────
     p.add_argument("--save_dir",        type=str, default="runs")
     p.add_argument("--save_name",       type=str, default="fofe_mappo_random.pt")
-    p.add_argument("--load_checkpoint", type=str, default=None)
+    p.add_argument("--load_checkpoint", type=str, default=DEFAULT_RANDOM_START_CHECKPOINT,
+                   help="Start random training from this checkpoint (default: saved 3x3 FOFE policy)")
     p.add_argument("--no_plot",    action="store_true")
     p.add_argument("--no_animate", action="store_true")
 
@@ -496,14 +522,19 @@ def main() -> None:
         log_every=args.log_every,
     )
 
+    effective_warmup_iters = args.warmup_iters if args.use_warmup else 0
     rng = random.Random(args.seed)
-    total_iters = args.warmup_iters + args.n_random_iters
+    total_iters = effective_warmup_iters + args.n_random_iters
 
     # ── Print plan ────────────────────────────────────────────────────
     print("=" * 70)
     print("  Domain-Randomised MAPPO Training")
     print("=" * 70)
-    print(f"  Warm-up  : {args.warmup_iters} iters on {WARMUP_CONFIG}")
+    warmup_desc = (
+        f"{effective_warmup_iters} iters on {WARMUP_CONFIG}"
+        if args.use_warmup else "disabled"
+    )
+    print(f"  Warm-up  : {warmup_desc}")
     print(f"  Random   : {args.n_random_iters} iters, config sampled each iteration")
     print(f"  Bounds   : S{bounds['n_strikers']}  J{bounds['n_jammers']}  "
           f"T{bounds['n_targets']}  R{bounds['n_radars']}")
@@ -515,8 +546,12 @@ def main() -> None:
     # ── Load initial checkpoint (optional) ───────────────────────────
     incoming_checkpoint: Optional[Dict[str, Any]] = None
     if args.load_checkpoint:
-        incoming_checkpoint = torch.load(args.load_checkpoint, map_location=ppo_template.device)
-        print(f"  Loaded initial checkpoint from: {args.load_checkpoint}")
+        ckpt_path = Path(args.load_checkpoint)
+        if not ckpt_path.exists():
+            raise FileNotFoundError(f"load_checkpoint not found: {ckpt_path}")
+        _ensure_checkpoint_import_aliases()
+        incoming_checkpoint = torch.load(ckpt_path, map_location=ppo_template.device, weights_only=False)
+        print(f"  Loaded initial checkpoint from: {ckpt_path}")
 
     all_logs: Dict[str, List[float]] = {}
     sampled_configs: List[Tuple[int, int, int, int]] = []
@@ -527,14 +562,14 @@ def main() -> None:
 
     # ── Training loop ─────────────────────────────────────────────────
     for global_it in range(total_iters):
-        is_warmup = global_it < args.warmup_iters
+        is_warmup = global_it < effective_warmup_iters
 
         if is_warmup:
             ns, nj, nt, nr = WARMUP_CONFIG
-            phase_label = f"warmup {global_it + 1}/{args.warmup_iters}"
+            phase_label = f"warmup {global_it + 1}/{effective_warmup_iters}"
         else:
             ns, nj, nt, nr = _sample_config(rng, bounds)
-            rand_it = global_it - args.warmup_iters + 1
+            rand_it = global_it - effective_warmup_iters + 1
             phase_label = f"random {rand_it}/{args.n_random_iters}"
 
         sampled_configs.append((ns, nj, nt, nr))

@@ -11,8 +11,8 @@ architecture allows the same weight matrix to handle variable S/J/T/R counts.
 
 Usage
 -----
-    .\.venv\Scripts\python.exe -m FOFE-MAPPO.run_generalisation --checkpoint runs/fofe_mappo.pt
-    .\.venv\Scripts\python.exe -m FOFE-MAPPO.run_generalisation --checkpoint runs/fofe_mappo.pt --n_eval_episodes 100
+    .\\.venv\\Scripts\\python.exe -m FOFE-MAPPO.run_generalisation --checkpoint runs/fofe_mappo.pt
+    .\\.venv\\Scripts\\python.exe -m FOFE-MAPPO.run_generalisation --checkpoint runs/fofe_mappo.pt --n_eval_episodes 100
 
 If the virtual environment is already activated, you can use:
     python.exe -m FOFE-MAPPO.run_generalisation --checkpoint runs/fofe_mappo.pt
@@ -55,6 +55,10 @@ if __package__ in (None, ""):
     __package__ = _CHECKPOINT_PKG_ALIAS
 
 import torch
+try:
+    import matplotlib.pyplot as plt
+except Exception:  # pragma: no cover - optional plotting dependency
+    plt = None
 
 from .config import EnvConfig, ExperimentConfig, FOFEConfig, NetworkConfig, PPOConfig
 from .models import make_combined_policy
@@ -282,6 +286,36 @@ def _print_results_table(rows: List[Dict[str, Any]], n_eval_episodes: int) -> No
     print()
 
 
+def _plot_completion_and_survival(rows: List[Dict[str, Any]], n_eval_episodes: int) -> None:
+    """Plot completion and survival separately for each TEST_CONFIGS label."""
+    if plt is None:
+        print("Plotting skipped: matplotlib is not available in this environment.")
+        return
+
+    labels = [r["label"] for r in rows]
+    completion = [float(r["completion_rate"]) for r in rows]
+    survival = [float(r["survival_rate"]) for r in rows]
+
+    fig, axes = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
+
+    axes[0].bar(labels, completion, color="tab:blue", alpha=0.9)
+    axes[0].set_ylim(0.0, 1.0)
+    axes[0].set_ylabel("Rate")
+    axes[0].set_title(f"Completion Rate by Config (n={n_eval_episodes})")
+    axes[0].grid(axis="y", alpha=0.3)
+
+    axes[1].bar(labels, survival, color="tab:green", alpha=0.9)
+    axes[1].set_ylim(0.0, 1.0)
+    axes[1].set_ylabel("Rate")
+    axes[1].set_title(f"Survival Rate by Config (n={n_eval_episodes})")
+    axes[1].set_xlabel("Configuration Label")
+    axes[1].grid(axis="y", alpha=0.3)
+    plt.setp(axes[1].get_xticklabels(), rotation=20, ha="right")
+
+    fig.tight_layout()
+    plt.show()
+
+
 # ──────────────────────────────────────────────────────────────────────
 # Main evaluation function
 # ──────────────────────────────────────────────────────────────────────
@@ -293,6 +327,7 @@ def run_generalisation(
     device: Optional[torch.device] = None,
     seed: int = 42,
     include_baseline: bool = True,
+    plot_metrics: bool = True,
 ) -> List[Dict[str, Any]]:
     """
     Load a frozen policy and evaluate it across *test_configs*.
@@ -447,12 +482,14 @@ def run_generalisation(
         results.append(result)
 
         print(
-            f"  completion={result['completion_rate']:.3f}  "
-            f"survival={result['survival_rate']:.3f}  "
-            f"time={result['mean_duration']:.1f}"
+            f"\n    completion_rate={result['completion_rate']:.3f}"
+            f"\n    survival_rate={result['survival_rate']:.3f}"
+            f"\n    mean_duration={result['mean_duration']:.1f}"
         )
 
     _print_results_table(results, n_eval_episodes)
+    if plot_metrics:
+        _plot_completion_and_survival(results, n_eval_episodes)
     return results
 
 
@@ -490,6 +527,10 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="DEVICE",
         help="Torch device string, e.g. 'cpu' or 'cuda:0'. Default: auto-detect.",
     )
+    p.add_argument(
+        "--no_plot", action="store_true",
+        help="Disable completion/survival per-label plots.",
+    )
     return p
 
 
@@ -503,6 +544,7 @@ def main() -> None:
         device=device,
         seed=args.seed,
         include_baseline=not args.no_baseline,
+        plot_metrics=not args.no_plot,
     )
 
 
