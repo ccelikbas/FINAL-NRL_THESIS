@@ -98,11 +98,11 @@ class FOFEConfig:
 @dataclass
 class EnvConfig:
     # Team composition
-    n_strikers: int = 2
-    n_jammers: int = 2
-    n_known_targets: int = 2
+    n_strikers: int = 3
+    n_jammers: int = 3
+    n_known_targets: int = 3
     n_unknown_targets: int = 0
-    n_known_radars: int = 2
+    n_known_radars: int = 3
     n_unknown_radars: int = 0
     n_targets: int = 0
     n_radars: int = 0
