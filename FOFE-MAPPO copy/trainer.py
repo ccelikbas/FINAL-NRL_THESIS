@@ -1,0 +1,1065 @@
+"""
+Dual-MAPPO training loop with optional FOFE observation encoding.
+
+When use_fofe=True, the PPO update loop extracts structured per-channel
+observations (entity sets + masks) from the TensorDict and passes them
+through FOFE-based actor/critic networks instead of flat observation vectors.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import math
+import time
+from typing import Any, Dict, List, Optional, Tuple
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from tensordict import TensorDict
+from torchrl.envs import TransformedEnv
+from torchrl.envs.transforms import RewardSum
+from torchrl.envs.utils import check_env_specs
+
+from .config import EnvConfig, FOFEConfig, NetworkConfig, PPOConfig
+from .environment import StrikeEA2DEnv
+from .models import (
+    CombinedCritic,
+    CombinedPolicy,
+    FOFE_ACTOR_KEYS,
+    FOFE_CRITIC_KEYS,
+    make_combined_critic,
+    make_combined_policy,
+)
+from .normalization import RewardNormalizer
+from .utils import (
+    compute_explained_variance,
+    compute_gae_sequential,
+    make_collector,
+    ppo_clip_loss,
+    prepare_done_keys,
+    value_loss_fn,
+)
+
+
+EVAL_REWARD_COMPONENT_KEYS: Tuple[str, ...] = (
+    "target_destroyed",
+    "terminal_bonus",
+    "border_penalty",
+    "timestep_penalty",
+    "radar_avoidance",
+    "striker_approach",
+    "jammer_approach",
+    "striker_progress",
+    "jammer_progress",
+    "jammer_jam_bonus",
+    "formation",
+    "agent_destroyed",
+    "paper_mission",
+    "separation_penalty",
+    "control_effort",
+)
+
+
+def _finite_mean(values: List[float]) -> float:
+    finite_vals = [v for v in values if math.isfinite(v)]
+    if not finite_vals:
+        return float("nan")
+    return float(sum(finite_vals) / len(finite_vals))
+
+
+try:
+    from torchrl.envs.utils import ExplorationType, set_exploration_type
+    _EXPLORATION_API = "new"
+except Exception:
+    try:
+        from tensordict.nn import InteractionType, set_interaction_type
+        _EXPLORATION_API = "interaction"
+    except Exception:
+        _EXPLORATION_API = None
+
+
+def _deterministic_context():
+    if _EXPLORATION_API == "new":
+        return set_exploration_type(ExplorationType.DETERMINISTIC)
+    if _EXPLORATION_API == "interaction":
+        return set_interaction_type(InteractionType.DETERMINISTIC)
+    return contextlib.nullcontext()
+
+
+# ------------------------------------------------------------------
+# Environment builder
+# ------------------------------------------------------------------
+
+def build_env(env_cfg: EnvConfig, ppo_cfg: PPOConfig) -> StrikeEA2DEnv:
+    return StrikeEA2DEnv(
+        num_envs=ppo_cfg.num_envs,
+        max_steps=env_cfg.max_steps,
+        device=ppo_cfg.device,
+        seed=ppo_cfg.seed,
+        n_strikers=env_cfg.n_strikers,
+        n_jammers=env_cfg.n_jammers,
+        n_targets=env_cfg.n_targets,
+        n_radars=env_cfg.n_radars,
+        n_known_targets=env_cfg.n_known_targets,
+        n_unknown_targets=env_cfg.n_unknown_targets,
+        n_known_radars=env_cfg.n_known_radars,
+        n_unknown_radars=env_cfg.n_unknown_radars,
+        dt=env_cfg.dt,
+        world_bounds=env_cfg.world_bounds,
+        v_max=env_cfg.v_max,
+        accel_magnitude=env_cfg.accel_magnitude,
+        dpsi_max=env_cfg.dpsi_max,
+        h_accel_magnitude_fraction=env_cfg.h_accel_magnitude_fraction,
+        min_turn_radius=env_cfg.min_turn_radius,
+        R_obs=env_cfg.R_obs,
+        R_comm=env_cfg.R_comm,
+        striker_engage_range=env_cfg.striker_engage_range,
+        striker_engage_fov=env_cfg.striker_engage_fov,
+        striker_v_min=env_cfg.striker_v_min,
+        jammer_jam_radius=env_cfg.jammer_jam_radius,
+        jammer_jam_effect=env_cfg.jammer_jam_effect,
+        jammer_v_min=env_cfg.jammer_v_min,
+        radar_range=env_cfg.radar_range,
+        radar_kill_probability=env_cfg.radar_kill_probability,
+        border_thresh=env_cfg.border_thresh,
+        reward_config=env_cfg.reward_config,
+        target_spawn_angle_range=env_cfg.target_spawn_angle_range,
+        n_env_layouts=env_cfg.n_env_layouts,
+        use_fofe=env_cfg.use_fofe,
+    )
+
+
+def _safe_check(env) -> None:
+    try:
+        check_env_specs(env)
+        print("check_env_specs: OK")
+    except Exception as exc:
+        print(f"check_env_specs warning (continuing): {type(exc).__name__}: {exc}")
+
+
+# ------------------------------------------------------------------
+# FOFE observation helpers for training loop
+# ------------------------------------------------------------------
+
+def _extract_fofe_actor_obs(td: TensorDict) -> Dict[str, torch.Tensor]:
+    """Extract FOFE actor observation channels from a TensorDict."""
+    return {k: td.get(("agents", k)) for k in FOFE_ACTOR_KEYS}
+
+
+def _extract_fofe_critic_obs(td: TensorDict) -> Dict[str, torch.Tensor]:
+    """Extract FOFE critic state channels from a TensorDict (root-level keys)."""
+    return {k: td.get(k) for k in FOFE_CRITIC_KEYS}
+
+
+def _split_fofe_by_role(fofe_dict: Dict[str, torch.Tensor],
+                         ns: int, nj: int) -> Tuple[Dict, Dict]:
+    """Split FOFE actor obs along agent dim into striker/jammer dicts.
+
+    Actor FOFE obs have shape [*, A, ...] where dim for agent is at position
+    determined by the key:
+      obs_self:         [*, A, 6]          → split on dim -2
+      obs_agents_feat:  [*, A, E_a, 4]    → split on dim -3
+      obs_agents_mask:  [*, A, E_a]       → split on dim -2
+      obs_targets_feat: [*, A, E_t, 3]    → split on dim -3
+      obs_targets_mask: [*, A, E_t]       → split on dim -2
+      obs_radars_feat:  [*, A, E_r, 3]    → split on dim -3
+      obs_radars_mask:  [*, A, E_r]       → split on dim -2
+
+    We use Ellipsis slicing: v[..., :ns, ...] with the agent dim always
+    being the first "entity" dim after any temporal/batch dims.
+    The agent dim position in the tensor depends on whether there's a time dim.
+    We split using a helper that identifies the agent dim as the one with size A=ns+nj.
+    """
+    A = ns + nj
+    s_dict, j_dict = {}, {}
+    for k, v in fofe_dict.items():
+        # Find which dim has size A (the agent dim)
+        # For FOFE actor keys, agent dim is always at ndim-2 for 2D masks,
+        # ndim-2 for self (before feature dim), ndim-3 for feat tensors.
+        # Simplest: find the dim with size A
+        agent_dim = None
+        for d in range(v.ndim):
+            if v.shape[d] == A:
+                agent_dim = d
+                break
+        if agent_dim is None:
+            # No agent dim (shouldn't happen), just copy
+            s_dict[k] = v
+            j_dict[k] = v
+            continue
+        s_dict[k] = v.narrow(agent_dim, 0, ns)
+        j_dict[k] = v.narrow(agent_dim, ns, nj)
+    return s_dict, j_dict
+
+
+def _transpose_fofe_dict(d: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    """Transpose dim 0 and 1 for all tensors in a FOFE dict (B,T <-> T,B)."""
+    return {k: v.transpose(0, 1).contiguous() for k, v in d.items()}
+
+
+def _flatten_fofe_dict(d: Dict[str, torch.Tensor], n_role: int) -> Dict[str, torch.Tensor]:
+    """Flatten temporal+batch dims: [T,B,n_role,...] or [N,n_role,...] → [N,n_role,...]."""
+    out = {}
+    for k, v in d.items():
+        # Determine which dim is the role dim (size n_role)
+        # After transpose, shape is [T, B, n_role, ...] or [N, n_role, ...]
+        # We want to merge all leading dims except the last role+feature dims.
+        # For obs_self [T,B,n_role,6] → [-1, n_role, 6]
+        # For obs_agents_feat [T,B,n_role,E,4] → [-1, n_role, E, 4]
+        # For obs_agents_mask [T,B,n_role,E] → [-1, n_role, E]
+        # Pattern: keep last (ndim - first_role_dim) dims, flatten the rest.
+        # The role dim is the first dim with size n_role.
+        role_dim = None
+        for dd in range(v.ndim):
+            if v.shape[dd] == n_role:
+                role_dim = dd
+                break
+        if role_dim is None or role_dim == 0:
+            # Already flat or ambiguous, just reshape merging first dims
+            out[k] = v.reshape(-1, *v.shape[1:])
+        else:
+            trailing = v.shape[role_dim:]
+            out[k] = v.reshape(-1, *trailing)
+    return out
+
+
+def _index_fofe_dict(d: Dict[str, torch.Tensor], idx: torch.Tensor) -> Dict[str, torch.Tensor]:
+    """Index first dim of all tensors in a FOFE dict."""
+    return {k: v[idx] for k, v in d.items()}
+
+
+# ------------------------------------------------------------------
+# FOFE diagnostic KPI helpers
+# ------------------------------------------------------------------
+
+# Canonical list of FOFE log keys — initialised to [] in the logs dict,
+# appended to every iteration (NaN when use_fofe=False).
+_FOFE_CHANNELS = ("agents", "targets", "radars")
+_FOFE_ROLES = ("striker", "jammer")
+
+FOFE_LOG_KEYS: Tuple[str, ...] = tuple(
+    f"fofe_{role}_{metric}"
+    for role in _FOFE_ROLES
+    for metric in (
+        # per-channel output norm mean/std (actor)
+        *[f"actor_{ch}_mean" for ch in _FOFE_CHANNELS],
+        *[f"actor_{ch}_std" for ch in _FOFE_CHANNELS],
+        # per-channel output norm mean/std (critic)
+        *[f"critic_{ch}_mean" for ch in _FOFE_CHANNELS],
+        *[f"critic_{ch}_std" for ch in _FOFE_CHANNELS],
+        # collapse fraction (actor)
+        *[f"collapse_{ch}" for ch in _FOFE_CHANNELS],
+        # channel dominance (actor)
+        *[f"dominance_{ch}" for ch in _FOFE_CHANNELS],
+        # visible entity counts from masks (actor)
+        *[f"visible_{ch}_mean" for ch in _FOFE_CHANNELS],
+        # all-masked fraction (actor)
+        *[f"all_masked_{ch}" for ch in _FOFE_CHANNELS],
+        # SEE gradient norms
+        "actor_see_grad_norm",
+        "critic_see_grad_norm",
+    )
+)
+
+
+@torch.no_grad()
+def _channel_mean_std(x: torch.Tensor) -> Tuple[float, float]:
+    """Mean and std of L2 norms across samples.  x: [N, D]."""
+    norms = x.norm(dim=-1)
+    return float(norms.mean().item()), float(norms.std().item())
+
+
+@torch.no_grad()
+def _collapse_fraction(x: torch.Tensor, eps: float = 1e-6) -> float:
+    """Fraction of samples where channel output L2 norm < eps."""
+    return float((x.norm(dim=-1) < eps).float().mean().item())
+
+
+@torch.no_grad()
+def _channel_dominance(cache: Dict[str, torch.Tensor]) -> Tuple[float, float, float]:
+    """Normalised share of each channel's mean norm.  Returns (a, t, r) summing to ~1."""
+    na = cache["x_agents"].norm(dim=-1).mean()
+    nt = cache["x_targets"].norm(dim=-1).mean()
+    nr = cache["x_radars"].norm(dim=-1).mean()
+    total = na + nt + nr + 1e-12
+    return float(na / total), float(nt / total), float(nr / total)
+
+
+@torch.no_grad()
+def _visible_entity_stats(mask: torch.Tensor) -> Tuple[float, float]:
+    """mask: [N, n_role, E] bool.  Returns (mean_visible, all_masked_frac)."""
+    visible = mask.float().sum(dim=-1)          # [N, n_role]
+    mean_vis = float(visible.mean().item())
+    all_masked = float((~mask.any(dim=-1)).float().mean().item())
+    return mean_vis, all_masked
+
+
+def _see_grad_norm(fofe_net) -> float:
+    """Total L2 grad norm across all SEE layer params in all three FOFE blocks."""
+    total_sq = 0.0
+    for block_name in ("fofe_agents", "fofe_targets", "fofe_radars"):
+        block = getattr(fofe_net, block_name, None)
+        if block is None:
+            continue
+        for see in block.see_layers:
+            for p in see.parameters():
+                if p.grad is not None:
+                    total_sq += float(p.grad.data.norm(2).item() ** 2)
+    return math.sqrt(total_sq)
+
+
+def _collect_fofe_kpis(
+    actor_cache: Dict[str, torch.Tensor],
+    critic_cache: Dict[str, torch.Tensor],
+    mb_fofe: Dict[str, torch.Tensor],
+    actor_net,
+    critic_net,
+) -> Dict[str, float]:
+    """Collect all FOFE KPIs for one role from a single minibatch."""
+    d: Dict[str, float] = {}
+
+    # -- actor per-channel output stats --
+    for ch in _FOFE_CHANNELS:
+        key = f"x_{ch}"
+        m, s = _channel_mean_std(actor_cache[key])
+        d[f"actor_{ch}_mean"] = m
+        d[f"actor_{ch}_std"] = s
+        d[f"collapse_{ch}"] = _collapse_fraction(actor_cache[key])
+
+    # -- critic per-channel output stats --
+    for ch in _FOFE_CHANNELS:
+        key = f"x_{ch}"
+        m, s = _channel_mean_std(critic_cache[key])
+        d[f"critic_{ch}_mean"] = m
+        d[f"critic_{ch}_std"] = s
+
+    # -- channel dominance (actor) --
+    dom_a, dom_t, dom_r = _channel_dominance(actor_cache)
+    d["dominance_agents"] = dom_a
+    d["dominance_targets"] = dom_t
+    d["dominance_radars"] = dom_r
+
+    # -- visibility from masks --
+    for ch, mask_key in [("agents", "obs_agents_mask"),
+                         ("targets", "obs_targets_mask"),
+                         ("radars", "obs_radars_mask")]:
+        if mask_key in mb_fofe:
+            vis, am = _visible_entity_stats(mb_fofe[mask_key])
+            d[f"visible_{ch}_mean"] = vis
+            d[f"all_masked_{ch}"] = am
+        else:
+            d[f"visible_{ch}_mean"] = float("nan")
+            d[f"all_masked_{ch}"] = float("nan")
+
+    # -- SEE gradient norms (read after backward + clip, before step) --
+    d["actor_see_grad_norm"] = _see_grad_norm(actor_net)
+    d["critic_see_grad_norm"] = _see_grad_norm(critic_net)
+
+    return d
+
+
+# ------------------------------------------------------------------
+# Evaluation
+# ------------------------------------------------------------------
+
+@torch.no_grad()
+def evaluate_current_policy(
+    policy: CombinedPolicy,
+    env_cfg: EnvConfig,
+    ppo_cfg: PPOConfig,
+    n_eval_episodes: int = 100,
+) -> Dict[str, float]:
+    # Run all episodes in parallel: num_envs = n_eval_episodes so every env
+    # completes exactly one episode, each with a different random layout.
+    # This is ~n_eval_episodes× faster than the old single-env sequential loop.
+    n_eval_episodes = max(1, int(n_eval_episodes))
+    eval_env = StrikeEA2DEnv(
+        num_envs=n_eval_episodes,
+        max_steps=env_cfg.max_steps,
+        device=ppo_cfg.device,
+        seed=ppo_cfg.seed + 10_000,
+        n_strikers=env_cfg.n_strikers,
+        n_jammers=env_cfg.n_jammers,
+        n_targets=env_cfg.n_targets,
+        n_radars=env_cfg.n_radars,
+        n_known_targets=env_cfg.n_known_targets,
+        n_unknown_targets=env_cfg.n_unknown_targets,
+        n_known_radars=env_cfg.n_known_radars,
+        n_unknown_radars=env_cfg.n_unknown_radars,
+        dt=env_cfg.dt,
+        world_bounds=env_cfg.world_bounds,
+        v_max=env_cfg.v_max,
+        accel_magnitude=env_cfg.accel_magnitude,
+        dpsi_max=env_cfg.dpsi_max,
+        h_accel_magnitude_fraction=env_cfg.h_accel_magnitude_fraction,
+        min_turn_radius=env_cfg.min_turn_radius,
+        R_obs=env_cfg.R_obs,
+        R_comm=env_cfg.R_comm,
+        striker_engage_range=env_cfg.striker_engage_range,
+        striker_engage_fov=env_cfg.striker_engage_fov,
+        striker_v_min=env_cfg.striker_v_min,
+        jammer_jam_radius=env_cfg.jammer_jam_radius,
+        jammer_jam_effect=env_cfg.jammer_jam_effect,
+        jammer_v_min=env_cfg.jammer_v_min,
+        radar_range=env_cfg.radar_range,
+        radar_kill_probability=env_cfg.radar_kill_probability,
+        border_thresh=env_cfg.border_thresh,
+        reward_config=env_cfg.reward_config,
+        target_spawn_angle_range=env_cfg.target_spawn_angle_range,
+        n_env_layouts=env_cfg.n_env_layouts,
+        use_fofe=env_cfg.use_fofe,
+    )
+
+    was_training = policy.training
+    policy.eval()
+    policy.deterministic = True
+
+    ep_total_rewards: List[float] = []
+    ep_survival: List[float] = []
+    ep_duration: List[float] = []
+    ep_completion: List[float] = []
+    ep_component_rewards: Dict[str, List[float]] = {
+        key: [] for key in EVAL_REWARD_COMPONENT_KEYS
+    }
+
+    # Track which envs have already finished so we stop stepping them.
+    # done_mask[b] = True once env b has emitted a done signal.
+    done_mask = torch.zeros(n_eval_episodes, dtype=torch.bool, device=ppo_cfg.device)
+    # Accumulate per-component rewards per env across steps.
+    component_sums: Dict[str, torch.Tensor] = {
+        key: torch.zeros(n_eval_episodes, device=ppo_cfg.device)
+        for key in EVAL_REWARD_COMPONENT_KEYS
+    }
+
+    td = eval_env.reset()
+    stats_by_env: Dict[int, Any] = {}
+
+    for _ in range(env_cfg.max_steps):
+        td = policy(td)
+        td_next = eval_env.step(td)
+
+        # Accumulate component rewards for envs still running
+        for comp_key in EVAL_REWARD_COMPONENT_KEYS:
+            comp_tensor = eval_env.last_reward_components[comp_key]  # [B, A, 1] or [B]
+            per_env = comp_tensor.reshape(n_eval_episodes, -1).sum(dim=-1)
+            component_sums[comp_key] += per_env * (~done_mask).float()
+
+        # Determine which envs just fired done for the first time this step
+        step_done = td_next.get(("next", "done"))  # [B, 1] or [B]
+        step_done = step_done.reshape(n_eval_episodes).bool()
+        newly_done = step_done & ~done_mask
+        done_mask = done_mask | step_done
+
+        # Collect stats immediately for newly-done envs.
+        # The env pushes stats inside _step then zeroes reward accumulators.
+        # If we wait until the end, re-stepping done envs fires the stat again
+        # with reward=0 and an inflated step_count, overwriting the real values.
+        if newly_done.any():
+            for s in eval_env.pop_episode_stats():
+                env_idx = int(s.get("env_idx", -1))
+                if env_idx >= 0 and newly_done[env_idx] and env_idx not in stats_by_env:
+                    stats_by_env[env_idx] = s
+
+        if done_mask.all():
+            break
+        td = td_next.get("next")
+
+    for b in range(n_eval_episodes):
+        s = stats_by_env.get(b)
+        if s is not None:
+            ep_total_rewards.append(float(s.get("episode_total_reward", float("nan"))))
+            ep_survival.append(float(s.get("survival_frac", float("nan"))))
+            ep_duration.append(float(s.get("duration", float("nan"))))
+            ep_completion.append(1.0 if bool(s.get("mission_complete", False)) else 0.0)
+        else:
+            ep_total_rewards.append(float("nan"))
+            ep_survival.append(float("nan"))
+            ep_duration.append(float("nan"))
+            ep_completion.append(float("nan"))
+        for comp_key in EVAL_REWARD_COMPONENT_KEYS:
+            ep_component_rewards[comp_key].append(float(component_sums[comp_key][b].item()))
+
+    policy.deterministic = False
+    if was_training:
+        policy.train()
+
+    metrics = {
+        "eval_mean_episode_total_reward": float(sum(ep_total_rewards) / len(ep_total_rewards)),
+        "eval_survival_rate": float(sum(ep_survival) / len(ep_survival)),
+        "eval_mean_duration": float(sum(ep_duration) / len(ep_duration)),
+        "eval_task_completion_rate": float(sum(ep_completion) / len(ep_completion)),
+    }
+    for comp_key in EVAL_REWARD_COMPONENT_KEYS:
+        metrics[f"eval_component_{comp_key}"] = _finite_mean(ep_component_rewards[comp_key])
+    return metrics
+
+
+# ------------------------------------------------------------------
+# Rollout data reshaping helpers
+# ------------------------------------------------------------------
+
+def _infer_time_batch(td: TensorDict, num_envs: int) -> Tuple[int, int, bool]:
+    obs = td.get(("agents", "observation"))
+    if obs.ndim == 3:
+        return 1, obs.shape[0], False
+    if obs.shape[1] == num_envs:
+        return obs.shape[0], obs.shape[1], False
+    elif obs.shape[0] == num_envs:
+        return obs.shape[1], obs.shape[0], True
+    else:
+        raise ValueError(f"Cannot infer layout: obs shape={obs.shape}, num_envs={num_envs}")
+
+
+# ------------------------------------------------------------------
+# Main training function
+# ------------------------------------------------------------------
+
+def train_mappo(
+    env_cfg: EnvConfig,
+    ppo_cfg: PPOConfig,
+    net_cfg: NetworkConfig,
+    fofe_cfg: Optional[FOFEConfig] = None,
+    checkpoint: Optional[Dict[str, Any]] = None,
+) -> Tuple[StrikeEA2DEnv, CombinedPolicy, CombinedCritic, Dict[str, List[float]], Optional[RewardNormalizer]]:
+    device = ppo_cfg.device
+    ns = env_cfg.n_strikers
+    nj = env_cfg.n_jammers
+    use_fofe = fofe_cfg is not None and fofe_cfg.use_fofe
+
+    # ── Build environment ────────────────────────────────────────────
+    base_env = build_env(env_cfg, ppo_cfg)
+    env = TransformedEnv(
+        base_env,
+        RewardSum(in_keys=[base_env._reward_key], out_keys=[(base_env.group, "episode_reward")]),
+    )
+    _safe_check(env)
+
+    # ── Build networks (FOFE or legacy depending on fofe_cfg) ────────
+    policy = make_combined_policy(base_env, hidden=net_cfg.actor_hidden,
+                                  depth=net_cfg.depth, fofe_cfg=fofe_cfg)
+    critic = make_combined_critic(base_env, hidden=net_cfg.critic_hidden,
+                                  depth=net_cfg.depth, fofe_cfg=fofe_cfg)
+
+    # ── Reward normalizer ────────────────────────────────────────────
+    reward_normalizer: Optional[RewardNormalizer] = None
+    if bool(ppo_cfg.normalize_rewards):
+        reward_normalizer = RewardNormalizer(
+            num_envs=ppo_cfg.num_envs, gamma=ppo_cfg.gamma, device=device,
+        )
+
+    # ── Load checkpoint ──────────────────────────────────────────────
+    if checkpoint is not None:
+        try:
+            if "policy_state_dict" in checkpoint:
+                policy.load_state_dict(checkpoint["policy_state_dict"])
+            if "critic_state_dict" in checkpoint:
+                critic.load_state_dict(checkpoint["critic_state_dict"])
+            if reward_normalizer is not None and checkpoint.get("reward_normalizer_state_dict") is not None:
+                reward_normalizer.load_state_dict(checkpoint["reward_normalizer_state_dict"])
+        except Exception as exc:
+            print(f"checkpoint load warning (continuing): {type(exc).__name__}: {exc}")
+
+    # ── Collector ────────────────────────────────────────────────────
+    collector = make_collector(env, policy, ppo_cfg.frames_per_batch, ppo_cfg.n_iters, device)
+
+    # ── Per-role optimizers ──────────────────────────────────────────
+    striker_actor_optim = optim.Adam(policy.striker_policy.parameters(), lr=ppo_cfg.actor_lr)
+    striker_critic_optim = optim.Adam(critic.striker_critic.parameters(), lr=ppo_cfg.critic_lr)
+    jammer_actor_optim = optim.Adam(policy.jammer_policy.parameters(), lr=ppo_cfg.actor_lr)
+    jammer_critic_optim = optim.Adam(critic.jammer_critic.parameters(), lr=ppo_cfg.critic_lr)
+
+    # ── Logging dict ─────────────────────────────────────────────────
+    logs: Dict[str, List[float]] = {
+        "train_mean_episode_total_reward": [],
+        "striker_loss_policy": [], "striker_loss_value": [],
+        "striker_entropy": [], "striker_approx_kl": [],
+        "striker_clip_ratio": [], "striker_explained_variance": [],
+        "jammer_loss_policy": [], "jammer_loss_value": [],
+        "jammer_entropy": [], "jammer_approx_kl": [],
+        "jammer_clip_ratio": [], "jammer_explained_variance": [],
+        "loss_policy": [], "loss_value": [], "entropy": [],
+        "clip_ratio": [], "explained_variance": [],
+        "eval_mean_episode_total_reward": [], "eval_survival_rate": [],
+        "eval_mean_duration": [], "eval_task_completion_rate": [],
+        "reward_norm_running_mean": [], "reward_norm_running_std": [],
+        "raw_reward_mean": [], "raw_reward_std": [],
+        "normalized_reward_mean": [], "normalized_reward_std": [],
+        "iter_time_s": [],           # total wall time per iteration (incl. eval)
+        "iter_time_excl_eval_s": [], # training-only time per iteration (eval subtracted)
+        "eval_time_s": [],           # time spent inside evaluate_current_policy (0 on non-eval iters)
+    }
+    for comp_key in EVAL_REWARD_COMPONENT_KEYS:
+        logs[f"train_component_{comp_key}"] = []
+        logs[f"eval_component_{comp_key}"] = []
+    for fk in FOFE_LOG_KEYS:
+        logs[fk] = []
+
+    # ==================================================================
+    # MAIN TRAINING LOOP
+    # ==================================================================
+    _PROFILE_ITERS = int(getattr(ppo_cfg, "profile_iters", 3))
+    _ITER_OFFSET = int(getattr(ppo_cfg, "iteration_offset", 0))
+    _first_eval_profiled = False  # also print profile on the first eval iteration
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    _t_iter_start = time.perf_counter()   # true start of iter 0 = before collector first blocks
+
+    for it, td in enumerate(collector):
+        # Sync GPU so the clock is read after all pending ops have finished,
+        # then record when the batch was delivered by the collector.
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        _t_batch_ready = time.perf_counter()
+        _t_rollout_s = _t_batch_ready - _t_iter_start   # time collector spent on rollout
+        _timed_out = False
+        td = td.to(device)
+
+        # ── Reward normalization ─────────────────────────────────────
+        if reward_normalizer is not None:
+            norm_stats = reward_normalizer.normalize_rollout_td(
+                td, reward_key=("next",) + base_env._reward_key, done_key=("next", "done"),
+            )
+        else:
+            raw_r = td.get(("next",) + base_env._reward_key)
+            raw_mean = float(raw_r.mean().item()) if raw_r.numel() > 0 else float("nan")
+            raw_std = float(raw_r.std(unbiased=False).item()) if raw_r.numel() > 0 else float("nan")
+            norm_stats = {"running_mean": float("nan"), "running_std": float("nan"),
+                          "raw_reward_mean": raw_mean, "raw_reward_std": raw_std,
+                          "normalized_reward_mean": raw_mean, "normalized_reward_std": raw_std}
+
+        prepare_done_keys(td, base_env)
+
+        # ── Compute values for current and next states ───────────────
+        with torch.no_grad():
+            try:
+                critic(td)
+            except Exception as e:
+                print(f"WARNING critic(td) failed: {e}")
+            try:
+                nxt = td.get("next").to(device)
+                critic(nxt)
+                td.set("next", nxt)
+            except Exception as e:
+                print(f"WARNING critic(nxt) failed: {e}")
+
+        # ── Extract tensors ──────────────────────────────────────────
+        obs_all = td.get(("agents", "observation"))
+        actions_all = td.get(("agents", "action"))
+        old_log_probs_all = td.get(("agents", "sample_log_prob"))
+        rewards_all = td.get(("next", "agents", "reward"))
+        values_all = td.get(("agents", "state_value"))
+        next_values_all = td.get(("next", "agents", "state_value"))
+        dones = td.get(("next", "done"))
+
+        # ── Extract FOFE obs if enabled ──────────────────────────────
+        if use_fofe:
+            fofe_actor_obs = _extract_fofe_actor_obs(td)
+            fofe_critic_obs = _extract_fofe_critic_obs(td)
+
+        # ── Handle time dimension ────────────────────────────────────
+        has_time = obs_all.ndim >= 4
+        if has_time:
+            T, B, transposed = _infer_time_batch(td, ppo_cfg.num_envs)
+            if transposed:
+                obs_all = obs_all.transpose(0, 1)
+                actions_all = actions_all.transpose(0, 1)
+                old_log_probs_all = old_log_probs_all.transpose(0, 1)
+                rewards_all = rewards_all.transpose(0, 1)
+                values_all = values_all.transpose(0, 1)
+                next_values_all = next_values_all.transpose(0, 1)
+                dones = dones.transpose(0, 1)
+                if use_fofe:
+                    fofe_actor_obs = _transpose_fofe_dict(fofe_actor_obs)
+                    fofe_critic_obs = _transpose_fofe_dict(fofe_critic_obs)
+
+        # ── Split by role ────────────────────────────────────────────
+        s_obs = obs_all[..., :ns, :]
+        j_obs = obs_all[..., ns:, :]
+        s_act = actions_all[..., :ns, :]
+        j_act = actions_all[..., ns:, :]
+        s_old_lp = old_log_probs_all[..., :ns]
+        j_old_lp = old_log_probs_all[..., ns:]
+        s_rew = rewards_all[..., :ns, :]
+        j_rew = rewards_all[..., ns:, :]
+        s_val = values_all[..., :ns, :]
+        j_val = values_all[..., ns:, :]
+        s_nval = next_values_all[..., :ns, :]
+        j_nval = next_values_all[..., ns:, :]
+
+        if use_fofe:
+            s_fofe_actor, j_fofe_actor = _split_fofe_by_role(fofe_actor_obs, ns, nj)
+
+        # ── GAE ──────────────────────────────────────────────────────
+        with torch.no_grad():
+            if has_time:
+                s_adv, s_ret = compute_gae_sequential(s_rew, s_val, s_nval, dones, ppo_cfg.gamma, ppo_cfg.lmbda)
+                j_adv, j_ret = compute_gae_sequential(j_rew, j_val, j_nval, dones, ppo_cfg.gamma, ppo_cfg.lmbda)
+            else:
+                from .utils import compute_gae
+                s_adv, s_ret = compute_gae(s_rew, s_val, s_nval, dones, ppo_cfg.gamma, ppo_cfg.lmbda)
+                j_adv, j_ret = compute_gae(j_rew, j_val, j_nval, dones, ppo_cfg.gamma, ppo_cfg.lmbda)
+
+        # ── Flatten everything to [N, ...] ───────────────────────────
+        s_obs_f = s_obs.reshape(-1, ns, s_obs.shape[-1])
+        j_obs_f = j_obs.reshape(-1, nj, j_obs.shape[-1])
+        s_act_f = s_act.reshape(-1, ns, s_act.shape[-1])
+        j_act_f = j_act.reshape(-1, nj, j_act.shape[-1])
+        s_old_lp_f = s_old_lp.reshape(-1, ns)
+        j_old_lp_f = j_old_lp.reshape(-1, nj)
+        s_adv_f = s_adv.reshape(-1, ns, 1)
+        j_adv_f = j_adv.reshape(-1, nj, 1)
+        s_ret_f = s_ret.reshape(-1, ns, 1)
+        j_ret_f = j_ret.reshape(-1, nj, 1)
+        s_val_f = s_val.reshape(-1, ns, 1)
+        j_val_f = j_val.reshape(-1, nj, 1)
+
+        state_raw = td.get("state")
+        if has_time and transposed:
+            state_raw = state_raw.transpose(0, 1)
+        state_f = state_raw.reshape(-1, state_raw.shape[-1])
+
+        # ── Flatten FOFE observations ────────────────────────────────
+        if use_fofe:
+            s_fofe_f = _flatten_fofe_dict(s_fofe_actor, ns)
+            j_fofe_f = _flatten_fofe_dict(j_fofe_actor, nj)
+            crt_fofe_f = {k: v.reshape(-1, *v.shape[2:]) if v.ndim > 2 else v.reshape(-1, *v.shape[1:])
+                          for k, v in fofe_critic_obs.items()}
+
+        n_samples = s_obs_f.shape[0]
+
+        # ── PPO update for each role ─────────────────────────────────
+        _t_ppo_start = time.perf_counter()
+        s_pol_acc = s_val_acc = s_ent_acc = s_kl_acc = s_clip_acc = 0.0
+        j_pol_acc = j_val_acc = j_ent_acc = j_kl_acc = j_clip_acc = 0.0
+        n_updates = 0
+        # FOFE KPI snapshot (overwritten each minibatch; last MB is kept)
+        _fofe_kpi_s: Dict[str, float] = {}
+        _fofe_kpi_j: Dict[str, float] = {}
+
+        for _ in range(ppo_cfg.num_epochs):
+            if _timed_out:
+                break
+            perm = torch.randperm(n_samples, device=device)
+            for start in range(0, n_samples, ppo_cfg.minibatch_size):
+                idx = perm[start : start + ppo_cfg.minibatch_size]
+                if idx.numel() == 0:
+                    continue
+                if (ppo_cfg.max_iter_time_s is not None
+                        and (time.perf_counter() - _t_batch_ready) > ppo_cfg.max_iter_time_s):
+                    _timed_out = True
+                    print(
+                        f"  [TIMEOUT] Iter {it + 1}: {time.perf_counter() - _t_batch_ready:.1f}s in PPO updates "
+                        f"> {ppo_cfg.max_iter_time_s}s limit — skipping remaining minibatches "
+                        f"({n_updates} updates completed)."
+                    )
+                    break
+
+                # ── Striker PPO update ───────────────────────────────
+                mb_s_act = s_act_f[idx]
+                mb_s_old_lp = s_old_lp_f[idx]
+                mb_s_adv = s_adv_f[idx]
+                mb_s_ret = s_ret_f[idx]
+
+                if use_fofe:
+                    # FOFE path: pass structured obs dict
+                    mb_s_fofe = _index_fofe_dict(s_fofe_f, idx)
+                    s_new_lp, s_entropy = policy.striker_log_prob_entropy(mb_s_fofe, mb_s_act)
+                else:
+                    mb_s_obs = s_obs_f[idx]
+                    s_new_lp, s_entropy = policy.striker_log_prob_entropy(mb_s_obs, mb_s_act)
+
+                s_loss_info = ppo_clip_loss(
+                    s_new_lp, mb_s_old_lp, mb_s_adv, s_entropy,
+                    ppo_cfg.clip_eps, ppo_cfg.entropy_coef,
+                )
+
+                if use_fofe:
+                    # FOFE critic: pass entity sets
+                    mb_crt = _index_fofe_dict(crt_fofe_f, idx)
+                    s_pred_val = critic.striker_critic(
+                        mb_crt["crt_agents_feat"], mb_crt["crt_agents_mask"],
+                        mb_crt["crt_targets_feat"], mb_crt["crt_targets_mask"],
+                        mb_crt["crt_radars_feat"], mb_crt["crt_radars_mask"],
+                        mb_crt["crt_time_feat"],
+                    )
+                else:
+                    mb_state = state_f[idx]
+                    s_pred_val = critic.striker_critic(mb_state)
+
+                s_vloss = value_loss_fn(s_pred_val, mb_s_ret)
+
+                striker_actor_optim.zero_grad(set_to_none=True)
+                s_loss_info["loss_total"].backward()
+                nn.utils.clip_grad_norm_(policy.striker_policy.parameters(), ppo_cfg.max_grad_norm)
+
+                # -- FOFE KPI snapshot (striker): read grads before step --
+                if use_fofe:
+                    _fofe_kpi_s = _collect_fofe_kpis(
+                        policy.striker_policy._diag_cache,
+                        critic.striker_critic._diag_cache,
+                        mb_s_fofe, policy.striker_policy, critic.striker_critic,
+                    )
+
+                striker_actor_optim.step()
+
+                striker_critic_optim.zero_grad(set_to_none=True)
+                s_vloss.backward()
+                nn.utils.clip_grad_norm_(critic.striker_critic.parameters(), ppo_cfg.max_grad_norm)
+                striker_critic_optim.step()
+
+                s_pol_acc += float(s_loss_info["loss_policy"].item())
+                s_val_acc += float(s_vloss.item())
+                s_ent_acc += float(s_loss_info["entropy_mean"].item())
+                s_kl_acc += s_loss_info["approx_kl"]
+                s_clip_acc += s_loss_info["clip_fraction"]
+
+                # ── Jammer PPO update ────────────────────────────────
+                mb_j_act = j_act_f[idx]
+                mb_j_old_lp = j_old_lp_f[idx]
+                mb_j_adv = j_adv_f[idx]
+                mb_j_ret = j_ret_f[idx]
+
+                if use_fofe:
+                    mb_j_fofe = _index_fofe_dict(j_fofe_f, idx)
+                    j_new_lp, j_entropy = policy.jammer_log_prob_entropy(mb_j_fofe, mb_j_act)
+                else:
+                    mb_j_obs = j_obs_f[idx]
+                    j_new_lp, j_entropy = policy.jammer_log_prob_entropy(mb_j_obs, mb_j_act)
+
+                j_loss_info = ppo_clip_loss(
+                    j_new_lp, mb_j_old_lp, mb_j_adv, j_entropy,
+                    ppo_cfg.clip_eps, ppo_cfg.entropy_coef,
+                )
+
+                if use_fofe:
+                    # Reuse mb_crt from striker (same global state)
+                    j_pred_val = critic.jammer_critic(
+                        mb_crt["crt_agents_feat"], mb_crt["crt_agents_mask"],
+                        mb_crt["crt_targets_feat"], mb_crt["crt_targets_mask"],
+                        mb_crt["crt_radars_feat"], mb_crt["crt_radars_mask"],
+                        mb_crt["crt_time_feat"],
+                    )
+                else:
+                    j_pred_val = critic.jammer_critic(state_f[idx])
+
+                j_vloss = value_loss_fn(j_pred_val, mb_j_ret)
+
+                jammer_actor_optim.zero_grad(set_to_none=True)
+                j_loss_info["loss_total"].backward()
+                nn.utils.clip_grad_norm_(policy.jammer_policy.parameters(), ppo_cfg.max_grad_norm)
+
+                # -- FOFE KPI snapshot (jammer): read grads before step --
+                if use_fofe:
+                    _fofe_kpi_j = _collect_fofe_kpis(
+                        policy.jammer_policy._diag_cache,
+                        critic.jammer_critic._diag_cache,
+                        mb_j_fofe, policy.jammer_policy, critic.jammer_critic,
+                    )
+
+                jammer_actor_optim.step()
+
+                jammer_critic_optim.zero_grad(set_to_none=True)
+                j_vloss.backward()
+                nn.utils.clip_grad_norm_(critic.jammer_critic.parameters(), ppo_cfg.max_grad_norm)
+                jammer_critic_optim.step()
+
+                j_pol_acc += float(j_loss_info["loss_policy"].item())
+                j_val_acc += float(j_vloss.item())
+                j_ent_acc += float(j_loss_info["entropy_mean"].item())
+                j_kl_acc += j_loss_info["approx_kl"]
+                j_clip_acc += j_loss_info["clip_fraction"]
+
+                n_updates += 1
+
+        # ── Update collector policy weights ──────────────────────────
+        try:
+            collector.update_policy_weights_()
+        except Exception:
+            print("policy weight update failed (continuing)")
+
+        _t_post_start = time.perf_counter()
+
+        # ── Compute explained variance per role ──────────────────────
+        s_ev = compute_explained_variance(s_ret_f, s_val_f)
+        j_ev = compute_explained_variance(j_ret_f, j_val_f)
+
+        # ── Training episode stats ───────────────────────────────────
+        train_ep_stats = base_env.pop_episode_stats()
+        if train_ep_stats:
+            train_mean_episode_total_reward = (
+                sum(s["episode_total_reward"] for s in train_ep_stats) / len(train_ep_stats)
+            )
+        else:
+            train_mean_episode_total_reward = float("nan")
+
+        train_component_means = {comp_key: float("nan") for comp_key in EVAL_REWARD_COMPONENT_KEYS}
+        if train_ep_stats:
+            for comp_key in EVAL_REWARD_COMPONENT_KEYS:
+                comp_vals = [
+                    float(s.get("episode_component_reward", {}).get(comp_key, float("nan")))
+                    for s in train_ep_stats
+                ]
+                train_component_means[comp_key] = _finite_mean(comp_vals)
+
+        # ── Record logs ──────────────────────────────────────────────
+        div = max(1, n_updates)
+        logs["train_mean_episode_total_reward"].append(train_mean_episode_total_reward)
+        logs["striker_loss_policy"].append(s_pol_acc / div)
+        logs["striker_loss_value"].append(s_val_acc / div)
+        logs["striker_entropy"].append(s_ent_acc / div)
+        logs["striker_approx_kl"].append(s_kl_acc / div)
+        logs["striker_clip_ratio"].append(s_clip_acc / div)
+        logs["striker_explained_variance"].append(s_ev)
+        logs["jammer_loss_policy"].append(j_pol_acc / div)
+        logs["jammer_loss_value"].append(j_val_acc / div)
+        logs["jammer_entropy"].append(j_ent_acc / div)
+        logs["jammer_approx_kl"].append(j_kl_acc / div)
+        logs["jammer_clip_ratio"].append(j_clip_acc / div)
+        logs["jammer_explained_variance"].append(j_ev)
+        logs["loss_policy"].append((s_pol_acc + j_pol_acc) / (2.0 * div))
+        logs["loss_value"].append((s_val_acc + j_val_acc) / (2.0 * div))
+        logs["entropy"].append((s_ent_acc + j_ent_acc) / (2.0 * div))
+        logs["clip_ratio"].append((s_clip_acc + j_clip_acc) / (2.0 * div))
+        ev_avg = float("nan")
+        if math.isfinite(s_ev) and math.isfinite(j_ev):
+            ev_avg = (s_ev + j_ev) / 2.0
+        elif math.isfinite(s_ev):
+            ev_avg = s_ev
+        elif math.isfinite(j_ev):
+            ev_avg = j_ev
+        logs["explained_variance"].append(ev_avg)
+        logs["reward_norm_running_mean"].append(norm_stats["running_mean"])
+        logs["reward_norm_running_std"].append(norm_stats["running_std"])
+        logs["raw_reward_mean"].append(norm_stats["raw_reward_mean"])
+        logs["raw_reward_std"].append(norm_stats["raw_reward_std"])
+        logs["normalized_reward_mean"].append(norm_stats["normalized_reward_mean"])
+        logs["normalized_reward_std"].append(norm_stats["normalized_reward_std"])
+        for comp_key in EVAL_REWARD_COMPONENT_KEYS:
+            logs[f"train_component_{comp_key}"].append(train_component_means[comp_key])
+
+        # ── Record FOFE KPIs ──────────────────────────────────────────
+        if use_fofe and _fofe_kpi_s and _fofe_kpi_j:
+            for metric_key, val in _fofe_kpi_s.items():
+                logs[f"fofe_striker_{metric_key}"].append(val)
+            for metric_key, val in _fofe_kpi_j.items():
+                logs[f"fofe_jammer_{metric_key}"].append(val)
+        else:
+            for fk in FOFE_LOG_KEYS:
+                logs[fk].append(float("nan"))
+
+        # ── Evaluation ───────────────────────────────────────────────
+        global_iter_1based = _ITER_OFFSET + it + 1
+        do_eval = bool(ppo_cfg.log_every) and (global_iter_1based % ppo_cfg.log_every == 0)
+        if do_eval:
+            _t_eval_start = time.perf_counter()
+            eval_metrics = evaluate_current_policy(policy, env_cfg, ppo_cfg)
+            _t_eval_s = time.perf_counter() - _t_eval_start
+            logs["eval_mean_episode_total_reward"].append(eval_metrics["eval_mean_episode_total_reward"])
+            logs["eval_survival_rate"].append(eval_metrics["eval_survival_rate"])
+            logs["eval_mean_duration"].append(eval_metrics["eval_mean_duration"])
+            logs["eval_task_completion_rate"].append(eval_metrics["eval_task_completion_rate"])
+            for comp_key in EVAL_REWARD_COMPONENT_KEYS:
+                logs[f"eval_component_{comp_key}"].append(eval_metrics[f"eval_component_{comp_key}"])
+        else:
+            logs["eval_mean_episode_total_reward"].append(float("nan"))
+            logs["eval_survival_rate"].append(float("nan"))
+            logs["eval_mean_duration"].append(float("nan"))
+            logs["eval_task_completion_rate"].append(float("nan"))
+            for comp_key in EVAL_REWARD_COMPONENT_KEYS:
+                logs[f"eval_component_{comp_key}"].append(float("nan"))
+
+        # Sync GPU so all remaining async ops finish before we read the clock.
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        _t_iter_end = time.perf_counter()
+
+        # ── True wall-clock breakdown ─────────────────────────────────
+        # rollout : collector blocking (before this iteration's body ran)
+        # prep    : td.to(device) + norm + critic inference + GAE + reshape
+        # ppo     : all forward/backward passes across epochs/minibatches
+        # post    : EV + episode stats + logging  (NOT eval — eval tracked separately)
+        # eval    : evaluate_current_policy (0 s on non-eval iterations)
+        _t_prep_s     = _t_ppo_start  - _t_batch_ready
+        _t_ppo_s      = _t_post_start - _t_ppo_start
+        _t_eval_s_val = _t_eval_s if do_eval else 0.0
+        _t_post_s     = _t_iter_end   - _t_post_start - _t_eval_s_val
+        _iter_total_s = _t_iter_end   - _t_iter_start   # true wall time incl. rollout + eval
+        logs["iter_time_s"].append(_iter_total_s)
+        logs["iter_time_excl_eval_s"].append(_iter_total_s - _t_eval_s_val)
+        logs["eval_time_s"].append(_t_eval_s_val)
+
+        # ── Profile print ─────────────────────────────────────────────
+        # Print for the first _PROFILE_ITERS iterations AND for the first
+        # eval iteration (so both non-eval and eval timings appear in the log).
+        _do_profile = ((_ITER_OFFSET + it) < _PROFILE_ITERS) or (do_eval and not _first_eval_profiled)
+        if _do_profile:
+            if do_eval:
+                _first_eval_profiled = True
+            print(
+                f"  [PROFILE iter {global_iter_1based}] "
+                f"total={_iter_total_s:.2f}s | "
+                f"rollout={_t_rollout_s:.2f}s | "
+                f"prep(norm+critic+GAE+reshape)={_t_prep_s:.2f}s | "
+                f"ppo_updates={_t_ppo_s:.2f}s | "
+                f"post(EV+stats+log)={_t_post_s:.2f}s"
+                + (f" | eval={_t_eval_s_val:.2f}s" if do_eval else "")
+                + (" [TIMED OUT]" if _timed_out else "")
+            )
+
+        # ── Reset iteration start for next iteration ──────────────────
+        _t_iter_start = _t_iter_end
+
+        # ── Print ────────────────────────────────────────────────────
+        if do_eval:
+            norm_log = ""
+            if bool(ppo_cfg.normalize_rewards):
+                norm_log = (
+                    f" | raw_s {norm_stats['raw_reward_std']:.4f}"
+                    f" | norm_s {norm_stats['normalized_reward_std']:.4f}"
+                    f" | ret_std {norm_stats['running_std']:.4f}"
+                    f" | ret_m {norm_stats['running_mean']:.4f}"
+                )
+            print(
+                f"Iter {global_iter_1based:4d} | "
+                f"train_ret {logs['train_mean_episode_total_reward'][-1]: .3f} | "
+                f"eval_ret {logs['eval_mean_episode_total_reward'][-1]: .3f} | "
+                f"comp {logs['eval_task_completion_rate'][-1]:.2f} | "
+                f"surv {logs['eval_survival_rate'][-1]:.2f} | "
+                f"dur {logs['eval_mean_duration'][-1]:.1f} | "
+                f"S[pi {logs['striker_loss_policy'][-1]:.4f} "
+                f"V {logs['striker_loss_value'][-1]:.4f} "
+                f"H {logs['striker_entropy'][-1]:.4f} "
+                f"ev {logs['striker_explained_variance'][-1]:.4f}] | "
+                f"J[pi {logs['jammer_loss_policy'][-1]:.4f} "
+                f"V {logs['jammer_loss_value'][-1]:.4f} "
+                f"H {logs['jammer_entropy'][-1]:.4f} "
+                f"ev {logs['jammer_explained_variance'][-1]:.4f}]"
+                f"{norm_log}"
+            )
+            if use_fofe and _fofe_kpi_s and _fofe_kpi_j:
+                print(
+                    f"  FOFE["
+                    f"S a/t/r dom {_fofe_kpi_s.get('dominance_agents',0):.2f}/"
+                    f"{_fofe_kpi_s.get('dominance_targets',0):.2f}/"
+                    f"{_fofe_kpi_s.get('dominance_radars',0):.2f} "
+                    f"col_t {_fofe_kpi_s.get('collapse_targets',0):.3f} "
+                    f"vis_t {_fofe_kpi_s.get('visible_targets_mean',0):.1f} "
+                    f"grad {_fofe_kpi_s.get('actor_see_grad_norm',0):.4f} | "
+                    f"J a/t/r dom {_fofe_kpi_j.get('dominance_agents',0):.2f}/"
+                    f"{_fofe_kpi_j.get('dominance_targets',0):.2f}/"
+                    f"{_fofe_kpi_j.get('dominance_radars',0):.2f} "
+                    f"col_t {_fofe_kpi_j.get('collapse_targets',0):.3f} "
+                    f"vis_t {_fofe_kpi_j.get('visible_targets_mean',0):.1f} "
+                    f"grad {_fofe_kpi_j.get('actor_see_grad_norm',0):.4f}]"
+                )
+
+        if it + 1 >= ppo_cfg.n_iters:
+            break
+
+    try:
+        collector.shutdown()
+    except Exception:
+        pass
+
+    return base_env, policy, critic, logs, reward_normalizer
