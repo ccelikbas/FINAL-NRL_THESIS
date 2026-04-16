@@ -87,7 +87,8 @@ def _compute_radar_boundary_km(
     hf_cfg = env.hf_cfg
     theta_main_half = math.radians(hf_cfg.theta_main_deg / 2)
     theta_side_half = math.radians(hf_cfg.theta_side_deg / 2)
-    gt_over_gs = env._gt_over_gs
+    meters_per_world_unit = env._meters_per_world_unit
+    r_main_world = min(env._r_main_bt_m / meters_per_world_unit, R_unc)
 
     angles = np.linspace(0, 2 * np.pi, _N_ANGLE_POINTS, endpoint=False)
     r_eff = np.full(_N_ANGLE_POINTS, R_unc)
@@ -97,14 +98,14 @@ def _compute_radar_boundary_km(
         if not jammer_alive[j]:
             continue
         jx, jy = jammer_pos[j]
-        R_J = math.hypot(jx - radar_x, jy - radar_y)
-        if R_J < 1e-12:
-            R_J = 1e-12
+        R_J_world = math.hypot(jx - radar_x, jy - radar_y)
+        R_J_m = max(R_J_world * meters_per_world_unit, 1e-12)
         theta_j = math.atan2(jy - radar_y, jx - radar_x)
 
-        # BT ranges (stand-off formulas, clamped to R_unc)
-        R_main = min(math.sqrt(R_unc * R_J), R_unc)
-        R_side = min((R_unc * R_unc * gt_over_gs * R_J * R_J) ** 0.25, R_unc)
+        # BT ranges (direct JSR=1 formulas, clamped to R_unc)
+        R_main = r_main_world
+        R_side_m = (max(env._r_side_bt_coeff * R_J_m * R_J_m, 0.0)) ** 0.25
+        R_side = min(R_side_m / meters_per_world_unit, R_unc)
 
         # Angular delta for each discrete angle
         delta = np.abs(angles - theta_j) % (2 * np.pi)

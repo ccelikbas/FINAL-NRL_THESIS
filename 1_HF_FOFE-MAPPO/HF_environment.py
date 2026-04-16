@@ -78,7 +78,9 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         system_losses_db = _cfg_float("system_losses", None, 0.0)
         snr_min_db = _cfg_float("snr_min", None, 0.0)
         boltzmann_constant = _cfg_float("boltzmann_constant", None, 1.380649e-23)
-        radar_side_lobe_gain_db = _cfg_float("G_S", "G_S")
+        radar_side_lobe_gain_db = _cfg_float("radar_side_lobe_gain", "G_S")
+        jammer_tx_power = _cfg_float("jammer_tx_power", "P_J")
+        jammer_gain_db = _cfg_float("jammer_gain", "G_J")
         meters_per_world_unit = _cfg_float("meters_per_world_unit", None, 1_000_000.0)
         normalized_range_scale = _cfg_float("normalized_range_scale", None, 1.0)
         target_unc_world = getattr(hf_cfg, "target_unconstrained_range_world", None)
@@ -89,6 +91,7 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         system_losses = _db_to_linear(system_losses_db)
         snr_min = _db_to_linear(snr_min_db)
         radar_side_lobe_gain = _db_to_linear(radar_side_lobe_gain_db)
+        jammer_gain = _db_to_linear(jammer_gain_db)
 
         # Precompute angle half-widths in radians
         self._theta_main_half = radians(hf_cfg.theta_main_deg / 2)
@@ -127,6 +130,20 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         self.radar_range_unconstrained_m = self.radar_range_unconstrained_m_raw * self._range_world_scale
         self.radar_range_unconstrained = self.radar_range_unconstrained_m / self._meters_per_world_unit
 
+        # Precompute burn-through constants in meters (JSR = 1 model).
+        # Main-lobe: R_main = sqrt((P_t * G_t * sigma) / (4*pi*P_J*G_J))
+        main_num = radar_tx_power * radar_tx_gain * target_rcs
+        main_den = 4.0 * math.pi * jammer_tx_power * jammer_gain
+        self._r_main_bt_m = math.sqrt(max(main_num / max(main_den, 1e-30), 0.0))
+
+        # Side-lobe: R_side = ((sigma/(4*pi)) * ((P_t*G_t)/(P_J*G_J)) * ((G_t*R_J^2)/G_S))^(1/4)
+        # Collect R_J-independent multiplier C so R_side = (C * R_J^2)^(1/4).
+        self._r_side_bt_coeff = (
+            (target_rcs / (4.0 * math.pi))
+            * ((radar_tx_power * radar_tx_gain) / max(jammer_tx_power * jammer_gain, 1e-30))
+            * (radar_tx_gain / max(radar_side_lobe_gain, 1e-30))
+        )
+
         # Override radar_range so existing reward / obs code uses R_unconstrained
         self.radar_range = self.radar_range_unconstrained
 
@@ -141,8 +158,8 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
             (B, self.n_agents, R), self.radar_range, device=self.device
         )
 
-        # Precompute ratio used in R_side stand-off calculation
-        self._gt_over_gs = radar_tx_gain / radar_side_lobe_gain
+        # Kept for compatibility with HF visualization helper.
+        self._gt_over_gs = radar_tx_gain / max(radar_side_lobe_gain, 1e-30)
 
     # ------------------------------------------------------------------
     # HF radar model
@@ -151,10 +168,11 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
     def _compute_hf_radar_eff_range(self) -> None:
         """Compute per-(agent, radar) effective detection range.
 
-        Uses stand-off jammer burn-through (BT) sector cuts derived from JSR = 1:
+        Uses burn-through (BT) sector cuts derived directly from JSR = 1:
 
-            R_main = (R_unc^2  *  R_J^2)^{1/4}   = sqrt(R_unc * R_J)
-            R_side = (R_unc^2  * (G_t/G_S) * R_J^2)^{1/4}
+            R_main = sqrt((P_t * G_t * sigma) / (4*pi*P_J*G_J))
+            R_side = ((sigma/(4*pi)) * ((P_t*G_t)/(P_J*G_J))
+                      * ((G_t*R_J^2)/G_S))^(1/4)
 
         Here R_unc is first computed in physical meters from the radar SNR
         equation at SNR_min threshold, then converted to world units.
@@ -195,16 +213,14 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         jammer_alive = self.agent_alive[:, ns:]                            # [B, J]
 
         # ----- BT ranges per (jammer, radar): [B, J, R] -----
-        R_unc_sq_m = R_unc_m * R_unc_m
-        # R_main = sqrt(R_unc * R_J) = (R_unc^2 * R_J^2)^{1/4}
-        R_main_jr = torch.sqrt(
-            torch.clamp(R_unc_m * dist_jr_m, min=0.0)
-        )                                                                  # [B, J, R]
-        # R_side = (R_unc^2 * G_t/G_S * R_J^2)^{1/4}
+        # R_main is constant in this model (independent of R_J).
+        R_main_jr = torch.full_like(dist_jr_m, self._r_main_bt_m)
+
+        # R_side depends on jammer-radar distance R_J.
         R_side_jr = torch.pow(
-            torch.clamp(R_unc_sq_m * self._gt_over_gs * dist_jr_m * dist_jr_m, min=0.0),
+            torch.clamp(self._r_side_bt_coeff * dist_jr_m * dist_jr_m, min=0.0),
             0.25,
-        )                                                                  # [B, J, R]
+        )
 
         # Clamp to unconstrained (far-away jammers have no net effect)
         R_main_jr = torch.clamp(R_main_jr, max=R_unc_m)

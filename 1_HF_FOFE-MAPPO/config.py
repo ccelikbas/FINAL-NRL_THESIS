@@ -235,9 +235,10 @@ class HFRadarConfig:
             ((4*pi)^3 * k * T0 * B_n * L * SNR_min)
         )^(1/4)
 
-    Sector cuts from jamming remain stand-off BT style:
-        R_main = sqrt(R_unc * R_J)
-        R_side = (R_unc^2 * (G_t_lin / G_S_lin) * R_J^2)^(1/4)
+    Jammed-sector burn-through ranges (from JSR = 1):
+        R_main = sqrt((P_t * G_t_lin * sigma) / (4*pi*P_J*G_J_lin))
+        R_side = ((sigma/(4*pi)) * ((P_t*G_t_lin)/(P_J*G_J_lin))
+                  * ((G_t_lin*R_J^2)/G_S_lin))^(1/4)
 
     Decibel interface:
         Enter gains/loss/SNR threshold in dB everywhere in this config.
@@ -274,11 +275,14 @@ class HFRadarConfig:
     target_unconstrained_range_world: Optional[float] = None  # if set, overrides normalized_range_scale
 
     # Radar angular/lobe model parameter
-    G_S: float = 10              # Radar side-lobe gain [dB] (equiv. to old linear 5.0)
+    radar_side_lobe_gain: Optional[float] = None   # G_S [dB], preferred name
+    G_S: float = 10                                 # legacy alias [dB]
 
     # Jammer RF parameters
-    P_J: float = 1e40      # Jammer transmit power (W)
-    G_J: float = 60.0         # Jammer antenna gain [dB] (equiv. to old linear 100.0)
+    jammer_tx_power: Optional[float] = None        # P_J [W], preferred name
+    jammer_gain: Optional[float] = None            # G_J [dB], preferred name
+    P_J: float = 1e40                              # legacy alias [W]
+    G_J: float = 60.0                              # legacy alias [dB]
 
     # Angular lobe boundaries (degrees, converted to radians internally)
     theta_main_deg: float = 3.0    # full main-lobe width (±1.5° each side)
@@ -287,6 +291,18 @@ class HFRadarConfig:
     def __post_init__(self):
         if self.radar_rx_gain is None:
             self.radar_rx_gain = float(self.radar_tx_gain)
+        if self.radar_side_lobe_gain is None:
+            self.radar_side_lobe_gain = float(self.G_S)
+        if self.jammer_tx_power is None:
+            self.jammer_tx_power = float(self.P_J)
+        if self.jammer_gain is None:
+            self.jammer_gain = float(self.G_J)
+
+        # Keep legacy aliases in sync for backward compatibility.
+        self.G_S = float(self.radar_side_lobe_gain)
+        self.P_J = float(self.jammer_tx_power)
+        self.G_J = float(self.jammer_gain)
+
         if self.receiver_bandwidth <= 0:
             raise ValueError("receiver_bandwidth must be > 0")
         if self.system_temperature <= 0:
@@ -299,10 +315,12 @@ class HFRadarConfig:
             raise ValueError("system_losses must be finite (dB)")
         if not math.isfinite(self.snr_min):
             raise ValueError("snr_min must be finite (dB)")
-        if not math.isfinite(self.G_S):
-            raise ValueError("G_S must be finite (dB)")
-        if not math.isfinite(self.G_J):
-            raise ValueError("G_J must be finite (dB)")
+        if not math.isfinite(self.radar_side_lobe_gain):
+            raise ValueError("radar_side_lobe_gain must be finite (dB)")
+        if not math.isfinite(self.jammer_gain):
+            raise ValueError("jammer_gain must be finite (dB)")
+        if self.jammer_tx_power <= 0:
+            raise ValueError("jammer_tx_power must be > 0")
         if self.meters_per_world_unit <= 0:
             raise ValueError("meters_per_world_unit must be > 0")
         if self.normalized_range_scale <= 0:
@@ -343,11 +361,11 @@ class HFRadarConfig:
 
     @property
     def G_S_linear(self) -> float:
-        return self.db_to_linear(self.G_S)
+        return self.db_to_linear(self.radar_side_lobe_gain)
 
     @property
     def G_J_linear(self) -> float:
-        return self.db_to_linear(self.G_J)
+        return self.db_to_linear(self.jammer_gain)
 
 
 @dataclass
