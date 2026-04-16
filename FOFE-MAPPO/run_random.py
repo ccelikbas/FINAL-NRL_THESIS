@@ -452,8 +452,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Enable warm-up phase before random training (default: disabled)")
     p.add_argument("--warmup_iters",    type=int, default=WARMUP_ITERS,
                    help=f"Fixed warm-up iterations on {WARMUP_CONFIG} (default: {WARMUP_ITERS})")
-    p.add_argument("--n_random_iters",  type=int, default=10,
-                   help="Number of random-config iterations after warm-up (default: 500)")
+    p.add_argument("--n_random_iters",  type=int, default=100,
+                   help="Number of random-config iterations after warm-up (default: 100)")
 
     # ── Randomisation bounds ──────────────────────────────────────────
     p.add_argument("--min_strikers", type=int, default=BOUNDS["n_strikers"][0])
