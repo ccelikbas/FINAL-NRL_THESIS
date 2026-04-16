@@ -137,7 +137,7 @@ class EnvConfig:
 
     # Threats
     radar_range: float = 0.20
-    radar_kill_probability: float = 1
+    radar_kill_probability: float = 0
 
     # Rewards
     border_thresh: float = 0.05
@@ -182,7 +182,7 @@ class EnvConfig:
 class PPOConfig:
     """Shared PPO hyperparameters for both striker and jammer MAPPO."""
     num_envs: int = 512
-    n_iters: int = 5
+    n_iters: int = 1
     frames_per_batch: Optional[int] = None
     num_epochs: int = 10
     minibatch_size: int = 2048
@@ -224,31 +224,99 @@ class NetworkConfig:
 class HFRadarConfig:
     """RF parameters for the high-fidelity angular radar/jammer model.
 
-    All values are global — the same for every radar and every jammer in
-    the scenario.  The model computes per-(agent, radar) effective detection
-    ranges based on the Jammer-to-Signal Ratio (JSR) in the main and side
-    lobes, using stand-off jammer geometry.
+    Unconstrained radar range is derived from the radar SNR equation with
+    SNR_min threshold:
 
-    Burn-through (BT) ranges are found by setting JSR = 1:
-        R_main = (P_t G_t sigma R_J^2 / (4 pi P_J G_J))^{1/4}
-        R_side = (P_t G_t^2 sigma R_J^2 / (4 pi P_J G_J G_S))^{1/4}
+        SNR = P_t * G_t * G_r * lambda^2 * sigma /
+              ((4*pi)^3 * R^4 * k * T0 * B_n * L)
 
-    The unconstrained (no-jammer) radar range is:
-        R_BT = sqrt(P_t G_t sigma / (4 pi P_J G_J))
+        R_unconstrained = (
+            P_t * G_t * G_r * lambda^2 * sigma /
+            ((4*pi)^3 * k * T0 * B_n * L * SNR_min)
+        )^(1/4)
+
+    Sector cuts from jamming remain stand-off BT style:
+        R_main = sqrt(R_unc * R_J)
+        R_side = (R_unc^2 * (G_t / G_S) * R_J^2)^(1/4)
+
+    Unit handling:
+        The SNR equation is evaluated in SI units (meters). The result is then
+        converted to normalized world units using:
+
+            R_unc_world = R_unc_meters / meters_per_world_unit
+
+        For this map setup (1 world unit = 1000 km), set:
+            meters_per_world_unit = 1_000_000.0
+
+        Optional calibration can then be applied without changing RF params:
+            R_unc_world *= normalized_range_scale
+        or by setting target_unconstrained_range_world directly.
     """
-    # Radar RF parameters
-    P_t: float = 1e4        # Radar transmit power (W)
-    G_t: float = 30.0       # Radar main-lobe gain (linear, not dB) — also G_M
-    G_S: float = 5       # Radar side-lobe gain (linear)
-    sigma: float = 1.0      # Target RCS (m^2)
+    # Radar SNR parameters
+    radar_tx_power: float = 1                 # P_t [W]
+    radar_tx_gain: float = 30.0                 # G_t [linear]
+    radar_rx_gain: Optional[float] = None       # G_r [linear], defaults to G_t
+    wavelength: float = 0.03                    # lambda [m]
+    target_rcs: float = 1.0                     # sigma [m^2]
+    system_temperature: float = 290.0           # T0 [K]
+    receiver_bandwidth: float = 1e6             # B_n [Hz]
+    system_losses: float = 1.0                  # L [linear]
+    snr_min: float = 1.0                        # SNR_min [linear]
+    boltzmann_constant: float = 1.380649e-23    # k [J/K]
+
+    # World/map scaling
+    meters_per_world_unit: float = 1_000_000.0          # 1.0 map unit = 1000 km
+    normalized_range_scale: float = 1.0                 # extra multiplier after SI->world conversion
+    target_unconstrained_range_world: Optional[float] = None  # if set, overrides normalized_range_scale
+
+    # Radar angular/lobe model parameter
+    G_S: float = 5.0                            # Radar side-lobe gain (linear)
 
     # Jammer RF parameters
     P_J: float = 500.0      # Jammer transmit power (W)
-    G_J: float = 5.0        # Jammer antenna gain (linear)
+    G_J: float = 100.0        # Jammer antenna gain (linear)
 
     # Angular lobe boundaries (degrees, converted to radians internally)
     theta_main_deg: float = 3.0    # full main-lobe width (±1.5° each side)
     theta_side_deg: float = 9.0    # full side-lobe+main-lobe cone width (±4.5° each side)
+
+    def __post_init__(self):
+        if self.radar_rx_gain is None:
+            self.radar_rx_gain = float(self.radar_tx_gain)
+        if self.receiver_bandwidth <= 0:
+            raise ValueError("receiver_bandwidth must be > 0")
+        if self.system_temperature <= 0:
+            raise ValueError("system_temperature must be > 0")
+        if self.system_losses <= 0:
+            raise ValueError("system_losses must be > 0")
+        if self.snr_min <= 0:
+            raise ValueError("snr_min must be > 0")
+        if self.G_S <= 0:
+            raise ValueError("G_S must be > 0")
+        if self.meters_per_world_unit <= 0:
+            raise ValueError("meters_per_world_unit must be > 0")
+        if self.normalized_range_scale <= 0:
+            raise ValueError("normalized_range_scale must be > 0")
+        if (self.target_unconstrained_range_world is not None
+                and self.target_unconstrained_range_world <= 0):
+            raise ValueError("target_unconstrained_range_world must be > 0 when provided")
+
+    # Backward-compatible aliases used by older code paths.
+    @property
+    def P_t(self) -> float:
+        return float(self.radar_tx_power)
+
+    @property
+    def G_t(self) -> float:
+        return float(self.radar_tx_gain)
+
+    @property
+    def G_r(self) -> float:
+        return float(self.radar_rx_gain)
+
+    @property
+    def sigma(self) -> float:
+        return float(self.target_rcs)
 
 
 @dataclass

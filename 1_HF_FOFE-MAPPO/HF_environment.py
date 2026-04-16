@@ -45,15 +45,75 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
 
         self.hf_cfg = hf_cfg
 
+        def _cfg_float(
+            new_name: str,
+            legacy_name: Optional[str] = None,
+            default: Optional[float] = None,
+        ) -> float:
+            if hasattr(hf_cfg, new_name):
+                val = getattr(hf_cfg, new_name)
+                if val is not None:
+                    return float(val)
+            if legacy_name is not None and hasattr(hf_cfg, legacy_name):
+                return float(getattr(hf_cfg, legacy_name))
+            if default is not None:
+                return float(default)
+            raise AttributeError(
+                f"Missing HF radar config parameter: '{new_name}'"
+                + (f" (or legacy '{legacy_name}')" if legacy_name else "")
+            )
+
+        # Read radar equation parameters (supporting old config field names too).
+        radar_tx_power = _cfg_float("radar_tx_power", "P_t")
+        radar_tx_gain = _cfg_float("radar_tx_gain", "G_t")
+        radar_rx_gain = _cfg_float("radar_rx_gain", "G_r") if hasattr(hf_cfg, "radar_rx_gain") else radar_tx_gain
+        wavelength = _cfg_float("wavelength", None, 0.03)
+        target_rcs = _cfg_float("target_rcs", "sigma")
+        system_temperature = _cfg_float("system_temperature", None, 290.0)
+        receiver_bandwidth = _cfg_float("receiver_bandwidth", None, 1e6)
+        system_losses = _cfg_float("system_losses", None, 1.0)
+        snr_min = _cfg_float("snr_min", None, 1.0)
+        boltzmann_constant = _cfg_float("boltzmann_constant", None, 1.380649e-23)
+        radar_side_lobe_gain = _cfg_float("G_S", "G_S")
+        meters_per_world_unit = _cfg_float("meters_per_world_unit", None, 1_000_000.0)
+        normalized_range_scale = _cfg_float("normalized_range_scale", None, 1.0)
+        target_unc_world = getattr(hf_cfg, "target_unconstrained_range_world", None)
+
         # Precompute angle half-widths in radians
         self._theta_main_half = radians(hf_cfg.theta_main_deg / 2)
         self._theta_side_half = radians(hf_cfg.theta_side_deg / 2)
 
-        # Precompute unconstrained radar range  R_BT = sqrt(P_t G_t sigma / (4 pi P_J G_J))
-        self.radar_range_unconstrained = math.sqrt(
-            hf_cfg.P_t * hf_cfg.G_t * hf_cfg.sigma
-            / (4.0 * math.pi * hf_cfg.P_J * hf_cfg.G_J)
+        # Unconstrained range from radar SNR equation at SNR_min threshold (SI meters):
+        # R_unc_m = (P_t G_t G_r lambda^2 sigma / ((4pi)^3 k T0 B_n L SNR_min))^(1/4)
+        snr_num = (
+            radar_tx_power
+            * radar_tx_gain
+            * radar_rx_gain
+            * (wavelength * wavelength)
+            * target_rcs
         )
+        snr_den = (
+            (4.0 * math.pi) ** 3
+            * boltzmann_constant
+            * system_temperature
+            * receiver_bandwidth
+            * system_losses
+            * snr_min
+        )
+        self._meters_per_world_unit = meters_per_world_unit
+        self.radar_range_unconstrained_m_raw = math.pow(max(snr_num / max(snr_den, 1e-30), 0.0), 0.25)
+
+        # Convert physical SI range (meters) into normalized world units.
+        # Optional calibration supports matching a target world-space range
+        # without changing RF parameters.
+        world_unc_raw = self.radar_range_unconstrained_m_raw / self._meters_per_world_unit
+        if target_unc_world is not None:
+            self._range_world_scale = float(target_unc_world) / max(world_unc_raw, 1e-12)
+        else:
+            self._range_world_scale = normalized_range_scale
+
+        self.radar_range_unconstrained_m = self.radar_range_unconstrained_m_raw * self._range_world_scale
+        self.radar_range_unconstrained = self.radar_range_unconstrained_m / self._meters_per_world_unit
 
         # Override radar_range so existing reward / obs code uses R_unconstrained
         self.radar_range = self.radar_range_unconstrained
@@ -69,8 +129,8 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
             (B, self.n_agents, R), self.radar_range, device=self.device
         )
 
-        # Precompute ratio used in R_side calculation
-        self._gt_over_gs = hf_cfg.G_t / hf_cfg.G_S
+        # Precompute ratio used in R_side stand-off calculation
+        self._gt_over_gs = radar_tx_gain / radar_side_lobe_gain
 
     # ------------------------------------------------------------------
     # HF radar model
@@ -79,10 +139,13 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
     def _compute_hf_radar_eff_range(self) -> None:
         """Compute per-(agent, radar) effective detection range.
 
-        Uses stand-off jammer burn-through (BT) formulas derived from JSR = 1:
+        Uses stand-off jammer burn-through (BT) sector cuts derived from JSR = 1:
 
             R_main = (R_unc^2  *  R_J^2)^{1/4}   = sqrt(R_unc * R_J)
             R_side = (R_unc^2  * (G_t/G_S) * R_J^2)^{1/4}
+
+        Here R_unc is first computed in physical meters from the radar SNR
+        equation at SNR_min threshold, then converted to world units.
 
         For each (agent, radar) pair the effective range is determined by the
         angular offset between the agent's bearing and each jammer's bearing
@@ -99,16 +162,16 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         R  = self.n_radars
         J  = self.n_jammers
         ns = self.n_strikers
-        R_unc = self.radar_range_unconstrained
+        R_unc_m = self.radar_range_unconstrained_m
 
         # Fast path: no jammers → unconstrained everywhere
         if J == 0:
-            self.radar_eff_range_per_agent.fill_(R_unc)
-            self.radar_eff_range.fill_(R_unc)
+            self.radar_eff_range_per_agent.fill_(self.radar_range_unconstrained)
+            self.radar_eff_range.fill_(self.radar_range_unconstrained)
             return
 
         # ----- distances -----
-        dist_jr = self._c_dist_ar[:, ns:, :]  # [B, J, R]
+        dist_jr_m = self._c_dist_ar[:, ns:, :] * self._meters_per_world_unit  # [B, J, R]
 
         # ----- absolute bearing angles from radar to entity -----
         # _c_rel_ar = radar_pos - agent_pos  →  radar-to-agent = -_c_rel_ar
@@ -120,20 +183,20 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         jammer_alive = self.agent_alive[:, ns:]                            # [B, J]
 
         # ----- BT ranges per (jammer, radar): [B, J, R] -----
-        R_unc_sq = R_unc * R_unc
+        R_unc_sq_m = R_unc_m * R_unc_m
         # R_main = sqrt(R_unc * R_J) = (R_unc^2 * R_J^2)^{1/4}
         R_main_jr = torch.sqrt(
-            torch.clamp(R_unc * dist_jr, min=0.0)
+            torch.clamp(R_unc_m * dist_jr_m, min=0.0)
         )                                                                  # [B, J, R]
         # R_side = (R_unc^2 * G_t/G_S * R_J^2)^{1/4}
         R_side_jr = torch.pow(
-            torch.clamp(R_unc_sq * self._gt_over_gs * dist_jr * dist_jr, min=0.0),
+            torch.clamp(R_unc_sq_m * self._gt_over_gs * dist_jr_m * dist_jr_m, min=0.0),
             0.25,
         )                                                                  # [B, J, R]
 
         # Clamp to unconstrained (far-away jammers have no net effect)
-        R_main_jr = torch.clamp(R_main_jr, max=R_unc)
-        R_side_jr = torch.clamp(R_side_jr, max=R_unc)
+        R_main_jr = torch.clamp(R_main_jr, max=R_unc_m)
+        R_side_jr = torch.clamp(R_side_jr, max=R_unc_m)
 
         # ----- angular delta [B, J, A, R] -----
         # Broadcast: angle_ra [B, 1, A, R]  -  angle_rj [B, J, 1, R]
@@ -152,16 +215,19 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
             torch.where(
                 delta <= self._theta_side_half,
                 R_side_exp,
-                R_unc,  # scalar broadcasts
+                R_unc_m,  # scalar broadcasts
             ),
         )                                                                  # [B, J, A, R]
 
         # Dead jammers have no effect → set to R_unc
         alive_mask = jammer_alive[:, :, None, None]                        # [B, J, 1, 1]
-        R_eff_jar = torch.where(alive_mask, R_eff_jar, R_unc)
+        R_eff_jar = torch.where(alive_mask, R_eff_jar, R_unc_m)
 
-        # ----- min across jammers (deepest cut wins) → [B, A, R] -----
-        self.radar_eff_range_per_agent = R_eff_jar.min(dim=1).values
+        # ----- min across jammers (deepest cut wins) → [B, A, R] in meters -----
+        R_eff_ar_m = R_eff_jar.min(dim=1).values
+
+        # Convert back to normalized world units for env state/obs consumers.
+        self.radar_eff_range_per_agent = R_eff_ar_m / self._meters_per_world_unit
 
         # Aggregate for observations: min across agents → [B, R]
         self.radar_eff_range = self.radar_eff_range_per_agent.min(dim=1).values
