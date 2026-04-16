@@ -16,10 +16,11 @@ if __package__ in (None, ""):
     sys.modules[_pkg_name] = _pkg
     __package__ = _pkg_name
 
-from .config import EnvConfig, ExperimentConfig, FOFEConfig, NetworkConfig, PPOConfig
+from .config import EnvConfig, EnvExtensionsConfig, ExperimentConfig, FOFEConfig, NetworkConfig, PPOConfig
 from .trainer import train_mappo
 from .rewards import RewardConfig
 from .visualization import TestRunner, animate_rollout, plot_training
+from .HF_visualization import HFTestRunner, hf_animate_rollout
 
 import torch
 
@@ -76,6 +77,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--save_dir", type=str, default="runs")
     p.add_argument("--save_name", type=str, default="fofe_mappo.pt")
     p.add_argument("--load_checkpoint", type=str, default=None)
+    # HF radar model
+    p.add_argument(
+        "--use_hf_radar",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Enable high-fidelity angular radar model (replaces simple binary jam/kill)",
+    )
     p.add_argument("--no_plot", action="store_true")
     p.add_argument("--no_animate", action="store_true")
     return p
@@ -120,12 +128,19 @@ def main() -> None:
         depth=args.depth,
     )
     fofe_cfg = FOFEConfig(use_fofe=args.use_fofe)
-    cfg = ExperimentConfig(env=env_cfg, ppo=ppo_cfg, net=net_cfg, fofe=fofe_cfg).finalize()
+    ext_cfg = EnvExtensionsConfig(use_hf_radar=args.use_hf_radar)
+    cfg = ExperimentConfig(env=env_cfg, ppo=ppo_cfg, net=net_cfg, fofe=fofe_cfg, ext=ext_cfg).finalize()
 
     if cfg.fofe.use_fofe:
         print("FOFE observation encoding: ENABLED")
     else:
         print("FOFE observation encoding: DISABLED (legacy flat MLP)")
+
+    hf_radar_cfg = cfg.ext.hf_radar if cfg.ext.use_hf_radar else None
+    if cfg.ext.use_hf_radar:
+        print("HF angular radar model: ENABLED")
+    else:
+        print("HF angular radar model: DISABLED (simple binary jam/kill)")
 
     checkpoint = None
     if args.load_checkpoint:
@@ -136,6 +151,7 @@ def main() -> None:
         cfg.env, cfg.ppo, cfg.net,
         fofe_cfg=cfg.fofe,
         checkpoint=checkpoint,
+        hf_radar_cfg=hf_radar_cfg,
     )
 
     # ── Save checkpoint ──────────────────────────────────────────────
@@ -150,6 +166,7 @@ def main() -> None:
             "ppo_cfg": cfg.ppo,
             "net_cfg": cfg.net,
             "fofe_cfg": cfg.fofe,
+            "ext_cfg": cfg.ext,
             "logs": logs,
             "reward_normalizer_state_dict": (
                 reward_normalizer.state_dict() if reward_normalizer is not None else None
@@ -177,9 +194,17 @@ def main() -> None:
     if not args.no_animate:
         try:
             for _ in range(3):
-                tester = TestRunner(policy, env_cfg=cfg.env, device=cfg.ppo.device, seed=999)
-                frames = tester.rollout()
-                animate_rollout(frames, tester.env)
+                if cfg.ext.use_hf_radar:
+                    tester = HFTestRunner(
+                        policy, env_cfg=cfg.env, hf_cfg=cfg.ext.hf_radar,
+                        device=cfg.ppo.device, seed=999,
+                    )
+                    frames = tester.rollout()
+                    hf_animate_rollout(frames, tester.env)
+                else:
+                    tester = TestRunner(policy, env_cfg=cfg.env, device=cfg.ppo.device, seed=999)
+                    frames = tester.rollout()
+                    animate_rollout(frames, tester.env)
                 print(f"Visualized rollout with {len(frames)} frames")
         except Exception as exc:
             print(f"animate_rollout warning (continuing): {type(exc).__name__}: {exc}")

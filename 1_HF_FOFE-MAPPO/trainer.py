@@ -21,8 +21,9 @@ from torchrl.envs import TransformedEnv
 from torchrl.envs.transforms import RewardSum
 from torchrl.envs.utils import check_env_specs
 
-from .config import EnvConfig, FOFEConfig, NetworkConfig, PPOConfig
+from .config import EnvConfig, FOFEConfig, HFRadarConfig, NetworkConfig, PPOConfig
 from .environment import StrikeEA2DEnv
+from .HF_environment import HFStrikeEA2DEnv
 from .models import (
     CombinedCritic,
     CombinedPolicy,
@@ -91,8 +92,9 @@ def _deterministic_context():
 # Environment builder
 # ------------------------------------------------------------------
 
-def build_env(env_cfg: EnvConfig, ppo_cfg: PPOConfig) -> StrikeEA2DEnv:
-    return StrikeEA2DEnv(
+def _env_kwargs(env_cfg: EnvConfig, ppo_cfg: PPOConfig) -> dict:
+    """Common keyword arguments shared by StrikeEA2DEnv and HFStrikeEA2DEnv."""
+    return dict(
         num_envs=ppo_cfg.num_envs,
         max_steps=env_cfg.max_steps,
         device=ppo_cfg.device,
@@ -128,6 +130,17 @@ def build_env(env_cfg: EnvConfig, ppo_cfg: PPOConfig) -> StrikeEA2DEnv:
         n_env_layouts=env_cfg.n_env_layouts,
         use_fofe=env_cfg.use_fofe,
     )
+
+
+def build_env(
+    env_cfg: EnvConfig,
+    ppo_cfg: PPOConfig,
+    hf_radar_cfg: Optional[HFRadarConfig] = None,
+) -> StrikeEA2DEnv:
+    kwargs = _env_kwargs(env_cfg, ppo_cfg)
+    if hf_radar_cfg is not None:
+        return HFStrikeEA2DEnv(hf_cfg=hf_radar_cfg, **kwargs)
+    return StrikeEA2DEnv(**kwargs)
 
 
 def _safe_check(env) -> None:
@@ -369,47 +382,18 @@ def evaluate_current_policy(
     env_cfg: EnvConfig,
     ppo_cfg: PPOConfig,
     n_eval_episodes: int = 100,
+    hf_radar_cfg: Optional[HFRadarConfig] = None,
 ) -> Dict[str, float]:
     # Run all episodes in parallel: num_envs = n_eval_episodes so every env
     # completes exactly one episode, each with a different random layout.
     # This is ~n_eval_episodes× faster than the old single-env sequential loop.
     n_eval_episodes = max(1, int(n_eval_episodes))
-    eval_env = StrikeEA2DEnv(
+    eval_ppo = PPOConfig(
         num_envs=n_eval_episodes,
-        max_steps=env_cfg.max_steps,
         device=ppo_cfg.device,
         seed=ppo_cfg.seed + 10_000,
-        n_strikers=env_cfg.n_strikers,
-        n_jammers=env_cfg.n_jammers,
-        n_targets=env_cfg.n_targets,
-        n_radars=env_cfg.n_radars,
-        n_known_targets=env_cfg.n_known_targets,
-        n_unknown_targets=env_cfg.n_unknown_targets,
-        n_known_radars=env_cfg.n_known_radars,
-        n_unknown_radars=env_cfg.n_unknown_radars,
-        dt=env_cfg.dt,
-        world_bounds=env_cfg.world_bounds,
-        v_max=env_cfg.v_max,
-        accel_magnitude=env_cfg.accel_magnitude,
-        dpsi_max=env_cfg.dpsi_max,
-        h_accel_magnitude_fraction=env_cfg.h_accel_magnitude_fraction,
-        min_turn_radius=env_cfg.min_turn_radius,
-        R_obs=env_cfg.R_obs,
-        R_comm=env_cfg.R_comm,
-        striker_engage_range=env_cfg.striker_engage_range,
-        striker_engage_fov=env_cfg.striker_engage_fov,
-        striker_v_min=env_cfg.striker_v_min,
-        jammer_jam_radius=env_cfg.jammer_jam_radius,
-        jammer_jam_effect=env_cfg.jammer_jam_effect,
-        jammer_v_min=env_cfg.jammer_v_min,
-        radar_range=env_cfg.radar_range,
-        radar_kill_probability=env_cfg.radar_kill_probability,
-        border_thresh=env_cfg.border_thresh,
-        reward_config=env_cfg.reward_config,
-        target_spawn_angle_range=env_cfg.target_spawn_angle_range,
-        n_env_layouts=env_cfg.n_env_layouts,
-        use_fofe=env_cfg.use_fofe,
     )
+    eval_env = build_env(env_cfg, eval_ppo, hf_radar_cfg=hf_radar_cfg)
 
     was_training = policy.training
     policy.eval()
@@ -521,6 +505,7 @@ def train_mappo(
     net_cfg: NetworkConfig,
     fofe_cfg: Optional[FOFEConfig] = None,
     checkpoint: Optional[Dict[str, Any]] = None,
+    hf_radar_cfg: Optional[HFRadarConfig] = None,
 ) -> Tuple[StrikeEA2DEnv, CombinedPolicy, CombinedCritic, Dict[str, List[float]], Optional[RewardNormalizer]]:
     device = ppo_cfg.device
     ns = env_cfg.n_strikers
@@ -528,7 +513,7 @@ def train_mappo(
     use_fofe = fofe_cfg is not None and fofe_cfg.use_fofe
 
     # ── Build environment ────────────────────────────────────────────
-    base_env = build_env(env_cfg, ppo_cfg)
+    base_env = build_env(env_cfg, ppo_cfg, hf_radar_cfg=hf_radar_cfg)
     env = TransformedEnv(
         base_env,
         RewardSum(in_keys=[base_env._reward_key], out_keys=[(base_env.group, "episode_reward")]),
@@ -953,7 +938,7 @@ def train_mappo(
         do_eval = bool(ppo_cfg.log_every) and (global_iter_1based % ppo_cfg.log_every == 0)
         if do_eval:
             _t_eval_start = time.perf_counter()
-            eval_metrics = evaluate_current_policy(policy, env_cfg, ppo_cfg)
+            eval_metrics = evaluate_current_policy(policy, env_cfg, ppo_cfg, hf_radar_cfg=hf_radar_cfg)
             _t_eval_s = time.perf_counter() - _t_eval_start
             logs["eval_mean_episode_total_reward"].append(eval_metrics["eval_mean_episode_total_reward"])
             logs["eval_survival_rate"].append(eval_metrics["eval_survival_rate"])

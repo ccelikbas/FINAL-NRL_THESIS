@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import shutil; shutil.copy\\(r'c:\\\\Users\\\\celikbas\\\\Documents\\\\REPO GIT NLR\\\\1_HF_FOFE-MAPPO\\\\environment.py', r'c:\\\\Users\\\\celikbas\\\\Documents\\\\REPO GIT NLR\\\\1_HF_FOFE-MAPPO\\\\HF_environment.py'\\)\")",
+      "Bash(echo \"exit: $?\")"
+    ]
+  }
+}

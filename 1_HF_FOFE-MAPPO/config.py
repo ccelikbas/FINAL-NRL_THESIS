@@ -216,12 +216,55 @@ class NetworkConfig:
     depth: int = 3
 
 
+# ======================================================================
+# High-fidelity radar model configuration
+# ======================================================================
+
+@dataclass
+class HFRadarConfig:
+    """RF parameters for the high-fidelity angular radar/jammer model.
+
+    All values are global — the same for every radar and every jammer in
+    the scenario.  The model computes per-(agent, radar) effective detection
+    ranges based on the Jammer-to-Signal Ratio (JSR) in the main and side
+    lobes, using stand-off jammer geometry.
+
+    Burn-through (BT) ranges are found by setting JSR = 1:
+        R_main = (P_t G_t sigma R_J^2 / (4 pi P_J G_J))^{1/4}
+        R_side = (P_t G_t^2 sigma R_J^2 / (4 pi P_J G_J G_S))^{1/4}
+
+    The unconstrained (no-jammer) radar range is:
+        R_BT = sqrt(P_t G_t sigma / (4 pi P_J G_J))
+    """
+    # Radar RF parameters
+    P_t: float = 1e4        # Radar transmit power (W)
+    G_t: float = 30.0       # Radar main-lobe gain (linear, not dB) — also G_M
+    G_S: float = 0.01       # Radar side-lobe gain (linear)
+    sigma: float = 1.0      # Target RCS (m^2)
+
+    # Jammer RF parameters
+    P_J: float = 500.0      # Jammer transmit power (W)
+    G_J: float = 5.0        # Jammer antenna gain (linear)
+
+    # Angular lobe boundaries (degrees, converted to radians internally)
+    theta_main_deg: float = 3.0    # full main-lobe width (±1.5° each side)
+    theta_side_deg: float = 9.0    # full side-lobe+main-lobe cone width (±4.5° each side)
+
+
+@dataclass
+class EnvExtensionsConfig:
+    """Extension flags that select alternative environment implementations."""
+    use_hf_radar: bool = False
+    hf_radar: HFRadarConfig = field(default_factory=HFRadarConfig)
+
+
 @dataclass
 class ExperimentConfig:
     env: EnvConfig = field(default_factory=EnvConfig)
     ppo: PPOConfig = field(default_factory=PPOConfig)
     net: NetworkConfig = field(default_factory=NetworkConfig)
     fofe: FOFEConfig = field(default_factory=FOFEConfig)
+    ext: EnvExtensionsConfig = field(default_factory=EnvExtensionsConfig)
 
     def finalize(self):
         if self.ppo.frames_per_batch is None:
