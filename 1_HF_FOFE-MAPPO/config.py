@@ -73,7 +73,7 @@ class FOFEConfig:
     critic_fusion_mlp_dims : tuple of int
         Fusion MLP dims for critic.
     """
-    use_fofe: bool = False
+    use_fofe: bool = True
 
     # --- Actor FOFE dims ---
     agents_see_dims:   Tuple[int, ...] = (96,) # one SEE layer
@@ -110,7 +110,7 @@ class EnvConfig:
     # World / episode
     world_bounds: Tuple[float, float] = (0.0, 1.0)
     dt: float = 1.0
-    max_steps: int = 150
+    max_steps: int = 100
     n_env_layouts: int = 0
     target_spawn_angle_range: Tuple[float, float] = (0, 360)
 
@@ -137,7 +137,7 @@ class EnvConfig:
 
     # Threats
     radar_range: float = 0.20
-    radar_kill_probability: float = 0
+    radar_kill_probability: float = 1
 
     # Rewards
     border_thresh: float = 0.05
@@ -182,7 +182,7 @@ class EnvConfig:
 class PPOConfig:
     """Shared PPO hyperparameters for both striker and jammer MAPPO."""
     num_envs: int = 512
-    n_iters: int = 1
+    n_iters: int = 50
     frames_per_batch: Optional[int] = None
     num_epochs: int = 10
     minibatch_size: int = 2048
@@ -265,7 +265,7 @@ class HFRadarConfig:
     target_rcs: float = 1.0                     # sigma [m^2]
     system_temperature: float = 290.0           # T0 [K]
     receiver_bandwidth: float = 1e6             # B_n [Hz]
-    system_losses: float = 0.0                  # L [dB]
+    system_losses: float = 4                  # L [dB]
     snr_min: float = 0.0                        # SNR_min [dB]
     boltzmann_constant: float = 1.380649e-23    # k [J/K]
 
@@ -276,17 +276,17 @@ class HFRadarConfig:
 
     # Radar angular/lobe model parameter
     radar_side_lobe_gain: Optional[float] = None   # G_S [dB], preferred name
-    G_S: float = 10                                 # legacy alias [dB]
+    G_S: float = 40                                 # legacy alias [dB]
 
     # Jammer RF parameters
     jammer_tx_power: Optional[float] = None        # P_J [W], preferred name
     jammer_gain: Optional[float] = None            # G_J [dB], preferred name
-    P_J: float = 1e40                              # legacy alias [W]
-    G_J: float = 60.0                              # legacy alias [dB]
+    P_J: float = 1e1                              # legacy alias [W]
+    G_J: float = 10.0                              # legacy alias [dB]
 
     # Angular lobe boundaries (degrees, converted to radians internally)
-    theta_main_deg: float = 3.0    # full main-lobe width (±1.5° each side)
-    theta_side_deg: float = 9.0    # full side-lobe+main-lobe cone width (±4.5° each side)
+    theta_main_deg: float = 6.0    # full main-lobe width (±1.5° each side)
+    theta_side_deg: float = 30.0    # full side-lobe+main-lobe cone width (±4.5° each side)
 
     def __post_init__(self):
         if self.radar_rx_gain is None:
