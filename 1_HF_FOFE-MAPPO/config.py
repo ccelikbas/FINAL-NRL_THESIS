@@ -73,7 +73,7 @@ class FOFEConfig:
     critic_fusion_mlp_dims : tuple of int
         Fusion MLP dims for critic.
     """
-    use_fofe: bool = True
+    use_fofe: bool = False
 
     # --- Actor FOFE dims ---
     agents_see_dims:   Tuple[int, ...] = (96,) # one SEE layer
@@ -182,7 +182,7 @@ class EnvConfig:
 class PPOConfig:
     """Shared PPO hyperparameters for both striker and jammer MAPPO."""
     num_envs: int = 512
-    n_iters: int = 50
+    n_iters: int = 5
     frames_per_batch: Optional[int] = None
     num_epochs: int = 10
     minibatch_size: int = 2048
@@ -239,7 +239,7 @@ class HFRadarConfig:
     # Radar RF parameters
     P_t: float = 1e4        # Radar transmit power (W)
     G_t: float = 30.0       # Radar main-lobe gain (linear, not dB) — also G_M
-    G_S: float = 0.01       # Radar side-lobe gain (linear)
+    G_S: float = 5       # Radar side-lobe gain (linear)
     sigma: float = 1.0      # Target RCS (m^2)
 
     # Jammer RF parameters
@@ -254,7 +254,7 @@ class HFRadarConfig:
 @dataclass
 class EnvExtensionsConfig:
     """Extension flags that select alternative environment implementations."""
-    use_hf_radar: bool = False
+    use_hf_radar: bool = True
     hf_radar: HFRadarConfig = field(default_factory=HFRadarConfig)
 
 

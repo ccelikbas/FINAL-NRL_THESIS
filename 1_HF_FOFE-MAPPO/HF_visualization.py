@@ -28,7 +28,7 @@ from .HF_environment import HFStrikeEA2DEnv
 # Re-export unchanged utilities from base visualization
 from .visualization import (
     plot_training,
-    plot_fofe_diagnostics,
+    _plot_fofe_diagnostics as plot_fofe_diagnostics,
     plot_comparison,
 )
 

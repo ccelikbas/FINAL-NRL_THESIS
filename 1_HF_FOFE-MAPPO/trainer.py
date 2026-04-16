@@ -165,6 +165,21 @@ def _extract_fofe_critic_obs(td: TensorDict) -> Dict[str, torch.Tensor]:
     return {k: td.get(k) for k in FOFE_CRITIC_KEYS}
 
 
+def _actor_role_dim_for_key(key: str, v: torch.Tensor) -> int:
+    """Return the role-agent dimension index for one FOFE actor tensor key."""
+    if key == "obs_self":
+        # [..., n_role, d_self]
+        return v.ndim - 2
+    if key.endswith("_feat"):
+        # [..., n_role, n_entities, d_feat]
+        return v.ndim - 3
+    if key.endswith("_mask"):
+        # [..., n_role, n_entities]
+        return v.ndim - 2
+    # Fallback for any future actor key following [..., n_role, ...]
+    return v.ndim - 2
+
+
 def _split_fofe_by_role(fofe_dict: Dict[str, torch.Tensor],
                          ns: int, nj: int) -> Tuple[Dict, Dict]:
     """Split FOFE actor obs along agent dim into striker/jammer dicts.
@@ -179,28 +194,12 @@ def _split_fofe_by_role(fofe_dict: Dict[str, torch.Tensor],
       obs_radars_feat:  [*, A, E_r, 3]    → split on dim -3
       obs_radars_mask:  [*, A, E_r]       → split on dim -2
 
-    We use Ellipsis slicing: v[..., :ns, ...] with the agent dim always
-    being the first "entity" dim after any temporal/batch dims.
-    The agent dim position in the tensor depends on whether there's a time dim.
-    We split using a helper that identifies the agent dim as the one with size A=ns+nj.
+    We split using key-based role-axis positions (not size-based heuristics),
+    which avoids ambiguity when unrelated dimensions happen to equal ns+nj.
     """
-    A = ns + nj
     s_dict, j_dict = {}, {}
     for k, v in fofe_dict.items():
-        # Find which dim has size A (the agent dim)
-        # For FOFE actor keys, agent dim is always at ndim-2 for 2D masks,
-        # ndim-2 for self (before feature dim), ndim-3 for feat tensors.
-        # Simplest: find the dim with size A
-        agent_dim = None
-        for d in range(v.ndim):
-            if v.shape[d] == A:
-                agent_dim = d
-                break
-        if agent_dim is None:
-            # No agent dim (shouldn't happen), just copy
-            s_dict[k] = v
-            j_dict[k] = v
-            continue
+        agent_dim = _actor_role_dim_for_key(k, v)
         s_dict[k] = v.narrow(agent_dim, 0, ns)
         j_dict[k] = v.narrow(agent_dim, ns, nj)
     return s_dict, j_dict
@@ -215,25 +214,9 @@ def _flatten_fofe_dict(d: Dict[str, torch.Tensor], n_role: int) -> Dict[str, tor
     """Flatten temporal+batch dims: [T,B,n_role,...] or [N,n_role,...] → [N,n_role,...]."""
     out = {}
     for k, v in d.items():
-        # Determine which dim is the role dim (size n_role)
-        # After transpose, shape is [T, B, n_role, ...] or [N, n_role, ...]
-        # We want to merge all leading dims except the last role+feature dims.
-        # For obs_self [T,B,n_role,6] → [-1, n_role, 6]
-        # For obs_agents_feat [T,B,n_role,E,4] → [-1, n_role, E, 4]
-        # For obs_agents_mask [T,B,n_role,E] → [-1, n_role, E]
-        # Pattern: keep last (ndim - first_role_dim) dims, flatten the rest.
-        # The role dim is the first dim with size n_role.
-        role_dim = None
-        for dd in range(v.ndim):
-            if v.shape[dd] == n_role:
-                role_dim = dd
-                break
-        if role_dim is None or role_dim == 0:
-            # Already flat or ambiguous, just reshape merging first dims
-            out[k] = v.reshape(-1, *v.shape[1:])
-        else:
-            trailing = v.shape[role_dim:]
-            out[k] = v.reshape(-1, *trailing)
+        role_dim = _actor_role_dim_for_key(k, v)
+        trailing = v.shape[role_dim:]
+        out[k] = v.reshape(-1, *trailing)
     return out
 
 
