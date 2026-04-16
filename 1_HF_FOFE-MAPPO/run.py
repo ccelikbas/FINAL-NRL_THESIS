@@ -27,6 +27,7 @@ import torch
 
 def build_parser() -> argparse.ArgumentParser:
     env_defaults = EnvConfig()
+    ext_defaults = EnvExtensionsConfig()
     ppo_defaults = PPOConfig()
     net_defaults = NetworkConfig()
     fofe_defaults = FOFEConfig()
@@ -81,7 +82,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--use_hf_radar",
         action=argparse.BooleanOptionalAction,
-        default=False,
+        default=ext_defaults.use_hf_radar,
         help="Enable high-fidelity angular radar model (replaces simple binary jam/kill)",
     )
     p.add_argument("--no_plot", action="store_true")
