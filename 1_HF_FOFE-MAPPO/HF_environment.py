@@ -63,27 +63,39 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
                 + (f" (or legacy '{legacy_name}')" if legacy_name else "")
             )
 
+        def _db_to_linear(db_value: float) -> float:
+            return float(10.0 ** (float(db_value) / 10.0))
+
         # Read radar equation parameters (supporting old config field names too).
         radar_tx_power = _cfg_float("radar_tx_power", "P_t")
-        radar_tx_gain = _cfg_float("radar_tx_gain", "G_t")
-        radar_rx_gain = _cfg_float("radar_rx_gain", "G_r") if hasattr(hf_cfg, "radar_rx_gain") else radar_tx_gain
+        radar_tx_gain_db = _cfg_float("radar_tx_gain", None)
+        radar_rx_gain_db_raw = getattr(hf_cfg, "radar_rx_gain", None)
+        radar_rx_gain_db = float(radar_tx_gain_db if radar_rx_gain_db_raw is None else radar_rx_gain_db_raw)
         wavelength = _cfg_float("wavelength", None, 0.03)
         target_rcs = _cfg_float("target_rcs", "sigma")
         system_temperature = _cfg_float("system_temperature", None, 290.0)
         receiver_bandwidth = _cfg_float("receiver_bandwidth", None, 1e6)
-        system_losses = _cfg_float("system_losses", None, 1.0)
-        snr_min = _cfg_float("snr_min", None, 1.0)
+        system_losses_db = _cfg_float("system_losses", None, 0.0)
+        snr_min_db = _cfg_float("snr_min", None, 0.0)
         boltzmann_constant = _cfg_float("boltzmann_constant", None, 1.380649e-23)
-        radar_side_lobe_gain = _cfg_float("G_S", "G_S")
+        radar_side_lobe_gain_db = _cfg_float("G_S", "G_S")
         meters_per_world_unit = _cfg_float("meters_per_world_unit", None, 1_000_000.0)
         normalized_range_scale = _cfg_float("normalized_range_scale", None, 1.0)
         target_unc_world = getattr(hf_cfg, "target_unconstrained_range_world", None)
+
+        # dB -> linear conversion for all power-ratio terms.
+        radar_tx_gain = _db_to_linear(radar_tx_gain_db)
+        radar_rx_gain = _db_to_linear(radar_rx_gain_db)
+        system_losses = _db_to_linear(system_losses_db)
+        snr_min = _db_to_linear(snr_min_db)
+        radar_side_lobe_gain = _db_to_linear(radar_side_lobe_gain_db)
 
         # Precompute angle half-widths in radians
         self._theta_main_half = radians(hf_cfg.theta_main_deg / 2)
         self._theta_side_half = radians(hf_cfg.theta_side_deg / 2)
 
-        # Unconstrained range from radar SNR equation at SNR_min threshold (SI meters):
+        # Unconstrained range from radar SNR equation at SNR_min threshold (SI meters).
+        # Gains/losses/SNR threshold are entered in dB and converted to linear above.
         # R_unc_m = (P_t G_t G_r lambda^2 sigma / ((4pi)^3 k T0 B_n L SNR_min))^(1/4)
         snr_num = (
             radar_tx_power

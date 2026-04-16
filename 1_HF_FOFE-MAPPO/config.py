@@ -227,17 +227,21 @@ class HFRadarConfig:
     Unconstrained radar range is derived from the radar SNR equation with
     SNR_min threshold:
 
-        SNR = P_t * G_t * G_r * lambda^2 * sigma /
+        SNR = P_t * G_t_lin * G_r_lin * lambda^2 * sigma /
               ((4*pi)^3 * R^4 * k * T0 * B_n * L)
 
         R_unconstrained = (
-            P_t * G_t * G_r * lambda^2 * sigma /
+            P_t * G_t_lin * G_r_lin * lambda^2 * sigma /
             ((4*pi)^3 * k * T0 * B_n * L * SNR_min)
         )^(1/4)
 
     Sector cuts from jamming remain stand-off BT style:
         R_main = sqrt(R_unc * R_J)
-        R_side = (R_unc^2 * (G_t / G_S) * R_J^2)^(1/4)
+        R_side = (R_unc^2 * (G_t_lin / G_S_lin) * R_J^2)^(1/4)
+
+    Decibel interface:
+        Enter gains/loss/SNR threshold in dB everywhere in this config.
+        The implementation converts dB values to linear internally.
 
     Unit handling:
         The SNR equation is evaluated in SI units (meters). The result is then
@@ -253,15 +257,15 @@ class HFRadarConfig:
         or by setting target_unconstrained_range_world directly.
     """
     # Radar SNR parameters
-    radar_tx_power: float = 1                 # P_t [W]
-    radar_tx_gain: float = 30.0                 # G_t [linear]
-    radar_rx_gain: Optional[float] = None       # G_r [linear], defaults to G_t
+    radar_tx_power: float = 1e6                 # P_t [W]
+    radar_tx_gain: float = 40.0                 # G_t [dB]
+    radar_rx_gain: Optional[float] = None       # G_r [dB], defaults to G_t
     wavelength: float = 0.03                    # lambda [m]
     target_rcs: float = 1.0                     # sigma [m^2]
     system_temperature: float = 290.0           # T0 [K]
     receiver_bandwidth: float = 1e6             # B_n [Hz]
-    system_losses: float = 1.0                  # L [linear]
-    snr_min: float = 1.0                        # SNR_min [linear]
+    system_losses: float = 0.0                  # L [dB]
+    snr_min: float = 0.0                        # SNR_min [dB]
     boltzmann_constant: float = 1.380649e-23    # k [J/K]
 
     # World/map scaling
@@ -270,11 +274,11 @@ class HFRadarConfig:
     target_unconstrained_range_world: Optional[float] = None  # if set, overrides normalized_range_scale
 
     # Radar angular/lobe model parameter
-    G_S: float = 5.0                            # Radar side-lobe gain (linear)
+    G_S: float = 10              # Radar side-lobe gain [dB] (equiv. to old linear 5.0)
 
     # Jammer RF parameters
-    P_J: float = 500.0      # Jammer transmit power (W)
-    G_J: float = 100.0        # Jammer antenna gain (linear)
+    P_J: float = 1e40      # Jammer transmit power (W)
+    G_J: float = 60.0         # Jammer antenna gain [dB] (equiv. to old linear 100.0)
 
     # Angular lobe boundaries (degrees, converted to radians internally)
     theta_main_deg: float = 3.0    # full main-lobe width (±1.5° each side)
@@ -287,12 +291,18 @@ class HFRadarConfig:
             raise ValueError("receiver_bandwidth must be > 0")
         if self.system_temperature <= 0:
             raise ValueError("system_temperature must be > 0")
-        if self.system_losses <= 0:
-            raise ValueError("system_losses must be > 0")
-        if self.snr_min <= 0:
-            raise ValueError("snr_min must be > 0")
-        if self.G_S <= 0:
-            raise ValueError("G_S must be > 0")
+        if not math.isfinite(self.radar_tx_gain):
+            raise ValueError("radar_tx_gain must be finite (dB)")
+        if not math.isfinite(self.radar_rx_gain):
+            raise ValueError("radar_rx_gain must be finite (dB)")
+        if not math.isfinite(self.system_losses):
+            raise ValueError("system_losses must be finite (dB)")
+        if not math.isfinite(self.snr_min):
+            raise ValueError("snr_min must be finite (dB)")
+        if not math.isfinite(self.G_S):
+            raise ValueError("G_S must be finite (dB)")
+        if not math.isfinite(self.G_J):
+            raise ValueError("G_J must be finite (dB)")
         if self.meters_per_world_unit <= 0:
             raise ValueError("meters_per_world_unit must be > 0")
         if self.normalized_range_scale <= 0:
@@ -301,6 +311,11 @@ class HFRadarConfig:
                 and self.target_unconstrained_range_world <= 0):
             raise ValueError("target_unconstrained_range_world must be > 0 when provided")
 
+    @staticmethod
+    def db_to_linear(db_value: float) -> float:
+        """Convert dB quantity (power ratio form) to linear."""
+        return float(10.0 ** (float(db_value) / 10.0))
+
     # Backward-compatible aliases used by older code paths.
     @property
     def P_t(self) -> float:
@@ -308,15 +323,31 @@ class HFRadarConfig:
 
     @property
     def G_t(self) -> float:
-        return float(self.radar_tx_gain)
+        return self.db_to_linear(self.radar_tx_gain)
 
     @property
     def G_r(self) -> float:
-        return float(self.radar_rx_gain)
+        return self.db_to_linear(self.radar_rx_gain)
 
     @property
     def sigma(self) -> float:
         return float(self.target_rcs)
+
+    @property
+    def L(self) -> float:
+        return self.db_to_linear(self.system_losses)
+
+    @property
+    def snr_min_linear(self) -> float:
+        return self.db_to_linear(self.snr_min)
+
+    @property
+    def G_S_linear(self) -> float:
+        return self.db_to_linear(self.G_S)
+
+    @property
+    def G_J_linear(self) -> float:
+        return self.db_to_linear(self.G_J)
 
 
 @dataclass

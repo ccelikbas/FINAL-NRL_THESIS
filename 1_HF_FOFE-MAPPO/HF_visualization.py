@@ -87,7 +87,7 @@ def _compute_radar_boundary_km(
     hf_cfg = env.hf_cfg
     theta_main_half = math.radians(hf_cfg.theta_main_deg / 2)
     theta_side_half = math.radians(hf_cfg.theta_side_deg / 2)
-    gt_over_gs = hf_cfg.G_t / hf_cfg.G_S
+    gt_over_gs = env._gt_over_gs
 
     angles = np.linspace(0, 2 * np.pi, _N_ANGLE_POINTS, endpoint=False)
     r_eff = np.full(_N_ANGLE_POINTS, R_unc)
@@ -297,12 +297,7 @@ def hf_animate_rollout(
         for _ in range(env.n_radars)
     ]
 
-    # Jammer, obs, comm circles
-    jammer_circles = [
-        ax.add_patch(Circle((0, 0), 0, fill=False, edgecolor="C4",
-                            alpha=0.5, lw=1.5, ls="--"))
-        for _ in range(env.n_jammers)
-    ]
+    # Obs / comm circles
     obs_circles = [
         ax.add_patch(Circle((0, 0), 0, fill=False, edgecolor="C0",
                             alpha=0.35, lw=1.0, ls=":"))
@@ -356,7 +351,7 @@ def hf_animate_rollout(
         target_unknown_sc.set_offsets(empty_xy)
         radar_known_sc.set_offsets(empty_xy)
         radar_unknown_sc.set_offsets(empty_xy)
-        for c in [*radar_unc_circles, *jammer_circles, *obs_circles, *comm_circles]:
+        for c in [*radar_unc_circles, *obs_circles, *comm_circles]:
             c.set_visible(False)
         for p in radar_coverage_polys:
             p.set_visible(False)
@@ -422,16 +417,6 @@ def hf_animate_rollout(
             )
             radar_coverage_polys[j].set_visible(True)
             radar_coverage_polys[j].set_xy(verts)
-
-        # Jammer circles (show jam_radius for reference, though not used by HF model)
-        for j, jc in enumerate(jammer_circles):
-            idx = env.n_strikers + j
-            if aa[idx].item():
-                jc.set_visible(True)
-                jc.set_center((float(ap_km[idx, 0]), float(ap_km[idx, 1])))
-                jc.set_radius(env.jammer.jam_radius * 1000)
-            else:
-                jc.set_visible(False)
 
         # Obs / comm circles
         for k, oc in enumerate(obs_circles):

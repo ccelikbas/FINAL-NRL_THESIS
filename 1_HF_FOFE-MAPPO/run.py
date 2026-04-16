@@ -186,11 +186,11 @@ def main() -> None:
         print(f"  eval_survival_rate              = {logs['eval_survival_rate'][-1]:.4f}")
         print(f"  eval_mean_duration              = {logs['eval_mean_duration'][-1]:.4f}")
 
-    if not args.no_plot:
-        try:
-            plot_training(logs)
-        except Exception as exc:
-            print(f"plot_training warning (continuing): {type(exc).__name__}: {exc}")
+    # if not args.no_plot:
+    #     try:
+    #         plot_training(logs)
+    #     except Exception as exc:
+    #         print(f"plot_training warning (continuing): {type(exc).__name__}: {exc}")
 
     if not args.no_animate:
         try:
