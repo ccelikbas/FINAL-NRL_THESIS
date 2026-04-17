@@ -69,7 +69,7 @@ def _build_requested_five_stage_plan(args: argparse.Namespace) -> List[Curriculu
             n_jammers=1,
             n_targets=1,
             n_radars=1,
-            radar_kill_probability=0.5,
+            radar_kill_probability=1,
         ),
         CurriculumStage(
             index=2,

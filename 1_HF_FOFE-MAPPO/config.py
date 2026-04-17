@@ -100,9 +100,9 @@ class EnvConfig:
     # Team composition
     n_strikers: int = 1
     n_jammers: int = 1
-    n_known_targets: int = 1
+    n_known_targets: int = 2
     n_unknown_targets: int = 0
-    n_known_radars: int = 1
+    n_known_radars: int = 2
     n_unknown_radars: int = 0
     n_targets: int = 0
     n_radars: int = 0
@@ -182,7 +182,7 @@ class EnvConfig:
 class PPOConfig:
     """Shared PPO hyperparameters for both striker and jammer MAPPO."""
     num_envs: int = 512
-    n_iters: int = 50
+    n_iters: int = 1
     frames_per_batch: Optional[int] = None
     num_epochs: int = 10
     minibatch_size: int = 2048
@@ -224,19 +224,18 @@ class NetworkConfig:
 class HFRadarConfig:
     """RF parameters for the high-fidelity angular radar/jammer model.
 
-    Unconstrained radar range is derived from the radar SNR equation with
-    SNR_min threshold:
+    Unconstrained radar range is derived from the radar SNR equation:
 
         SNR = P_t * G_t_lin * G_r_lin * lambda^2 * sigma /
               ((4*pi)^3 * R^4 * k * T0 * B_n * L)
 
         R_unconstrained = (
             P_t * G_t_lin * G_r_lin * lambda^2 * sigma /
-            ((4*pi)^3 * k * T0 * B_n * L * SNR_min)
+            ((4*pi)^3 * k * T0 * B_n * L)
         )^(1/4)
 
     Jammed-sector burn-through ranges (from JSR = 1):
-        R_main = sqrt((P_t * G_t_lin * sigma) / (4*pi*P_J*G_J_lin))
+        R_main = (((P_t * G_t_lin * sigma) / (4*pi*P_J*G_J_lin)) * R_J^2)^(1/4)
         R_side = ((sigma/(4*pi)) * ((P_t*G_t_lin)/(P_J*G_J_lin))
                   * ((G_t_lin*R_J^2)/G_S_lin))^(1/4)
 
@@ -286,7 +285,7 @@ class HFRadarConfig:
 
     # Angular lobe boundaries (degrees, converted to radians internally)
     theta_main_deg: float = 6.0    # full main-lobe width (±1.5° each side)
-    theta_side_deg: float = 30.0    # full side-lobe+main-lobe cone width (±4.5° each side)
+    theta_side_deg: float = 15.0    # full side-lobe+main-lobe cone width (±4.5° each side)
 
     def __post_init__(self):
         if self.radar_rx_gain is None:
@@ -389,3 +388,4 @@ class ExperimentConfig:
         # Propagate FOFE flag into EnvConfig so the env knows to emit FOFE obs
         self.env._use_fofe = self.fofe.use_fofe
         return self
+
