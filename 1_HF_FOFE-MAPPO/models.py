@@ -526,17 +526,18 @@ class CombinedCritic(nn.Module):
 
     @staticmethod
     def _broadcast_role_values(values: torch.Tensor, n_role: int, role_name: str) -> torch.Tensor:
-        """Normalize role critic outputs to [B, n_role, 1]."""
-        if values.ndim != 3 or values.shape[-1] != 1:
+        """Normalize role critic outputs to [..., n_role, 1]."""
+        if values.ndim < 2 or values.shape[-1] != 1:
             raise RuntimeError(
-                f"{role_name} critic must return [B, N, 1], got {tuple(values.shape)}"
+                f"{role_name} critic must return [..., N, 1], got {tuple(values.shape)}"
             )
 
         out_n = values.shape[-2]
         if out_n == n_role:
             return values
         if out_n == 1:
-            return values.expand(-1, n_role, -1)
+            expand_shape = (*values.shape[:-2], n_role, values.shape[-1])
+            return values.expand(*expand_shape)
         raise RuntimeError(
             f"{role_name} critic returned N={out_n}, expected N in {{1, {n_role}}}"
         )

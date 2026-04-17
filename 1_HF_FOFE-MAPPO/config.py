@@ -370,7 +370,7 @@ class HFRadarConfig:
 @dataclass
 class EnvExtensionsConfig:
     """Extension flags that select alternative environment implementations."""
-    use_hf_radar: bool = False
+    use_hf_radar: bool = True
     hf_radar: HFRadarConfig = field(default_factory=HFRadarConfig)
 
 
