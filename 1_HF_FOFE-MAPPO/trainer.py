@@ -755,6 +755,8 @@ def train_mappo(
                     mb_state = state_f[idx]
                     s_pred_val = critic.striker_critic(mb_state)
 
+                s_pred_val = critic._broadcast_role_values(s_pred_val, ns, "striker")
+
                 s_vloss = value_loss_fn(s_pred_val, mb_s_ret)
 
                 striker_actor_optim.zero_grad(set_to_none=True)
@@ -810,6 +812,8 @@ def train_mappo(
                     )
                 else:
                     j_pred_val = critic.jammer_critic(state_f[idx])
+
+                j_pred_val = critic._broadcast_role_values(j_pred_val, nj, "jammer")
 
                 j_vloss = value_loss_fn(j_pred_val, mb_j_ret)
 

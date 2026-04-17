@@ -323,7 +323,7 @@ class FOFEValueNet(nn.Module):
     Parameters
     ----------
     fofe_cfg : FOFEConfig
-    n_role_agents : int   Number of agents in this role (output dim).
+    n_role_agents : int   Number of agents in this role (kept for API compatibility).
     d_agents, d_targets, d_radars : int  Per-entity feature dims.
     """
 
@@ -348,8 +348,8 @@ class FOFEValueNet(nn.Module):
             cur = dim
         self.fusion_mlp = nn.Sequential(*fuse_layers)
 
-        # ---- Value head: one scalar per role-agent ----
-        self.value_head = nn.Linear(cur, n_role_agents)
+        # ---- Value head: one scalar per role (shared baseline) ----
+        self.value_head = nn.Linear(cur, 1)
 
         # Diagnostic cache (populated each forward, detached, zero cost when unused)
         self._diag_cache: Dict[str, torch.Tensor] = {}
@@ -359,7 +359,7 @@ class FOFEValueNet(nn.Module):
         """
         All entity inputs: [B, E, d].  Masks: [B, E] bool.
         time_feat: [B, 1].
-        Returns [B, n_role_agents, 1].
+        Returns [B, 1, 1].
         """
         x_a = self.fofe_agents(agent_feat, agent_mask)    # [B, D_fofe]
         x_t = self.fofe_targets(target_feat, target_mask)  # [B, D_fofe]
@@ -374,7 +374,7 @@ class FOFEValueNet(nn.Module):
 
         x = torch.cat([x_a, x_t, x_r, time_feat], dim=-1)  # [B, 3*D_fofe+1]
         x = self.fusion_mlp(x)
-        return self.value_head(x).unsqueeze(-1)  # [B, n_role, 1]
+        return self.value_head(x).unsqueeze(-1)  # [B, 1, 1]
 
 
 # ======================================================================
@@ -403,7 +403,8 @@ class RoleValueNet(nn.Module):
     """Legacy flat-state critic."""
     def __init__(self, state_dim, n_agents, hidden=256, depth=3):
         super().__init__()
-        self.net = MLP(state_dim, n_agents, hidden, depth)
+        self.n_agents = n_agents
+        self.net = MLP(state_dim, 1, hidden, depth)
 
     def forward(self, state):
         return self.net(state).unsqueeze(-1)
@@ -523,6 +524,23 @@ class CombinedCritic(nn.Module):
         self.n_jammers = n_jammers
         self.use_fofe = use_fofe
 
+    @staticmethod
+    def _broadcast_role_values(values: torch.Tensor, n_role: int, role_name: str) -> torch.Tensor:
+        """Normalize role critic outputs to [B, n_role, 1]."""
+        if values.ndim != 3 or values.shape[-1] != 1:
+            raise RuntimeError(
+                f"{role_name} critic must return [B, N, 1], got {tuple(values.shape)}"
+            )
+
+        out_n = values.shape[-2]
+        if out_n == n_role:
+            return values
+        if out_n == 1:
+            return values.expand(-1, n_role, -1)
+        raise RuntimeError(
+            f"{role_name} critic returned N={out_n}, expected N in {{1, {n_role}}}"
+        )
+
     def forward(self, td):
         if self.use_fofe:
             # ---- FOFE critic path: extract global state channels ----
@@ -540,6 +558,9 @@ class CombinedCritic(nn.Module):
             state = td.get("state")
             sv = self.striker_critic(state)
             jv = self.jammer_critic(state)
+
+        sv = self._broadcast_role_values(sv, self.n_strikers, "striker")
+        jv = self._broadcast_role_values(jv, self.n_jammers, "jammer")
 
         td.set(("agents", "state_value"), torch.cat([sv, jv], dim=-2))
         return td
