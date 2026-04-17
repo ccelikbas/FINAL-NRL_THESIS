@@ -73,7 +73,7 @@ class FOFEConfig:
     critic_fusion_mlp_dims : tuple of int
         Fusion MLP dims for critic.
     """
-    use_fofe: bool = True
+    use_fofe: bool = False
 
     # --- Actor FOFE dims ---
     agents_see_dims:   Tuple[int, ...] = (96,) # one SEE layer
@@ -275,17 +275,17 @@ class HFRadarConfig:
 
     # Radar angular/lobe model parameter
     radar_side_lobe_gain: Optional[float] = None   # G_S [dB], preferred name
-    G_S: float = 40                                 # legacy alias [dB]
+    G_S: float = 5                                 # legacy alias [dB]
 
     # Jammer RF parameters
     jammer_tx_power: Optional[float] = None        # P_J [W], preferred name
     jammer_gain: Optional[float] = None            # G_J [dB], preferred name
     P_J: float = 1e1                              # legacy alias [W]
-    G_J: float = 10.0                              # legacy alias [dB]
+    G_J: float = 30.0                              # legacy alias [dB]
 
     # Angular lobe boundaries (degrees, converted to radians internally)
     theta_main_deg: float = 6.0    # full main-lobe width (±1.5° each side)
-    theta_side_deg: float = 15.0    # full side-lobe+main-lobe cone width (±4.5° each side)
+    theta_side_deg: float = 30.0    # full side-lobe+main-lobe cone width (±4.5° each side)
 
     def __post_init__(self):
         if self.radar_rx_gain is None:

@@ -1,12 +1,21 @@
+"""Curriculum learning runner for FOFE-MAPPO.
+
+Edit the CURRICULUM and EVAL sections below to configure your curriculum
+phases and evaluation scenarios.  The training loop uses a **global
+iteration counter** that never resets across phase transitions, so
+evaluation runs at fixed global intervals regardless of config changes.
+"""
+
 from __future__ import annotations
 
 import argparse
 import copy
+import math
 import random
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 if __package__ in (None, ""):
     import types
@@ -22,113 +31,216 @@ if __package__ in (None, ""):
     __package__ = _pkg_name
 
 import torch
+import numpy as np
+import matplotlib.pyplot as plt
 
-from .config import EnvConfig, ExperimentConfig, NetworkConfig, PPOConfig
+from .config import EnvConfig, ExperimentConfig, FOFEConfig, NetworkConfig, PPOConfig
 from .models import make_combined_critic, make_combined_policy
 from .rewards import RewardConfig
 from .trainer import build_env, evaluate_current_policy, train_mappo
 from .visualization import TestRunner, animate_rollout, plot_training
 
 
+# =====================================================================
+#  CURRICULUM CONFIGURATION  –  edit this section freely
+# =====================================================================
+
 @dataclass
-class CurriculumStage:
-    index: int
-    n_iters: int
-    n_strikers: int
-    n_jammers: int
-    n_targets: int
-    n_radars: int
-    radar_kill_probability: float
-    label: str
+class ScenarioConfig:
+    """A single environment scenario configuration."""
+    n_strikers: int = 1
+    n_jammers: int = 1
+    n_known_targets: int = 1
+    n_unknown_targets: int = 0
+    n_known_radars: int = 1
+    n_unknown_radars: int = 0
+    radar_kill_probability: float = 1.0
+
+    @property
+    def label(self) -> str:
+        parts = [f"{self.n_strikers}s{self.n_jammers}j"]
+        parts.append(f"{self.n_known_targets}kt")
+        if self.n_unknown_targets > 0:
+            parts.append(f"{self.n_unknown_targets}ut")
+        parts.append(f"{self.n_known_radars}kr")
+        if self.n_unknown_radars > 0:
+            parts.append(f"{self.n_unknown_radars}ur")
+        if self.radar_kill_probability < 1.0:
+            parts.append(f"p{self.radar_kill_probability:.2f}")
+        return "_".join(parts)
 
 
-def _split_iters(total: int, chunks: int) -> List[int]:
-    total = int(total)
-    chunks = int(chunks)
-    if total <= 0 or chunks <= 0:
-        return []
-    base = total // chunks
-    rem = total % chunks
-    out = [base + (1 if i < rem else 0) for i in range(chunks)]
-    return [x for x in out if x > 0]
+@dataclass
+class Fixed:
+    """Use a single fixed configuration for the entire phase."""
+    config: ScenarioConfig
 
 
-def _build_requested_five_stage_plan(args: argparse.Namespace) -> List[CurriculumStage]:
-    rng = random.Random(int(args.seed) + 1093)
+@dataclass
+class RandomChoice:
+    """Randomly pick one configuration per iteration from a list."""
+    choices: List[ScenarioConfig]
 
-    stage2_template = dict(n_strikers=1, n_jammers=1, n_targets=1, n_radars=1, radar_kill_probability=1.0)
-    stage3_template = dict(n_strikers=1, n_jammers=1, n_targets=2, n_radars=2, radar_kill_probability=1.0)
-    stage4_template = dict(n_strikers=2, n_jammers=2, n_targets=2, n_radars=2, radar_kill_probability=1.0)
 
-    stages: List[CurriculumStage] = [
-        CurriculumStage(
-            index=1,
-            label="stage_1",
-            n_iters=args.stage1_iters,
-            n_strikers=1,
-            n_jammers=1,
-            n_targets=1,
-            n_radars=1,
-            radar_kill_probability=1,
-        ),
-        CurriculumStage(
-            index=2,
-            label="stage_2",
-            n_iters=args.stage2_iters,
-            **stage2_template,
-        ),
-        CurriculumStage(
-            index=3,
-            label="stage_3",
-            n_iters=args.stage3_iters,
-            **stage3_template,
-        ),
-        CurriculumStage(
-            index=4,
-            label="stage_4",
-            n_iters=args.stage4_iters,
-            **stage4_template,
-        ),
-    ]
+@dataclass
+class RandomRange:
+    """Sample each parameter independently from [min, max] per iteration."""
+    n_strikers: Tuple[int, int] = (1, 1)
+    n_jammers: Tuple[int, int] = (1, 1)
+    n_known_targets: Tuple[int, int] = (1, 1)
+    n_unknown_targets: Tuple[int, int] = (0, 0)
+    n_known_radars: Tuple[int, int] = (1, 1)
+    n_unknown_radars: Tuple[int, int] = (0, 0)
+    radar_kill_probability: Tuple[float, float] = (1.0, 1.0)
 
-    random_stage_choices = [
-        ("stage2", stage2_template),
-        ("stage3", stage3_template),
-        ("stage4", stage4_template),
-    ]
-    # Final phase: domain randomization per ITERATION (not every N iters).
-    # Each stage below has n_iters=1 and randomised S/J/R/T sampled within user bounds.
-    # This keeps one actor policy continuously optimised while exposing varied configs.
-    # Radar kill probability is intentionally fixed to 1.0 for all stages except stage 1.
-    next_index = 5
-    for i in range(int(args.stage5_iters)):
-        if bool(args.stage5_use_bounds):
-            sampled_cfg = {
-                "n_strikers": rng.randint(int(args.stage5_min_strikers), int(args.stage5_max_strikers)),
-                "n_jammers": rng.randint(int(args.stage5_min_jammers), int(args.stage5_max_jammers)),
-                "n_targets": rng.randint(int(args.stage5_min_targets), int(args.stage5_max_targets)),
-                "n_radars": rng.randint(int(args.stage5_min_radars), int(args.stage5_max_radars)),
-                "radar_kill_probability": 1.0,
-            }
-            choice_name = "bounds"
-            cfg = sampled_cfg
-        else:
-            choice_name, cfg = random_stage_choices[rng.randint(0, len(random_stage_choices) - 1)]
-        stages.append(
-            CurriculumStage(
-                index=next_index,
-                label=f"stage_5_random_{i + 1}_{choice_name}",
-                n_iters=1,
-                n_strikers=cfg["n_strikers"],
-                n_jammers=cfg["n_jammers"],
-                n_targets=cfg["n_targets"],
-                n_radars=cfg["n_radars"],
-                radar_kill_probability=1.0,
-            )
+
+ConfigType = Union[Fixed, RandomChoice, RandomRange]
+
+
+@dataclass
+class CurriculumPhase:
+    """One phase of the curriculum.
+
+    iters : (start, end) — half-open range [start, end) of global iterations.
+    config: Fixed, RandomChoice, or RandomRange.
+            For RandomChoice / RandomRange a *new* config is sampled every
+            iteration so the policy learns generalised behaviour.
+    """
+    name: str
+    iters: Tuple[int, int]
+    config: ConfigType
+
+
+# ──────────────────── CURRICULUM DEFINITION ────────────────────────
+# Phases must be contiguous: phase[i].iters[1] == phase[i+1].iters[0].
+
+CURRICULUM: List[CurriculumPhase] = [
+    CurriculumPhase(
+        name="basic_1v1",
+        iters=(0, 5),
+        config=Fixed(ScenarioConfig(
+            n_strikers=1, n_jammers=1,
+            n_known_targets=1, n_known_radars=1,
+            radar_kill_probability=1.0,
+        )),
+    ),
+    CurriculumPhase(
+        name="mixed_easy",
+        iters=(5, 10),
+        config=RandomChoice([
+            ScenarioConfig(n_strikers=1, n_jammers=1,
+                           n_known_targets=1, n_known_radars=1),
+            ScenarioConfig(n_strikers=1, n_jammers=1,
+                           n_known_targets=2, n_known_radars=2),
+        ]),
+    ),
+    CurriculumPhase(
+        name="scaling_2v2",
+        iters=(10, 20),
+        config=RandomChoice([
+            ScenarioConfig(n_strikers=1, n_jammers=1,
+                           n_known_targets=2, n_known_radars=2),
+            ScenarioConfig(n_strikers=2, n_jammers=2,
+                           n_known_targets=2, n_known_radars=2),
+        ]),
+    ),
+    # CurriculumPhase(
+    #     name="domain_randomization",
+    #     iters=(200, 400),
+    #     config=RandomRange(
+    #         n_strikers=(1, 2),
+    #         n_jammers=(1, 2),
+    #         n_known_targets=(1, 3),
+    #         n_known_radars=(1, 3),
+    #         radar_kill_probability=(1.0),
+    #     ),
+    # ),
+]
+
+
+# ──────────────────── EVALUATION SCENARIOS ─────────────────────────
+# Tested every EVAL_EVERY global iterations; each runs EVAL_EPISODES.
+
+EVAL_SCENARIOS: List[ScenarioConfig] = [
+    ScenarioConfig(n_strikers=1, n_jammers=1, n_known_targets=1, n_known_radars=1),
+    ScenarioConfig(n_strikers=1, n_jammers=1, n_known_targets=2, n_known_radars=2),
+    ScenarioConfig(n_strikers=2, n_jammers=2, n_known_targets=2, n_known_radars=2)
+    # ScenarioConfig(n_strikers=2, n_jammers=2, n_known_targets=3, n_known_radars=3),
+]
+
+EVAL_EVERY: int = 1        # run multi-scenario eval every N global iterations
+EVAL_EPISODES: int = 30     # episodes per eval scenario
+
+
+# ──────────────────── FOFE CONFIGURATION ───────────────────────────
+
+FOFE_CONFIG = FOFEConfig(use_fofe=False)
+
+
+# =====================================================================
+#  IMPLEMENTATION  –  you usually do not need to edit below this line
+# =====================================================================
+
+# ── helpers ──────────────────────────────────────────────────────────
+
+def _get_total_iters() -> int:
+    if not CURRICULUM:
+        return 0
+    return max(p.iters[1] for p in CURRICULUM)
+
+
+def _get_phase(global_iter: int) -> Optional[CurriculumPhase]:
+    for phase in CURRICULUM:
+        if phase.iters[0] <= global_iter < phase.iters[1]:
+            return phase
+    return None
+
+
+def _sample_config(phase: CurriculumPhase, rng: random.Random) -> ScenarioConfig:
+    cfg = phase.config
+    if isinstance(cfg, Fixed):
+        return cfg.config
+    if isinstance(cfg, RandomChoice):
+        return rng.choice(cfg.choices)
+    if isinstance(cfg, RandomRange):
+        return ScenarioConfig(
+            n_strikers=rng.randint(*cfg.n_strikers),
+            n_jammers=rng.randint(*cfg.n_jammers),
+            n_known_targets=rng.randint(*cfg.n_known_targets),
+            n_unknown_targets=rng.randint(*cfg.n_unknown_targets),
+            n_known_radars=rng.randint(*cfg.n_known_radars),
+            n_unknown_radars=rng.randint(*cfg.n_unknown_radars),
+            radar_kill_probability=rng.uniform(*cfg.radar_kill_probability),
         )
-        next_index += 1
+    raise TypeError(f"Unknown config type: {type(cfg)}")
 
-    return stages
+
+def _scenario_to_env_cfg(
+    scenario: ScenarioConfig,
+    max_steps: int,
+    reward_cfg: RewardConfig,
+    fofe_cfg: Optional[FOFEConfig] = None,
+) -> EnvConfig:
+    env_cfg = EnvConfig(
+        n_strikers=scenario.n_strikers,
+        n_jammers=scenario.n_jammers,
+        n_known_targets=scenario.n_known_targets,
+        n_unknown_targets=scenario.n_unknown_targets,
+        n_known_radars=scenario.n_known_radars,
+        n_unknown_radars=scenario.n_unknown_radars,
+        max_steps=max_steps,
+        radar_kill_probability=scenario.radar_kill_probability,
+        reward_config=copy.deepcopy(reward_cfg),
+    )
+    if fofe_cfg is not None:
+        env_cfg._use_fofe = fofe_cfg.use_fofe
+    return env_cfg
+
+
+def _next_eval_boundary(global_iter: int, eval_every: int) -> int:
+    if eval_every <= 0:
+        return 10**9
+    return ((global_iter // eval_every) + 1) * eval_every
 
 
 def _merge_logs(dst: Dict[str, List[float]], src: Dict[str, List[float]]) -> None:
@@ -137,167 +249,178 @@ def _merge_logs(dst: Dict[str, List[float]], src: Dict[str, List[float]]) -> Non
         dst[key].extend(values)
 
 
+# ── checkpoint adaptation ────────────────────────────────────────────
+
 def _adapt_checkpoint_for_stage(
     checkpoint: Optional[Dict[str, Any]],
     env_cfg: EnvConfig,
     ppo_cfg: PPOConfig,
     net_cfg: NetworkConfig,
+    fofe_cfg: Optional[FOFEConfig] = None,
 ) -> Optional[Dict[str, Any]]:
+    """Adapt checkpoint weights for a (possibly changed) env configuration.
+
+    - Actor policy: always strict load (architecture is config-invariant).
+    - Critic: strict when FOFE is on (shapes invariant); partial shape-
+      matching when FOFE is off (critic input may change with entity count).
+    """
     if checkpoint is None:
         return None
 
+    use_fofe = fofe_cfg is not None and fofe_cfg.use_fofe
+
     temp_env = build_env(env_cfg, ppo_cfg)
-    temp_policy = make_combined_policy(temp_env, hidden=net_cfg.actor_hidden, depth=net_cfg.depth)
-    temp_critic = make_combined_critic(temp_env, hidden=net_cfg.critic_hidden, depth=net_cfg.depth)
+    temp_policy = make_combined_policy(
+        temp_env, hidden=net_cfg.actor_hidden, depth=net_cfg.depth, fofe_cfg=fofe_cfg,
+    )
+    temp_critic = make_combined_critic(
+        temp_env, hidden=net_cfg.critic_hidden, depth=net_cfg.depth, fofe_cfg=fofe_cfg,
+    )
 
-    src_policy = checkpoint.get("policy_state_dict") if isinstance(checkpoint, dict) else None
-    src_critic = checkpoint.get("critic_state_dict") if isinstance(checkpoint, dict) else None
+    src_policy = checkpoint.get("policy_state_dict")
+    src_critic = checkpoint.get("critic_state_dict")
 
+    # ── Policy: always strict ────────────────────────────────────────
     dst_policy = temp_policy.state_dict()
-    dst_critic = temp_critic.state_dict()
-
     matched_policy = 0
-    matched_critic = 0
-
     if isinstance(src_policy, dict):
         temp_policy.load_state_dict(src_policy, strict=True)
         dst_policy = temp_policy.state_dict()
         matched_policy = len([v for v in dst_policy.values() if isinstance(v, torch.Tensor)])
 
+    # ── Critic: strict (FOFE) or partial (legacy) ────────────────────
+    dst_critic = temp_critic.state_dict()
+    matched_critic = 0
     if isinstance(src_critic, dict):
-        for key, tensor in src_critic.items():
-            if not isinstance(tensor, torch.Tensor):
-                continue
-            if key in dst_critic and isinstance(dst_critic[key], torch.Tensor) and tuple(dst_critic[key].shape) == tuple(tensor.shape):
-                dst_critic[key] = tensor.detach().to(dst_critic[key].device, dtype=dst_critic[key].dtype)
-                matched_critic += 1
+        if use_fofe:
+            temp_critic.load_state_dict(src_critic, strict=True)
+            dst_critic = temp_critic.state_dict()
+            matched_critic = len(dst_critic)
+        else:
+            for key, tensor in src_critic.items():
+                if not isinstance(tensor, torch.Tensor):
+                    continue
+                if (key in dst_critic
+                        and isinstance(dst_critic[key], torch.Tensor)
+                        and tuple(dst_critic[key].shape) == tuple(tensor.shape)):
+                    dst_critic[key] = tensor.detach().to(
+                        dst_critic[key].device, dtype=dst_critic[key].dtype,
+                    )
+                    matched_critic += 1
 
     print(
-        f"Checkpoint adaptation: policy strict_load tensors={matched_policy}, "
-        f"critic matched {matched_critic}/{len(dst_critic)}"
+        f"  Checkpoint adapt: policy={matched_policy} tensors (strict), "
+        f"critic={matched_critic}/{len(dst_critic)} ({'strict' if use_fofe else 'partial'})"
     )
 
-    adapted = {
+    return {
         "policy_state_dict": dst_policy,
         "critic_state_dict": dst_critic,
         "reward_normalizer_state_dict": checkpoint.get("reward_normalizer_state_dict"),
-        "from_stage_label": checkpoint.get("stage_label"),
     }
-    return adapted
 
 
-def _evaluate_generalized_policy(
+# ── multi-scenario evaluation ────────────────────────────────────────
+
+def _run_multi_scenario_eval(
     checkpoint: Dict[str, Any],
+    eval_scenarios: List[ScenarioConfig],
     reward_cfg: RewardConfig,
     ppo_template: PPOConfig,
     net_cfg: NetworkConfig,
+    fofe_cfg: Optional[FOFEConfig],
     max_steps: int,
     n_eval_episodes: int,
-) -> List[Dict[str, Any]]:
-    eval_setups = _get_generalized_eval_setups()
+) -> Dict[str, Dict[str, float]]:
+    """Evaluate current policy on every scenario. Returns {label: metrics}."""
+    results: Dict[str, Dict[str, float]] = {}
 
-    print("\n=== Generalized Single-Policy Evaluation ===")
-    print(f"Episodes per configuration: {n_eval_episodes}")
+    for scenario in eval_scenarios:
+        env_cfg = _scenario_to_env_cfg(scenario, max_steps, reward_cfg, fofe_cfg)
+        adapted = _adapt_checkpoint_for_stage(checkpoint, env_cfg, ppo_template, net_cfg, fofe_cfg)
+        if adapted is None:
+            continue
 
-    results: List[Dict[str, Any]] = []
-    for label, ns, nj, nr, nt in eval_setups:
-        eval_env_cfg = EnvConfig(
-            n_strikers=ns,
-            n_jammers=nj,
-            n_targets=nt,
-            n_radars=nr,
-            max_steps=max_steps,
-            radar_kill_probability=1.0,
-            reward_config=copy.deepcopy(reward_cfg),
+        eval_env = build_env(env_cfg, ppo_template)
+        eval_policy = make_combined_policy(
+            eval_env, hidden=net_cfg.actor_hidden, depth=net_cfg.depth, fofe_cfg=fofe_cfg,
         )
-        eval_ppo_cfg = PPOConfig(
-            num_envs=ppo_template.num_envs,
-            n_iters=1,
-            num_epochs=ppo_template.num_epochs,
-            minibatch_size=ppo_template.minibatch_size,
-            actor_lr=ppo_template.actor_lr,
-            critic_lr=ppo_template.critic_lr,
-            clip_eps=ppo_template.clip_eps,
-            entropy_coef=ppo_template.entropy_coef,
-            normalize_rewards=ppo_template.normalize_rewards,
-            seed=ppo_template.seed,
-            log_every=ppo_template.log_every,
-            device=ppo_template.device,
-        )
-
-        adapted_ckpt = _adapt_checkpoint_for_stage(checkpoint, eval_env_cfg, eval_ppo_cfg, net_cfg)
-        if adapted_ckpt is None:
-            raise RuntimeError("Generalized evaluation requires a trained checkpoint.")
-
-        eval_env = build_env(eval_env_cfg, eval_ppo_cfg)
-        eval_policy = make_combined_policy(eval_env, hidden=net_cfg.actor_hidden, depth=net_cfg.depth)
-        eval_policy.load_state_dict(adapted_ckpt["policy_state_dict"], strict=True)
-        eval_policy = eval_policy.to(eval_ppo_cfg.device)
+        eval_policy.load_state_dict(adapted["policy_state_dict"], strict=True)
+        eval_policy = eval_policy.to(ppo_template.device)
 
         metrics = evaluate_current_policy(
-            eval_policy,
-            eval_env_cfg,
-            eval_ppo_cfg,
-            n_eval_episodes=int(n_eval_episodes),
+            eval_policy, env_cfg, ppo_template, n_eval_episodes=n_eval_episodes,
         )
 
-        results.append(
-            {
-                "config": label,
-                "completion_rate": float(metrics["eval_task_completion_rate"]),
-                "survival_rate": float(metrics["eval_survival_rate"]),
-                "mean_duration": float(metrics["eval_mean_duration"]),
-            }
-        )
-
-    headers = ("Config", "Completion", "Survival", "Mean Time")
-    print("\n" + f"{headers[0]:<14}{headers[1]:>14}{headers[2]:>12}{headers[3]:>14}")
-    print("-" * 54)
-    for row in results:
-        print(
-            f"{row['config']:<14}"
-            f"{row['completion_rate']:>14.4f}"
-            f"{row['survival_rate']:>12.4f}"
-            f"{row['mean_duration']:>14.2f}"
-        )
+        results[scenario.label] = {
+            "completion_rate": float(metrics["eval_task_completion_rate"]),
+            "survival_rate": float(metrics["eval_survival_rate"]),
+            "mean_duration": float(metrics["eval_mean_duration"]),
+            "mean_reward": float(metrics["eval_mean_episode_total_reward"]),
+        }
 
     return results
 
 
-def _get_generalized_eval_setups() -> List[tuple[str, int, int, int, int]]:
-    # (label, n_strikers, n_jammers, n_radars, n_targets)
-    return [
-        ("1s1j1r1t", 1, 1, 1, 1),
-        ("1s1j2r2t", 1, 1, 2, 2),
-        ("2s2j2r2t", 2, 2, 2, 2),
-        ("2s2j3r3t", 2, 2, 3, 3),
-    ]
+def _print_eval_results(global_iter: int, results: Dict[str, Dict[str, float]]) -> None:
+    print(f"\n{'=' * 70}")
+    print(f"  Multi-scenario evaluation @ global iteration {global_iter}")
+    print(f"{'=' * 70}")
+    hdr = ("Scenario", "Completion", "Survival", "Duration", "Reward")
+    print(f"  {hdr[0]:<24} {hdr[1]:>10} {hdr[2]:>10} {hdr[3]:>10} {hdr[4]:>10}")
+    print(f"  {'-' * 68}")
 
+    comp_v, surv_v, dur_v, rew_v = [], [], [], []
+    for label, m in results.items():
+        print(
+            f"  {label:<24} "
+            f"{m['completion_rate']:>10.4f} "
+            f"{m['survival_rate']:>10.4f} "
+            f"{m['mean_duration']:>10.2f} "
+            f"{m['mean_reward']:>10.3f}"
+        )
+        comp_v.append(m["completion_rate"])
+        surv_v.append(m["survival_rate"])
+        dur_v.append(m["mean_duration"])
+        rew_v.append(m["mean_reward"])
+
+    if comp_v:
+        n = len(comp_v)
+        print(f"  {'-' * 68}")
+        print(
+            f"  {'AVERAGE':<24} "
+            f"{sum(comp_v)/n:>10.4f} "
+            f"{sum(surv_v)/n:>10.4f} "
+            f"{sum(dur_v)/n:>10.2f} "
+            f"{sum(rew_v)/n:>10.3f}"
+        )
+    print()
+
+
+# ── shape-consistency guard ──────────────────────────────────────────
 
 def _assert_actor_policy_shape_consistency(
     ppo_template: PPOConfig,
     net_cfg: NetworkConfig,
+    fofe_cfg: Optional[FOFEConfig],
     env_cfgs: List[EnvConfig],
 ) -> None:
-    """Assert actor parameter shapes are identical across all curriculum/eval configs.
-
-    This guards the requirement that one actor policy architecture is used for all
-    configurations. If this fails, strict policy transfer would also fail.
-    """
     if not env_cfgs:
         return
-
     base_env = build_env(env_cfgs[0], ppo_template)
-    base_policy = make_combined_policy(base_env, hidden=net_cfg.actor_hidden, depth=net_cfg.depth)
+    base_policy = make_combined_policy(
+        base_env, hidden=net_cfg.actor_hidden, depth=net_cfg.depth, fofe_cfg=fofe_cfg,
+    )
     base_shapes = {
         k: tuple(v.shape)
         for k, v in base_policy.state_dict().items()
         if isinstance(v, torch.Tensor)
     }
-
     for idx, cfg in enumerate(env_cfgs[1:], start=2):
         env_i = build_env(cfg, ppo_template)
-        pol_i = make_combined_policy(env_i, hidden=net_cfg.actor_hidden, depth=net_cfg.depth)
+        pol_i = make_combined_policy(
+            env_i, hidden=net_cfg.actor_hidden, depth=net_cfg.depth, fofe_cfg=fofe_cfg,
+        )
         shapes_i = {
             k: tuple(v.shape)
             for k, v in pol_i.state_dict().items()
@@ -306,99 +429,250 @@ def _assert_actor_policy_shape_consistency(
         if shapes_i != base_shapes:
             raise RuntimeError(
                 f"Actor policy shape mismatch at config #{idx}: "
-                f"S/J/T/R={cfg.n_strikers}/{cfg.n_jammers}/{cfg.n_targets}/{cfg.n_radars}."
+                f"S={cfg.n_strikers} J={cfg.n_jammers} "
+                f"T={cfg.n_targets} R={cfg.n_radars}."
             )
 
 
+# ── dashboard plotting ───────────────────────────────────────────────
+
+def plot_curriculum_dashboard(
+    training_logs: Dict[str, List[float]],
+    eval_history: Dict[int, Dict[str, Dict[str, float]]],
+    curriculum: List[CurriculumPhase],
+) -> None:
+    """Plot curriculum training dashboard with per-scenario eval metrics."""
+
+    def _plot_valid(ax, x, y, label, **kwargs):
+        x = np.asarray(x, dtype=float)
+        y = np.asarray(y, dtype=float)
+        valid = np.isfinite(y)
+        if not np.any(valid):
+            return
+        ax.plot(x[valid], y[valid], marker="o", markersize=2, label=label, **kwargs)
+
+    def _add_phase_shading(ax, curriculum_phases):
+        bg = ["#e8f0fe", "#fef7e0", "#e8fce8", "#fce8e8", "#f0e8fc",
+              "#fce8f0", "#e0f7fe", "#fefce0"]
+        for i, phase in enumerate(curriculum_phases):
+            ax.axvspan(
+                phase.iters[0], phase.iters[1],
+                alpha=0.18, color=bg[i % len(bg)], zorder=0,
+            )
+
+    eval_iters = sorted(eval_history.keys())
+    if not eval_iters:
+        plot_training(training_logs)
+        return
+
+    first_eval = next(iter(eval_history.values()))
+    scenario_labels = list(first_eval.keys())
+
+    fig, axes = plt.subplots(3, 3, figsize=(26, 17))
+
+    # ── Row 0 col 0: Training reward ─────────────────────────────────
+    ax = axes[0, 0]
+    if "train_mean_episode_total_reward" in training_logs:
+        iters = np.arange(1, len(training_logs["train_mean_episode_total_reward"]) + 1)
+        _plot_valid(ax, iters, training_logs["train_mean_episode_total_reward"], "train_reward")
+    _add_phase_shading(ax, curriculum)
+    ax.set_title("Training Episode Reward")
+    ax.set_xlabel("Global Iteration")
+    ax.legend(fontsize=7)
+    ax.grid(True, alpha=0.3)
+
+    # ── Row 0 col 1: Policy + Value loss ─────────────────────────────
+    ax = axes[0, 1]
+    for key, lbl, clr in [
+        ("striker_loss_policy", "striker_pi", "tab:blue"),
+        ("striker_loss_value", "striker_V", "tab:orange"),
+        ("jammer_loss_policy", "jammer_pi", "tab:green"),
+        ("jammer_loss_value", "jammer_V", "tab:red"),
+    ]:
+        if key in training_logs:
+            iters = np.arange(1, len(training_logs[key]) + 1)
+            _plot_valid(ax, iters, training_logs[key], lbl, color=clr)
+    _add_phase_shading(ax, curriculum)
+    ax.set_title("Policy & Value Loss")
+    ax.set_xlabel("Global Iteration")
+    ax.legend(fontsize=7)
+    ax.grid(True, alpha=0.3)
+
+    # ── Row 0 col 2: Entropy / KL ────────────────────────────────────
+    ax = axes[0, 2]
+    for key, lbl, clr in [
+        ("striker_entropy", "striker_H", "tab:green"),
+        ("jammer_entropy", "jammer_H", "tab:olive"),
+        ("striker_approx_kl", "striker_KL", "tab:red"),
+        ("jammer_approx_kl", "jammer_KL", "tab:pink"),
+    ]:
+        if key in training_logs:
+            iters = np.arange(1, len(training_logs[key]) + 1)
+            _plot_valid(ax, iters, training_logs[key], lbl, color=clr)
+    _add_phase_shading(ax, curriculum)
+    ax.set_title("Entropy & KL Divergence")
+    ax.set_xlabel("Global Iteration")
+    ax.legend(fontsize=7)
+    ax.grid(True, alpha=0.3)
+
+    # ── Row 1-2: Multi-scenario eval metrics ─────────────────────────
+    metric_axes = [
+        (axes[1, 0], "completion_rate", "Task Completion Rate"),
+        (axes[1, 1], "survival_rate", "Survival Rate"),
+        (axes[1, 2], "mean_duration", "Mean Duration"),
+        (axes[2, 0], "mean_reward", "Mean Reward"),
+    ]
+
+    for ax, metric_key, title in metric_axes:
+        for lbl in scenario_labels:
+            vals = [eval_history[ei][lbl][metric_key] for ei in eval_iters]
+            _plot_valid(ax, eval_iters, vals, lbl)
+
+        avg = []
+        for ei in eval_iters:
+            sv = [eval_history[ei][lbl][metric_key] for lbl in scenario_labels]
+            finite = [v for v in sv if math.isfinite(v)]
+            avg.append(sum(finite) / len(finite) if finite else float("nan"))
+        _plot_valid(
+            ax, eval_iters, avg, "AVERAGE",
+            linewidth=2.5, color="black", linestyle="--",
+        )
+        _add_phase_shading(ax, curriculum)
+        ax.set_title(f"Eval: {title}")
+        ax.set_xlabel("Global Iteration")
+        ax.legend(fontsize=6, loc="best")
+        ax.grid(True, alpha=0.3)
+
+    # ── Row 2 col 1: Curriculum phase timeline ────────────────────────
+    ax = axes[2, 1]
+    palette = ["tab:blue", "tab:orange", "tab:green", "tab:red", "tab:purple",
+               "tab:brown", "tab:cyan", "tab:olive"]
+    for i, phase in enumerate(curriculum):
+        clr = palette[i % len(palette)]
+        ax.barh(
+            0, phase.iters[1] - phase.iters[0], left=phase.iters[0],
+            height=0.5, color=clr, alpha=0.7, edgecolor="black",
+        )
+        mid = (phase.iters[0] + phase.iters[1]) / 2
+        cfg = phase.config
+        if isinstance(cfg, Fixed):
+            desc = f"{phase.name}\n{cfg.config.label}"
+        elif isinstance(cfg, RandomChoice):
+            desc = f"{phase.name}\nRndChoice({len(cfg.choices)})"
+        elif isinstance(cfg, RandomRange):
+            desc = f"{phase.name}\nRndRange"
+        else:
+            desc = phase.name
+        ax.text(mid, 0, desc, ha="center", va="center", fontsize=6, fontweight="bold")
+    ax.set_title("Curriculum Phases")
+    ax.set_xlabel("Global Iteration")
+    ax.set_yticks([])
+
+    # ── Row 2 col 2: Time per iteration ───────────────────────────────
+    ax = axes[2, 2]
+    if "iter_time_s" in training_logs:
+        iters = np.arange(1, len(training_logs["iter_time_s"]) + 1)
+        _plot_valid(ax, iters, training_logs["iter_time_s"], "total", color="tab:blue")
+    if "iter_time_excl_eval_s" in training_logs:
+        iters = np.arange(1, len(training_logs["iter_time_excl_eval_s"]) + 1)
+        _plot_valid(ax, iters, training_logs["iter_time_excl_eval_s"], "train only", color="tab:orange")
+    _add_phase_shading(ax, curriculum)
+    ax.set_title("Time per Iteration (s)")
+    ax.set_xlabel("Global Iteration")
+    ax.set_ylabel("seconds")
+    ax.legend(fontsize=7)
+    ax.grid(True, alpha=0.3)
+
+    fig.suptitle("Curriculum MAPPO Training Dashboard", fontsize=15, fontweight="bold")
+    fig.tight_layout(rect=[0, 0, 1, 0.96])
+    plt.show()
+
+
+# =====================================================================
+#  CLI  (training hyper-parameters; curriculum is defined above)
+# =====================================================================
+
 def build_parser() -> argparse.ArgumentParser:
-    env_defaults = EnvConfig()
-    ppo_defaults = PPOConfig()
-    net_defaults = NetworkConfig()
-    reward_defaults = RewardConfig()
+    env_d = EnvConfig()
+    ppo_d = PPOConfig()
+    net_d = NetworkConfig()
+    rew_d = RewardConfig()
 
-    p = argparse.ArgumentParser(description="Dual-MAPPO curriculum runner (run.py remains unchanged)")
+    p = argparse.ArgumentParser(
+        description="Curriculum MAPPO runner.  "
+        "Edit CURRICULUM / EVAL_SCENARIOS at the top of this file to configure.",
+    )
 
-    p.add_argument("--stage1_iters", type=int, default=50)
-    p.add_argument("--stage2_iters", type=int, default=50)
-    p.add_argument("--stage3_iters", type=int, default=100)
-    p.add_argument("--stage4_iters", type=int, default=100)
-    p.add_argument("--stage5_iters", type=int, default=200)
-    # Stage-5 randomization mode:
-    # --stage5_use_bounds=True => sample S/J/R/T and radar kill prob from bounds every iteration.
-    # --stage5_use_bounds=False => sample from predefined stage2/3/4 templates every iteration.
-    p.add_argument("--stage5_use_bounds", action=argparse.BooleanOptionalAction, default=True)
-    p.add_argument("--stage5_min_strikers", type=int, default=1)
-    p.add_argument("--stage5_max_strikers", type=int, default=2)
-    p.add_argument("--stage5_min_jammers", type=int, default=1)
-    p.add_argument("--stage5_max_jammers", type=int, default=2)
-    p.add_argument("--stage5_min_radars", type=int, default=1)
-    p.add_argument("--stage5_max_radars", type=int, default=3)
-    p.add_argument("--stage5_min_targets", type=int, default=1)
-    p.add_argument("--stage5_max_targets", type=int, default=3)
-    p.add_argument("--stage5_min_radar_kill_probability", type=float, default=0.5)
-    p.add_argument("--stage5_max_radar_kill_probability", type=float, default=1.0)
-    p.add_argument("--generalized_eval_episodes", type=int, default=30)
-    p.add_argument("--generalized_eval", action=argparse.BooleanOptionalAction, default=True)
+    # PPO
+    p.add_argument("--num_envs", type=int, default=ppo_d.num_envs)
+    p.add_argument("--max_steps", type=int, default=env_d.max_steps)
+    p.add_argument("--num_epochs", type=int, default=ppo_d.num_epochs)
+    p.add_argument("--minibatch_size", type=int, default=ppo_d.minibatch_size)
+    p.add_argument("--actor_lr", type=float, default=ppo_d.actor_lr)
+    p.add_argument("--critic_lr", type=float, default=ppo_d.critic_lr)
+    p.add_argument("--clip_eps", type=float, default=ppo_d.clip_eps)
+    p.add_argument("--entropy_coef", type=float, default=ppo_d.entropy_coef)
+    p.add_argument("--normalize_rewards", action=argparse.BooleanOptionalAction, default=ppo_d.normalize_rewards)
+    p.add_argument("--seed", type=int, default=ppo_d.seed)
+    p.add_argument("--log_every", type=int, default=ppo_d.log_every)
 
-    p.add_argument("--num_envs", type=int, default=ppo_defaults.num_envs)
-    p.add_argument("--max_steps", type=int, default=env_defaults.max_steps)
-    p.add_argument("--num_epochs", type=int, default=ppo_defaults.num_epochs)
-    p.add_argument("--minibatch_size", type=int, default=ppo_defaults.minibatch_size)
-    p.add_argument("--actor_lr", type=float, default=ppo_defaults.actor_lr)
-    p.add_argument("--critic_lr", type=float, default=ppo_defaults.critic_lr)
-    p.add_argument("--clip_eps", type=float, default=ppo_defaults.clip_eps)
-    p.add_argument("--entropy_coef", type=float, default=ppo_defaults.entropy_coef)
-    p.add_argument("--normalize_rewards", action=argparse.BooleanOptionalAction, default=ppo_defaults.normalize_rewards)
-    p.add_argument("--seed", type=int, default=ppo_defaults.seed)
-    p.add_argument("--log_every", type=int, default=ppo_defaults.log_every)
+    # Network
+    p.add_argument("--actor_hidden", type=int, default=net_d.actor_hidden)
+    p.add_argument("--critic_hidden", type=int, default=net_d.critic_hidden)
+    p.add_argument("--depth", type=int, default=net_d.depth)
 
-    p.add_argument("--actor_hidden", type=int, default=net_defaults.actor_hidden)
-    p.add_argument("--critic_hidden", type=int, default=net_defaults.critic_hidden)
-    p.add_argument("--depth", type=int, default=net_defaults.depth)
+    # Rewards
+    p.add_argument("--target_destroyed", type=float, default=rew_d.target_destroyed)
+    p.add_argument("--agent_destroyed", type=float, default=rew_d.agent_destroyed)
+    p.add_argument("--timestep_penalty", type=float, default=rew_d.timestep_penalty)
+    p.add_argument("--team_spirit", type=float, default=rew_d.team_spirit)
+    p.add_argument("--striker_progress_scale", type=float, default=rew_d.striker_progress_scale)
+    p.add_argument("--jammer_progress_scale", type=float, default=rew_d.jammer_progress_scale)
+    p.add_argument("--jammer_jam_bonus", type=float, default=rew_d.jammer_jam_bonus)
 
-    p.add_argument("--target_destroyed", type=float, default=reward_defaults.target_destroyed)
-    p.add_argument("--agent_destroyed", type=float, default=reward_defaults.agent_destroyed)
-    p.add_argument("--timestep_penalty", type=float, default=reward_defaults.timestep_penalty)
-    p.add_argument("--team_spirit", type=float, default=reward_defaults.team_spirit)
-    p.add_argument("--striker_progress_scale", type=float, default=reward_defaults.striker_progress_scale)
-    p.add_argument("--jammer_progress_scale", type=float, default=reward_defaults.jammer_progress_scale)
-    p.add_argument("--jammer_jam_bonus", type=float, default=reward_defaults.jammer_jam_bonus)
-
+    # Save / load
     p.add_argument("--save_dir", type=str, default="runs")
-    p.add_argument("--save_name", type=str, default="dual_mappo_curriculum.pt")
-    p.add_argument("--save_stage_checkpoints", action=argparse.BooleanOptionalAction, default=False)
+    p.add_argument("--save_name", type=str, default="curriculum_mappo.pt")
     p.add_argument("--load_checkpoint", type=str, default=None)
     p.add_argument("--no_plot", action="store_true")
     p.add_argument("--no_animate", action="store_true")
 
+    # CLI overrides for the top-of-file eval settings
+    p.add_argument("--eval_every", type=int, default=None,
+                   help="Override EVAL_EVERY (default: use value at top of file)")
+    p.add_argument("--eval_episodes", type=int, default=None,
+                   help="Override EVAL_EPISODES (default: use value at top of file)")
+
     return p
 
+
+# =====================================================================
+#  MAIN
+# =====================================================================
 
 def main() -> None:
     args = build_parser().parse_args()
 
-    for key in ("stage1_iters", "stage2_iters", "stage3_iters", "stage4_iters", "stage5_iters"):
-        if int(getattr(args, key)) <= 0:
-            raise ValueError(f"{key} must be > 0")
-    if int(args.generalized_eval_episodes) <= 0:
-        raise ValueError("generalized_eval_episodes must be > 0")
-    for low_key, high_key in (
-        ("stage5_min_strikers", "stage5_max_strikers"),
-        ("stage5_min_jammers", "stage5_max_jammers"),
-        ("stage5_min_radars", "stage5_max_radars"),
-        ("stage5_min_targets", "stage5_max_targets"),
-    ):
-        if int(getattr(args, low_key)) <= 0:
-            raise ValueError(f"{low_key} must be > 0")
-        if int(getattr(args, high_key)) < int(getattr(args, low_key)):
-            raise ValueError(f"{high_key} must be >= {low_key}")
-    if not (0.0 <= float(args.stage5_min_radar_kill_probability) <= 1.0):
-        raise ValueError("stage5_min_radar_kill_probability must be in [0,1]")
-    if not (0.0 <= float(args.stage5_max_radar_kill_probability) <= 1.0):
-        raise ValueError("stage5_max_radar_kill_probability must be in [0,1]")
-    if float(args.stage5_max_radar_kill_probability) < float(args.stage5_min_radar_kill_probability):
-        raise ValueError("stage5_max_radar_kill_probability must be >= stage5_min_radar_kill_probability")
+    eval_every = args.eval_every if args.eval_every is not None else EVAL_EVERY
+    eval_episodes = args.eval_episodes if args.eval_episodes is not None else EVAL_EPISODES
+    fofe_cfg = FOFE_CONFIG
 
+    # ── validate curriculum ──────────────────────────────────────────
+    total_iters = _get_total_iters()
+    if total_iters <= 0:
+        raise RuntimeError("CURRICULUM is empty or has no iterations.")
+    for i, phase in enumerate(CURRICULUM):
+        if phase.iters[0] >= phase.iters[1]:
+            raise ValueError(f"Phase '{phase.name}' has empty range {phase.iters}")
+        if i > 0 and phase.iters[0] != CURRICULUM[i - 1].iters[1]:
+            raise ValueError(
+                f"Gap/overlap between '{CURRICULUM[i-1].name}' (ends {CURRICULUM[i-1].iters[1]}) "
+                f"and '{phase.name}' (starts {phase.iters[0]})"
+            )
+    if not EVAL_SCENARIOS:
+        raise ValueError("EVAL_SCENARIOS must not be empty.")
+
+    # ── build shared configs ─────────────────────────────────────────
     reward_cfg = RewardConfig(
         target_destroyed=args.target_destroyed,
         agent_destroyed=args.agent_destroyed,
@@ -408,7 +682,6 @@ def main() -> None:
         jammer_progress_scale=args.jammer_progress_scale,
         jammer_jam_bonus=args.jammer_jam_bonus,
     )
-
     ppo_template = PPOConfig(
         num_envs=args.num_envs,
         n_iters=1,
@@ -428,74 +701,121 @@ def main() -> None:
         depth=args.depth,
     )
 
-    stages: List[CurriculumStage] = _build_requested_five_stage_plan(args)
+    # ── print plan ───────────────────────────────────────────────────
+    print("\n" + "=" * 70)
+    print("  CURRICULUM PLAN")
+    print("=" * 70)
+    print(f"  Total global iterations : {total_iters}")
+    print(f"  Multi-scenario eval     : every {eval_every} iters, "
+          f"{eval_episodes} episodes/scenario, {len(EVAL_SCENARIOS)} scenarios")
+    print()
+    for phase in CURRICULUM:
+        cfg = phase.config
+        if isinstance(cfg, Fixed):
+            desc = f"Fixed({cfg.config.label})"
+        elif isinstance(cfg, RandomChoice):
+            desc = f"RandomChoice([{', '.join(c.label for c in cfg.choices)}])"
+        elif isinstance(cfg, RandomRange):
+            desc = (
+                f"RandomRange(S={cfg.n_strikers}, J={cfg.n_jammers}, "
+                f"kT={cfg.n_known_targets}, uT={cfg.n_unknown_targets}, "
+                f"kR={cfg.n_known_radars}, uR={cfg.n_unknown_radars}, "
+                f"p={cfg.radar_kill_probability})"
+            )
+        else:
+            desc = str(cfg)
+        print(f"  [{phase.iters[0]:4d}, {phase.iters[1]:4d})  {phase.name:25s} {desc}")
+    print()
+    print("  Eval scenarios:")
+    for sc in EVAL_SCENARIOS:
+        print(f"    - {sc.label}")
+    print("=" * 70)
 
-    if not stages:
-        raise RuntimeError("No curriculum stages were generated. Check n_iters and settings.")
+    # ── shape-consistency check ──────────────────────────────────────
+    shape_check_cfgs: List[EnvConfig] = []
+    # eval scenarios
+    for sc in EVAL_SCENARIOS:
+        shape_check_cfgs.append(_scenario_to_env_cfg(sc, args.max_steps, reward_cfg, fofe_cfg))
+    # curriculum corners
+    for phase in CURRICULUM:
+        cfg = phase.config
+        if isinstance(cfg, Fixed):
+            shape_check_cfgs.append(
+                _scenario_to_env_cfg(cfg.config, args.max_steps, reward_cfg, fofe_cfg),
+            )
+        elif isinstance(cfg, RandomChoice):
+            for c in cfg.choices:
+                shape_check_cfgs.append(
+                    _scenario_to_env_cfg(c, args.max_steps, reward_cfg, fofe_cfg),
+                )
+        elif isinstance(cfg, RandomRange):
+            for s in cfg.n_strikers:
+                for j in cfg.n_jammers:
+                    for kt in cfg.n_known_targets:
+                        for kr in cfg.n_known_radars:
+                            shape_check_cfgs.append(_scenario_to_env_cfg(
+                                ScenarioConfig(
+                                    n_strikers=s, n_jammers=j,
+                                    n_known_targets=kt, n_known_radars=kr,
+                                ),
+                                args.max_steps, reward_cfg, fofe_cfg,
+                            ))
+    _assert_actor_policy_shape_consistency(ppo_template, net_cfg, fofe_cfg, shape_check_cfgs)
+    print("Actor shape consistency check: PASSED")
 
-    print("\n=== Curriculum Plan ===")
-    print("Actor policy transfer mode: strict=True (same actor weights/biases carried each stage)")
-    print("Domain randomization: enabled in stage 5 (new random config every iteration)")
-    print(f"Reward normalization: {'enabled' if ppo_template.normalize_rewards else 'disabled'} and state carried across stages")
-    for st in stages:
-        print(
-            f"Stage {st.index:02d} [{st.label}] | iters={st.n_iters:3d} | "
-            f"S/J/T/R={st.n_strikers}/{st.n_jammers}/{st.n_targets}/{st.n_radars} | "
-            f"radar_kill_probability={st.radar_kill_probability:.3f}"
-        )
-
+    # ── optional initial checkpoint ──────────────────────────────────
     incoming_checkpoint: Optional[Dict[str, Any]] = None
     if args.load_checkpoint:
         incoming_checkpoint = torch.load(args.load_checkpoint, map_location=ppo_template.device)
-        print(f"Loaded initial checkpoint from: {args.load_checkpoint}")
+        print(f"Loaded initial checkpoint: {args.load_checkpoint}")
 
-    all_logs: Dict[str, List[float]] = {}
-    stage_records: List[Dict[str, Any]] = []
-    final_env_cfg: Optional[EnvConfig] = None
-    final_policy = None
-    final_critic = None
-    final_reward_normalizer = None
+    # ── training state ───────────────────────────────────────────────
+    all_training_logs: Dict[str, List[float]] = {}
+    eval_history: Dict[int, Dict[str, Dict[str, float]]] = {}
+    iter_configs: List[Dict[str, Any]] = []
+    rng = random.Random(args.seed + 7777)
 
-    # Verify once that actor architecture is identical across all planned/eval configurations.
-    # This enforces the single-policy-shape requirement before training starts.
-    shape_check_cfgs: List[EnvConfig] = []
-    for st in stages:
-        shape_check_cfgs.append(
-            EnvConfig(
-                n_strikers=st.n_strikers,
-                n_jammers=st.n_jammers,
-                n_targets=st.n_targets,
-                n_radars=st.n_radars,
-                max_steps=args.max_steps,
-                radar_kill_probability=st.radar_kill_probability,
-                reward_config=copy.deepcopy(reward_cfg),
-            )
-        )
-    shape_check_cfgs.extend(
-        [
-            EnvConfig(n_strikers=1, n_jammers=1, n_targets=1, n_radars=1, max_steps=args.max_steps, reward_config=copy.deepcopy(reward_cfg)),
-            EnvConfig(n_strikers=1, n_jammers=1, n_targets=2, n_radars=2, max_steps=args.max_steps, reward_config=copy.deepcopy(reward_cfg)),
-            EnvConfig(n_strikers=2, n_jammers=2, n_targets=2, n_radars=2, max_steps=args.max_steps, reward_config=copy.deepcopy(reward_cfg)),
-            EnvConfig(n_strikers=2, n_jammers=2, n_targets=3, n_radars=3, max_steps=args.max_steps, reward_config=copy.deepcopy(reward_cfg)),
-        ]
-    )
-    _assert_actor_policy_shape_consistency(ppo_template, net_cfg, shape_check_cfgs)
-    print("Actor shape consistency check: PASSED across curriculum + evaluation configurations")
+    # ==================================================================
+    #  MAIN CURRICULUM LOOP
+    # ==================================================================
+    global_iter = 0
+    while global_iter < total_iters:
+        phase = _get_phase(global_iter)
+        if phase is None:
+            raise RuntimeError(f"No curriculum phase for global iteration {global_iter}")
 
-    for st in stages:
-        stage_reward_cfg = copy.deepcopy(reward_cfg)
-        env_cfg = EnvConfig(
-            n_strikers=st.n_strikers,
-            n_jammers=st.n_jammers,
-            n_targets=st.n_targets,
-            n_radars=st.n_radars,
-            max_steps=args.max_steps,
-            radar_kill_probability=st.radar_kill_probability,
-            reward_config=stage_reward_cfg,
-        )
+        # ── determine batch size and scenario config ─────────────────
+        if isinstance(phase.config, Fixed):
+            # batch consecutive Fixed iterations, split at eval boundaries
+            phase_end = phase.iters[1]
+            next_eval = _next_eval_boundary(global_iter, eval_every)
+            batch_end = min(phase_end, next_eval, total_iters)
+            n_batch = batch_end - global_iter
+            scenario = phase.config.config
+        else:
+            # RandomChoice / RandomRange: sample fresh each iteration
+            n_batch = 1
+            scenario = _sample_config(phase, rng)
+
+        # record which config each global iteration used
+        for _ in range(n_batch):
+            iter_configs.append({
+                "phase": phase.name,
+                "config": scenario.label,
+                "n_strikers": scenario.n_strikers,
+                "n_jammers": scenario.n_jammers,
+                "n_known_targets": scenario.n_known_targets,
+                "n_unknown_targets": scenario.n_unknown_targets,
+                "n_known_radars": scenario.n_known_radars,
+                "n_unknown_radars": scenario.n_unknown_radars,
+                "radar_kill_probability": scenario.radar_kill_probability,
+            })
+
+        # ── build env / ppo configs ──────────────────────────────────
+        env_cfg = _scenario_to_env_cfg(scenario, args.max_steps, reward_cfg, fofe_cfg)
         ppo_cfg = PPOConfig(
             num_envs=ppo_template.num_envs,
-            n_iters=st.n_iters,
+            n_iters=n_batch,
             num_epochs=ppo_template.num_epochs,
             minibatch_size=ppo_template.minibatch_size,
             actor_lr=ppo_template.actor_lr,
@@ -503,188 +823,148 @@ def main() -> None:
             clip_eps=ppo_template.clip_eps,
             entropy_coef=ppo_template.entropy_coef,
             normalize_rewards=ppo_template.normalize_rewards,
-            seed=ppo_template.seed + st.index,
+            seed=ppo_template.seed + global_iter,
+            log_every=ppo_template.log_every,
         )
+        # propagate global offset so trainer.py prints correct iter numbers
+        ppo_cfg.iteration_offset = global_iter
 
-        stage_exp_cfg = ExperimentConfig(env=env_cfg, ppo=ppo_cfg, net=net_cfg).finalize()
-        adapted_ckpt = _adapt_checkpoint_for_stage(incoming_checkpoint, stage_exp_cfg.env, stage_exp_cfg.ppo, stage_exp_cfg.net)
+        exp_cfg = ExperimentConfig(
+            env=env_cfg, ppo=ppo_cfg, net=net_cfg, fofe=fofe_cfg,
+        ).finalize()
+
+        # ── adapt checkpoint ─────────────────────────────────────────
+        adapted = _adapt_checkpoint_for_stage(
+            incoming_checkpoint, exp_cfg.env, exp_cfg.ppo, exp_cfg.net, fofe_cfg,
+        )
 
         print(
-            f"\n--- Training stage {st.index}/{len(stages)} ({st.label}) ---\n"
-            f"n_iters={st.n_iters}, S/J/T/R={st.n_strikers}/{st.n_jammers}/{st.n_targets}/{st.n_radars}, "
-            f"radar_kill_probability={st.radar_kill_probability:.3f}"
+            f"\n--- Global iter [{global_iter}, {global_iter + n_batch}) | "
+            f"Phase: {phase.name} | Config: {scenario.label} | "
+            f"n_iters={n_batch} ---"
         )
 
-        base_env, policy, critic, logs, reward_normalizer = train_mappo(
-            stage_exp_cfg.env,
-            stage_exp_cfg.ppo,
-            stage_exp_cfg.net,
-            checkpoint=adapted_ckpt,
+        # ── train ────────────────────────────────────────────────────
+        _base_env, policy, critic, logs, reward_normalizer = train_mappo(
+            exp_cfg.env, exp_cfg.ppo, exp_cfg.net, fofe_cfg, adapted,
         )
 
-        _merge_logs(all_logs, logs)
+        _merge_logs(all_training_logs, logs)
 
-        stage_end_eval = float("nan")
-        if logs.get("eval_mean_episode_total_reward"):
-            stage_end_eval = logs["eval_mean_episode_total_reward"][-1]
-
-        stage_record = {
-            "index": st.index,
-            "label": st.label,
-            "n_iters": st.n_iters,
-            "n_strikers": st.n_strikers,
-            "n_jammers": st.n_jammers,
-            "n_targets": st.n_targets,
-            "n_radars": st.n_radars,
-            "radar_kill_probability": st.radar_kill_probability,
-            "last_eval_mean_episode_total_reward": stage_end_eval,
-        }
-        stage_records.append(stage_record)
-
-        if args.save_stage_checkpoints:
-            stage_name = Path(args.save_name).stem
-            stage_suffix = Path(args.save_name).suffix or ".pt"
-            stage_path = Path(args.save_dir) / f"{stage_name}_stage_{st.index:02d}{stage_suffix}"
-            stage_path.parent.mkdir(parents=True, exist_ok=True)
-            torch.save(
-                {
-                    "policy_state_dict": policy.state_dict(),
-                    "critic_state_dict": critic.state_dict(),
-                    "env_cfg": stage_exp_cfg.env,
-                    "ppo_cfg": stage_exp_cfg.ppo,
-                    "net_cfg": stage_exp_cfg.net,
-                    "logs": logs,
-                    "reward_normalizer_state_dict": (
-                        reward_normalizer.state_dict() if reward_normalizer is not None else None
-                    ),
-                    "stage_record": stage_record,
-                    "stage_label": st.label,
-                },
-                stage_path,
-            )
-            print(f"Saved stage checkpoint: {stage_path}")
-
+        # ── update checkpoint ────────────────────────────────────────
         incoming_checkpoint = {
             "policy_state_dict": policy.state_dict(),
             "critic_state_dict": critic.state_dict(),
             "reward_normalizer_state_dict": (
                 reward_normalizer.state_dict() if reward_normalizer is not None else None
             ),
-            "stage_label": st.label,
         }
-        final_env_cfg = stage_exp_cfg.env
-        final_policy = policy
-        final_critic = critic
-        final_reward_normalizer = reward_normalizer
 
-    if final_env_cfg is None or final_policy is None or final_critic is None:
-        raise RuntimeError("Curriculum did not produce a final policy.")
+        global_iter += n_batch
 
-    final_checkpoint_payload = {
-        "policy_state_dict": final_policy.state_dict(),
-        "critic_state_dict": final_critic.state_dict(),
-        "reward_normalizer_state_dict": (
-            final_reward_normalizer.state_dict() if final_reward_normalizer is not None else None
-        ),
-        "stage_label": "final_curriculum_policy",
-    }
+        # ── multi-scenario evaluation ────────────────────────────────
+        if eval_every > 0 and global_iter % eval_every == 0:
+            eval_results = _run_multi_scenario_eval(
+                checkpoint=incoming_checkpoint,
+                eval_scenarios=EVAL_SCENARIOS,
+                reward_cfg=reward_cfg,
+                ppo_template=ppo_template,
+                net_cfg=net_cfg,
+                fofe_cfg=fofe_cfg,
+                max_steps=args.max_steps,
+                n_eval_episodes=eval_episodes,
+            )
+            eval_history[global_iter] = eval_results
+            _print_eval_results(global_iter, eval_results)
 
-    generalized_eval_results: List[Dict[str, Any]] = []
-    if bool(args.generalized_eval):
-        generalized_eval_results = _evaluate_generalized_policy(
-            checkpoint=final_checkpoint_payload,
+    # ── final evaluation (if not already on a boundary) ──────────────
+    if total_iters not in eval_history:
+        eval_results = _run_multi_scenario_eval(
+            checkpoint=incoming_checkpoint,
+            eval_scenarios=EVAL_SCENARIOS,
             reward_cfg=reward_cfg,
             ppo_template=ppo_template,
             net_cfg=net_cfg,
+            fofe_cfg=fofe_cfg,
             max_steps=args.max_steps,
-            n_eval_episodes=args.generalized_eval_episodes,
+            n_eval_episodes=eval_episodes,
         )
+        eval_history[total_iters] = eval_results
+        _print_eval_results(total_iters, eval_results)
 
+    # ── save ─────────────────────────────────────────────────────────
     save_dir = Path(args.save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
     save_path = save_dir / args.save_name
     torch.save(
         {
-            "policy_state_dict": final_policy.state_dict(),
-            "critic_state_dict": final_critic.state_dict(),
-            "env_cfg": final_env_cfg,
-            "ppo_cfg": ppo_template,
+            "policy_state_dict": incoming_checkpoint["policy_state_dict"],
+            "critic_state_dict": incoming_checkpoint["critic_state_dict"],
+            "reward_normalizer_state_dict": incoming_checkpoint["reward_normalizer_state_dict"],
             "net_cfg": net_cfg,
-            "logs": all_logs,
-            "reward_normalizer_state_dict": (
-                final_reward_normalizer.state_dict() if final_reward_normalizer is not None else None
-            ),
-            "curriculum_stages": stage_records,
-            "generalized_policy_eval": generalized_eval_results,
+            "ppo_template": ppo_template,
+            "fofe_cfg": fofe_cfg,
+            "reward_cfg": reward_cfg,
+            "training_logs": all_training_logs,
+            "eval_history": eval_history,
+            "iter_configs": iter_configs,
+            "curriculum_phases": [
+                {"name": p.name, "iters": p.iters, "config_type": type(p.config).__name__}
+                for p in CURRICULUM
+            ],
+            "eval_scenario_labels": [sc.label for sc in EVAL_SCENARIOS],
         },
         save_path,
     )
     print(f"\nSaved curriculum checkpoint to: {save_path}")
 
-    if all_logs.get("eval_mean_episode_total_reward"):
-        print("Last aggregated metrics:")
-        print(f"  train_mean_episode_total_reward = {all_logs['train_mean_episode_total_reward'][-1]:.4f}")
-        print(f"  eval_mean_episode_total_reward  = {all_logs['eval_mean_episode_total_reward'][-1]:.4f}")
-        print(f"  eval_task_completion_rate       = {all_logs['eval_task_completion_rate'][-1]:.4f}")
-        print(f"  eval_survival_rate              = {all_logs['eval_survival_rate'][-1]:.4f}")
-        print(f"  eval_mean_duration              = {all_logs['eval_mean_duration'][-1]:.4f}")
-
+    # ── dashboard ────────────────────────────────────────────────────
     if not args.no_plot:
         try:
-            plot_training(all_logs)
+            plot_curriculum_dashboard(all_training_logs, eval_history, CURRICULUM)
         except Exception as exc:
-            print(f"plot_training warning (continuing): {type(exc).__name__}: {exc}")
+            print(f"plot warning (continuing): {type(exc).__name__}: {exc}")
 
+    # ── animation ────────────────────────────────────────────────────
     if not args.no_animate:
         try:
-            print("\nAnimating generalized policy: 5 rollouts per evaluation config (20 total)")
-            eval_setups = _get_generalized_eval_setups()
-            rollout_counter = 0
-            for label, ns, nj, nr, nt in eval_setups:
-                anim_env_cfg = EnvConfig(
-                    n_strikers=ns,
-                    n_jammers=nj,
-                    n_targets=nt,
-                    n_radars=nr,
-                    max_steps=args.max_steps,
-                    radar_kill_probability=1.0,
-                    reward_config=copy.deepcopy(reward_cfg),
+            n_rollouts = 5
+            total_vis = n_rollouts * len(EVAL_SCENARIOS)
+            print(f"\nAnimating: {n_rollouts} rollouts x {len(EVAL_SCENARIOS)} eval scenarios "
+                  f"= {total_vis} total")
+            counter = 0
+            for scenario in EVAL_SCENARIOS:
+                anim_env_cfg = _scenario_to_env_cfg(
+                    scenario, args.max_steps, reward_cfg, fofe_cfg,
                 )
-                anim_ppo_cfg = PPOConfig(
-                    num_envs=ppo_template.num_envs,
-                    n_iters=1,
-                    num_epochs=ppo_template.num_epochs,
-                    minibatch_size=ppo_template.minibatch_size,
-                    actor_lr=ppo_template.actor_lr,
-                    critic_lr=ppo_template.critic_lr,
-                    clip_eps=ppo_template.clip_eps,
-                    entropy_coef=ppo_template.entropy_coef,
-                    normalize_rewards=ppo_template.normalize_rewards,
-                    seed=ppo_template.seed,
-                    log_every=ppo_template.log_every,
-                    device=ppo_template.device,
+                adapted = _adapt_checkpoint_for_stage(
+                    incoming_checkpoint, anim_env_cfg, ppo_template, net_cfg, fofe_cfg,
                 )
+                if adapted is None:
+                    continue
+                anim_env = build_env(anim_env_cfg, ppo_template)
+                anim_policy = make_combined_policy(
+                    anim_env, hidden=net_cfg.actor_hidden,
+                    depth=net_cfg.depth, fofe_cfg=fofe_cfg,
+                )
+                anim_policy.load_state_dict(adapted["policy_state_dict"], strict=True)
+                anim_policy = anim_policy.to(ppo_template.device)
 
-                adapted_ckpt = _adapt_checkpoint_for_stage(final_checkpoint_payload, anim_env_cfg, anim_ppo_cfg, net_cfg)
-                if adapted_ckpt is None:
-                    raise RuntimeError("Animation requires a trained checkpoint payload.")
-
-                anim_env = build_env(anim_env_cfg, anim_ppo_cfg)
-                anim_policy = make_combined_policy(anim_env, hidden=net_cfg.actor_hidden, depth=net_cfg.depth)
-                anim_policy.load_state_dict(adapted_ckpt["policy_state_dict"], strict=True)
-                anim_policy = anim_policy.to(anim_ppo_cfg.device)
-
-                for r in range(5):
-                    tester = TestRunner(anim_policy, env_cfg=anim_env_cfg, device=anim_ppo_cfg.device, seed=999 + r)
+                for r in range(n_rollouts):
+                    tester = TestRunner(
+                        anim_policy, env_cfg=anim_env_cfg,
+                        device=ppo_template.device, seed=999 + r,
+                    )
                     frames = tester.rollout()
                     animate_rollout(frames, tester.env)
-                    rollout_counter += 1
+                    counter += 1
                     print(
-                        f"Visualized rollout {rollout_counter}/20 "
-                        f"for {label} (run {r + 1}/5) with {len(frames)} frames"
+                        f"  Rollout {counter}/{total_vis} | "
+                        f"{scenario.label} run {r + 1}/{n_rollouts} | "
+                        f"{len(frames)} frames"
                     )
         except Exception as exc:
-            print(f"animate_rollout warning (continuing): {type(exc).__name__}: {exc}")
+            print(f"animate warning (continuing): {type(exc).__name__}: {exc}")
 
 
 if __name__ == "__main__":
