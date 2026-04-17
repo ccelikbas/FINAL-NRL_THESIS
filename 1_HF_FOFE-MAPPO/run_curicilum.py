@@ -117,7 +117,7 @@ class CurriculumPhase:
 CURRICULUM: List[CurriculumPhase] = [
     CurriculumPhase(
         name="basic_1v1",
-        iters=(0, 5),
+        iters=(0, 25),
         config=Fixed(ScenarioConfig(
             n_strikers=1, n_jammers=1,
             n_known_targets=1, n_known_radars=1,
@@ -125,8 +125,8 @@ CURRICULUM: List[CurriculumPhase] = [
         )),
     ),
     CurriculumPhase(
-        name="mixed_easy",
-        iters=(5, 10),
+        name="scaling_1v2",
+        iters=(25, 100),
         config=RandomChoice([
             ScenarioConfig(n_strikers=1, n_jammers=1,
                            n_known_targets=1, n_known_radars=1),
@@ -136,7 +136,7 @@ CURRICULUM: List[CurriculumPhase] = [
     ),
     CurriculumPhase(
         name="scaling_2v2",
-        iters=(10, 20),
+        iters=(100, 150),
         config=RandomChoice([
             ScenarioConfig(n_strikers=1, n_jammers=1,
                            n_known_targets=2, n_known_radars=2),
@@ -168,13 +168,13 @@ EVAL_SCENARIOS: List[ScenarioConfig] = [
     # ScenarioConfig(n_strikers=2, n_jammers=2, n_known_targets=3, n_known_radars=3),
 ]
 
-EVAL_EVERY: int = 1        # run multi-scenario eval every N global iterations
-EVAL_EPISODES: int = 30     # episodes per eval scenario
+EVAL_EVERY: int = 5        # run multi-scenario eval every N global iterations
+EVAL_EPISODES: int = 100     # episodes per eval scenario
 
 
 # ──────────────────── FOFE CONFIGURATION ───────────────────────────
 
-FOFE_CONFIG = FOFEConfig(use_fofe=False)
+FOFE_CONFIG = FOFEConfig(use_fofe=True)
 
 
 # =====================================================================
@@ -267,8 +267,6 @@ def _adapt_checkpoint_for_stage(
     if checkpoint is None:
         return None
 
-    use_fofe = fofe_cfg is not None and fofe_cfg.use_fofe
-
     temp_env = build_env(env_cfg, ppo_cfg)
     temp_policy = make_combined_policy(
         temp_env, hidden=net_cfg.actor_hidden, depth=net_cfg.depth, fofe_cfg=fofe_cfg,
@@ -288,15 +286,19 @@ def _adapt_checkpoint_for_stage(
         dst_policy = temp_policy.state_dict()
         matched_policy = len([v for v in dst_policy.values() if isinstance(v, torch.Tensor)])
 
-    # ── Critic: strict (FOFE) or partial (legacy) ────────────────────
+    # ── Critic: try strict first, fall back to partial shape-matching ──
     dst_critic = temp_critic.state_dict()
     matched_critic = 0
+    critic_mode = "skip"
     if isinstance(src_critic, dict):
-        if use_fofe:
+        try:
             temp_critic.load_state_dict(src_critic, strict=True)
             dst_critic = temp_critic.state_dict()
             matched_critic = len(dst_critic)
-        else:
+            critic_mode = "strict"
+        except RuntimeError:
+            # Shape mismatch (e.g. value_head changes with agent count) —
+            # copy only the parameters whose shapes match exactly.
             for key, tensor in src_critic.items():
                 if not isinstance(tensor, torch.Tensor):
                     continue
@@ -307,10 +309,11 @@ def _adapt_checkpoint_for_stage(
                         dst_critic[key].device, dtype=dst_critic[key].dtype,
                     )
                     matched_critic += 1
+            critic_mode = "partial"
 
     print(
         f"  Checkpoint adapt: policy={matched_policy} tensors (strict), "
-        f"critic={matched_critic}/{len(dst_critic)} ({'strict' if use_fofe else 'partial'})"
+        f"critic={matched_critic}/{len(dst_critic)} ({critic_mode})"
     )
 
     return {
