@@ -46,7 +46,8 @@ from .visualization import (
     animate_comparison_rollout,
     plot_comparison,
 )
-from .HF_visualization import HFTestRunner
+from .HF_visualization import HFTestRunner, animate_hf_comparison_rollout
+from .HF_environment import HFStrikeEA2DEnv
 
 import torch
 
@@ -264,6 +265,11 @@ def main() -> None:
         fofe_cfg=legacy_cfg.fofe,
         hf_radar_cfg=hf_radar_cfg,
     )
+    print(f"  Training env class: {type(legacy_env).__name__}")
+    if ext_cfg.use_hf_radar and not isinstance(legacy_env, HFStrikeEA2DEnv):
+        raise RuntimeError(
+            "HF mode requested, but legacy run did not use HFStrikeEA2DEnv."
+        )
 
     _save_checkpoint(save_dir / "comparison_legacy.pt",
                      legacy_policy, legacy_critic, legacy_cfg,
@@ -308,6 +314,11 @@ def main() -> None:
         fofe_cfg=fofe_cfg.fofe,
         hf_radar_cfg=hf_radar_cfg,
     )
+    print(f"  Training env class: {type(fofe_env).__name__}")
+    if ext_cfg.use_hf_radar and not isinstance(fofe_env, HFStrikeEA2DEnv):
+        raise RuntimeError(
+            "HF mode requested, but FOFE run did not use HFStrikeEA2DEnv."
+        )
 
     _save_checkpoint(save_dir / "comparison_fofe.pt",
                      fofe_policy, fofe_critic, fofe_cfg,
@@ -336,6 +347,10 @@ def main() -> None:
         print("\n" + "=" * 70)
         print(f"  Generating {args.n_rollouts} side-by-side rollout animation(s)")
         print("=" * 70)
+        if ext_cfg.use_hf_radar:
+            print("  Visualization mode: HF (angular radar coverage)")
+        else:
+            print("  Visualization mode: standard")
         # Move legacy policy back to GPU for rollout (was moved to CPU to free VRAM)
         rollout_device = fofe_cfg.ppo.device
         legacy_policy.to(rollout_device)
@@ -372,10 +387,16 @@ def main() -> None:
                     )
                 legacy_frames = legacy_tester.rollout()
                 fofe_frames = fofe_tester.rollout()
-                animate_comparison_rollout(
-                    legacy_frames, fofe_frames,
-                    legacy_tester.env, fofe_tester.env,
-                )
+                if ext_cfg.use_hf_radar:
+                    animate_hf_comparison_rollout(
+                        legacy_frames, fofe_frames,
+                        legacy_tester.env, fofe_tester.env,
+                    )
+                else:
+                    animate_comparison_rollout(
+                        legacy_frames, fofe_frames,
+                        legacy_tester.env, fofe_tester.env,
+                    )
                 print(f"  Rollout {r+1}/{args.n_rollouts}: "
                       f"legacy={len(legacy_frames)} frames, "
                       f"fofe={len(fofe_frames)} frames")

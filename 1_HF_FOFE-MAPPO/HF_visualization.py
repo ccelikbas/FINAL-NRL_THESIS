@@ -554,3 +554,279 @@ def hf_animate_rollout(
     )
     plt.show()
     return ani
+
+
+_HF_LEGACY_LABEL = "MAPPO (Legacy)"
+_HF_FOFE_LABEL = "FOFE-MAPPO"
+
+
+def _draw_hf_world_panel(ax, env: HFStrikeEA2DEnv, frames: List[Dict[str, torch.Tensor]], title: str):
+    """Set up one HF world panel and return an update callable."""
+    ax.set_xlim(0, 1000)
+    ax.set_ylim(0, 1000)
+    ax.set_aspect("equal", adjustable="box")
+    ax.set_xlabel("X (km)")
+    ax.set_ylabel("Y (km)")
+    ax.set_title(
+        f"{title} | HF Radar | R_unc={env.radar_range_unconstrained:.3f} | "
+        f"R_obs={env.R_obs:.2f}, R_comm={env.R_comm:.2f}"
+    )
+
+    empty_xy = np.empty((0, 2), dtype=float)
+
+    striker_sc = ax.scatter([], [], s=60, marker="^", label="Strikers")
+    jammer_sc = ax.scatter([], [], s=60, marker="s", label="Jammers")
+    target_known_sc = ax.scatter([], [], s=80, marker="*", label="Targets (known)", color="#a65e00")
+    target_unknown_sc = ax.scatter(
+        [], [], s=80, marker="*", label="Targets (unknown)",
+        facecolors="none", edgecolors="#a65e00", linewidths=1.8,
+    )
+    radar_known_sc = ax.scatter([], [], s=80, marker="X", label="Radars (known)", color="#243c9b")
+    radar_unknown_sc = ax.scatter(
+        [], [], s=80, marker="X", label="Radars (unknown)",
+        facecolors="none", edgecolors="#243c9b", linewidths=1.8,
+    )
+
+    # Dashed circles at unconstrained range
+    r_unc_km = env.radar_range_unconstrained * 1000.0
+    radar_unc_circles = [
+        ax.add_patch(Circle((0, 0), r_unc_km, fill=False, edgecolor="red", alpha=0.4, lw=1.0, ls="--"))
+        for _ in range(env.n_radars)
+    ]
+
+    # Per-angle effective coverage polygons
+    radar_coverage_polys = [
+        ax.add_patch(Polygon(
+            np.empty((0, 2)), closed=True,
+            fc=(1.0, 0.6, 0.6, 0.25), ec="red", lw=1.2, alpha=0.7,
+        ))
+        for _ in range(env.n_radars)
+    ]
+
+    obs_circles = [
+        ax.add_patch(Circle((0, 0), 0, fill=False, edgecolor="C0", alpha=0.35, lw=1.0, ls=":"))
+        for _ in range(env.n_agents)
+    ]
+    comm_circles = [
+        ax.add_patch(Circle((0, 0), 0, fill=False, edgecolor="black", alpha=0.18, lw=0.9, ls="-."))
+        for _ in range(env.n_agents)
+    ]
+    striker_arcs = [
+        ax.add_patch(Polygon(np.empty((0, 2)), closed=True, fc="C2", alpha=0.18, ec="C2"))
+        for _ in range(env.n_strikers)
+    ]
+    heading_lines = [ax.plot([], [])[0] for _ in range(env.n_agents)]
+    comm_lines = [
+        ax.plot([], [], color="black", lw=1.4, alpha=0.7)[0]
+        for _ in range(max(env.n_agents - 1, 1))
+    ]
+    ax.plot([], [], color="black", lw=1.4, alpha=0.7, label="Comm MST (<= R_comm)")
+    ax.plot([], [], color="black", lw=0.9, ls="-.", alpha=0.35, label="R_comm")
+    ax.plot([], [], color="C0", lw=1.0, ls=":", alpha=0.45, label="R_obs")
+    ax.legend(loc="upper right", fontsize=6)
+
+    def _update_panel(i: int):
+        fr = frames[min(i, len(frames) - 1)]
+        ap = fr["agent_pos"]
+        aa = fr["agent_alive"]
+        ah = fr["agent_heading"]
+        tp = fr["target_pos"]
+        ta = fr["target_alive"]
+        tk = fr["target_known"]
+        rp = fr["radar_pos"]
+        rk = fr["radar_known"]
+
+        ap_km = ap * 1000
+        tp_km = tp * 1000
+        rp_km = rp * 1000
+
+        # Agents
+        striker_xy = ap_km[:env.n_strikers][aa[:env.n_strikers]]
+        jammer_xy = ap_km[env.n_strikers:][aa[env.n_strikers:]]
+        striker_sc.set_offsets(striker_xy.numpy() if striker_xy.numel() else empty_xy)
+        jammer_sc.set_offsets(jammer_xy.numpy() if jammer_xy.numel() else empty_xy)
+
+        # Targets
+        alive_known_targets = ta & tk
+        alive_unknown_targets = ta & (~tk)
+        target_known_sc.set_offsets(tp_km[alive_known_targets].numpy() if alive_known_targets.any() else empty_xy)
+        target_unknown_sc.set_offsets(tp_km[alive_unknown_targets].numpy() if alive_unknown_targets.any() else empty_xy)
+
+        # Radars
+        radar_known_sc.set_offsets(rp_km[rk].numpy() if rk.any() else empty_xy)
+        radar_unknown_sc.set_offsets(rp_km[~rk].numpy() if (~rk).any() else empty_xy)
+
+        # HF angular coverage
+        jammer_pos_np = ap[env.n_strikers:].numpy()
+        jammer_alive_np = aa[env.n_strikers:].numpy()
+
+        for j in range(env.n_radars):
+            rx, ry = float(rp[j, 0]), float(rp[j, 1])
+
+            radar_unc_circles[j].set_visible(True)
+            radar_unc_circles[j].set_center((rx * 1000, ry * 1000))
+            radar_unc_circles[j].set_radius(r_unc_km)
+
+            verts = _compute_radar_boundary_km(rx, ry, jammer_pos_np, jammer_alive_np, env)
+            radar_coverage_polys[j].set_visible(True)
+            radar_coverage_polys[j].set_xy(verts)
+
+        # Obs / comm circles
+        for k, oc in enumerate(obs_circles):
+            if aa[k].item():
+                oc.set_visible(True)
+                oc.set_center((float(ap_km[k, 0]), float(ap_km[k, 1])))
+                oc.set_radius(float(env.R_obs) * 1000)
+            else:
+                oc.set_visible(False)
+        for k, cc in enumerate(comm_circles):
+            if aa[k].item():
+                cc.set_visible(True)
+                cc.set_center((float(ap_km[k, 0]), float(ap_km[k, 1])))
+                cc.set_radius(float(env.R_comm) * 1000)
+            else:
+                cc.set_visible(False)
+
+        # Striker engagement arcs
+        half_fov = 0.5 * env.striker.engage_fov_deg
+        r_str = env.striker.engage_range * 1000
+        for s, sa in enumerate(striker_arcs):
+            if aa[s].item():
+                cx, cy = float(ap_km[s, 0]), float(ap_km[s, 1])
+                th1 = math.radians(math.degrees(float(ah[s])) - half_fov)
+                th2 = th1 + math.radians(2 * half_fov)
+                angs = np.linspace(th1, th2, 24)
+                verts = np.vstack(([cx, cy], np.column_stack((cx + r_str * np.cos(angs), cy + r_str * np.sin(angs)))))
+                sa.set_visible(True)
+                sa.set_xy(verts)
+            else:
+                sa.set_visible(False)
+
+        # Heading lines
+        for k, ln in enumerate(heading_lines):
+            if aa[k].item():
+                x, y = float(ap_km[k, 0]), float(ap_km[k, 1])
+                ln.set_data([x, x + 30 * math.cos(float(ah[k]))], [y, y + 30 * math.sin(float(ah[k]))])
+            else:
+                ln.set_data([], [])
+
+        # Communication MST
+        alive_idx = torch.where(aa)[0]
+        edges_for_plot = []
+        if alive_idx.numel() > 1:
+            alive_pos_world = ap[alive_idx]
+            alive_pos_km_sel = ap_km[alive_idx]
+            na = alive_idx.numel()
+            dmat = torch.cdist(alive_pos_world, alive_pos_world)
+            adj = dmat <= env.R_comm
+
+            visited = torch.zeros(na, dtype=torch.bool)
+            components: List[List[int]] = []
+            for start in range(na):
+                if visited[start]:
+                    continue
+                queue = [start]
+                visited[start] = True
+                comp = [start]
+                while queue:
+                    u = queue.pop(0)
+                    neigh = torch.where(adj[u])[0].tolist()
+                    for v in neigh:
+                        if not visited[v]:
+                            visited[v] = True
+                            queue.append(v)
+                            comp.append(v)
+                components.append(comp)
+
+            for comp in components:
+                if len(comp) <= 1:
+                    continue
+                parent = {u: u for u in comp}
+
+                def _find(u):
+                    while parent[u] != u:
+                        parent[u] = parent[parent[u]]
+                        u = parent[u]
+                    return u
+
+                def _union(u, v):
+                    ru, rv = _find(u), _find(v)
+                    if ru == rv:
+                        return False
+                    parent[rv] = ru
+                    return True
+
+                cand = []
+                for ci in range(len(comp)):
+                    for cj in range(ci + 1, len(comp)):
+                        u, v = comp[ci], comp[cj]
+                        if bool(adj[u, v].item()):
+                            cand.append((float(dmat[u, v].item()), u, v))
+                cand.sort(key=lambda x: x[0])
+
+                added = 0
+                for _w, u, v in cand:
+                    if _union(u, v):
+                        p1 = alive_pos_km_sel[u]
+                        p2 = alive_pos_km_sel[v]
+                        edges_for_plot.append((float(p1[0]), float(p1[1]), float(p2[0]), float(p2[1])))
+                        added += 1
+                        if added == len(comp) - 1:
+                            break
+
+        for li, line in enumerate(comm_lines):
+            if li < len(edges_for_plot):
+                x1, y1, x2, y2 = edges_for_plot[li]
+                line.set_data([x1, x2], [y1, y2])
+            else:
+                line.set_data([], [])
+
+        ax.set_xlabel(
+            f"t={i} | Agents: {int(aa.sum().item())}/{env.n_agents} "
+            f"| Targets: {int(ta.sum().item())}/{env.n_targets}"
+        )
+
+    return {}, _update_panel
+
+
+def animate_hf_comparison_rollout(
+    legacy_frames: List[Dict[str, torch.Tensor]],
+    fofe_frames: List[Dict[str, torch.Tensor]],
+    legacy_env: HFStrikeEA2DEnv,
+    fofe_env: HFStrikeEA2DEnv,
+    interval_ms: int = 70,
+):
+    """Side-by-side rollout animation with HF radar fidelity on both panels."""
+    fig, (ax_l, ax_f) = plt.subplots(1, 2, figsize=(22, 9))
+
+    _, update_legacy = _draw_hf_world_panel(ax_l, legacy_env, legacy_frames, _HF_LEGACY_LABEL)
+    _, update_fofe = _draw_hf_world_panel(ax_f, fofe_env, fofe_frames, _HF_FOFE_LABEL)
+
+    n_frames = max(len(legacy_frames), len(fofe_frames))
+
+    def _init():
+        return []
+
+    def _update(i):
+        update_legacy(i)
+        update_fofe(i)
+        return []
+
+    fig.suptitle(
+        f"HF Rollout Comparison: {_HF_LEGACY_LABEL}  vs  {_HF_FOFE_LABEL}",
+        fontsize=13,
+        fontweight="bold",
+    )
+    fig.tight_layout(rect=[0, 0, 1, 0.95])
+
+    ani = animation.FuncAnimation(
+        fig,
+        _update,
+        frames=n_frames,
+        init_func=_init,
+        interval=interval_ms,
+        blit=False,
+        repeat=False,
+    )
+    plt.show()
+    return ani
