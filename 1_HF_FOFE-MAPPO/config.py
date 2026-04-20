@@ -98,8 +98,8 @@ class FOFEConfig:
 @dataclass
 class EnvConfig:
     # Team composition
-    n_strikers: int = 1
-    n_jammers: int = 1
+    n_strikers: int = 2
+    n_jammers: int = 2
     n_known_targets: int = 2
     n_unknown_targets: int = 0
     n_known_radars: int = 2
@@ -182,7 +182,7 @@ class EnvConfig:
 class PPOConfig:
     """Shared PPO hyperparameters for both striker and jammer MAPPO."""
     num_envs: int = 512
-    n_iters: int = 1
+    n_iters: int = 100
     frames_per_batch: Optional[int] = None
     num_epochs: int = 10
     minibatch_size: int = 2048

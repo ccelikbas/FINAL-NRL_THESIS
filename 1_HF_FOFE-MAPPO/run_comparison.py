@@ -31,7 +31,14 @@ if __package__ in (None, ""):
     sys.modules[_pkg_name] = _pkg
     __package__ = _pkg_name
 
-from .config import EnvConfig, ExperimentConfig, FOFEConfig, NetworkConfig, PPOConfig
+from .config import (
+    EnvConfig,
+    EnvExtensionsConfig,
+    ExperimentConfig,
+    FOFEConfig,
+    NetworkConfig,
+    PPOConfig,
+)
 from .trainer import train_mappo
 from .rewards import RewardConfig
 from .visualization import (
@@ -39,12 +46,14 @@ from .visualization import (
     animate_comparison_rollout,
     plot_comparison,
 )
+from .HF_visualization import HFTestRunner
 
 import torch
 
 
 def build_parser() -> argparse.ArgumentParser:
     env_defaults = EnvConfig()
+    ext_defaults = EnvExtensionsConfig()
     ppo_defaults = PPOConfig()
     net_defaults = NetworkConfig()
     reward_defaults = RewardConfig()
@@ -74,6 +83,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--normalize_rewards", action=argparse.BooleanOptionalAction,
                    default=ppo_defaults.normalize_rewards)
     p.add_argument("--seed", type=int, default=ppo_defaults.seed)
+    # Environment extension toggles
+    p.add_argument(
+        "--use_hf_radar",
+        action=argparse.BooleanOptionalAction,
+        default=ext_defaults.use_hf_radar,
+        help="Enable high-fidelity angular radar model for both comparison runs",
+    )
     # Network
     p.add_argument("--actor_hidden", type=int, default=net_defaults.actor_hidden)
     p.add_argument("--critic_hidden", type=int, default=net_defaults.critic_hidden)
@@ -134,7 +150,8 @@ def _build_configs(args):
         critic_hidden=args.critic_hidden,
         depth=args.depth,
     )
-    return env_cfg, ppo_cfg, net_cfg
+    ext_cfg = EnvExtensionsConfig(use_hf_radar=args.use_hf_radar)
+    return env_cfg, ppo_cfg, net_cfg, ext_cfg
 
 
 def _save_checkpoint(path, policy, critic, cfg, logs, reward_normalizer):
@@ -146,6 +163,7 @@ def _save_checkpoint(path, policy, critic, cfg, logs, reward_normalizer):
             "ppo_cfg": cfg.ppo,
             "net_cfg": cfg.net,
             "fofe_cfg": cfg.fofe,
+            "ext_cfg": cfg.ext,
             "logs": logs,
             "reward_normalizer_state_dict": (
                 reward_normalizer.state_dict() if reward_normalizer is not None else None
@@ -188,6 +206,7 @@ def _save_run_logs(path: Path, run_name: str, cfg: ExperimentConfig, logs: dict)
         "ppo_cfg": _to_jsonable(vars(cfg.ppo)),
         "net_cfg": _to_jsonable(vars(cfg.net)),
         "fofe_cfg": _to_jsonable(vars(cfg.fofe)),
+        "ext_cfg": _to_jsonable(vars(cfg.ext)),
         "logs": _to_jsonable(logs),
     }
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -209,11 +228,17 @@ def _print_final_metrics(label, logs):
 
 def main() -> None:
     args = build_parser().parse_args()
-    env_cfg, ppo_cfg, net_cfg = _build_configs(args)
+    env_cfg, ppo_cfg, net_cfg, ext_cfg = _build_configs(args)
     save_dir = Path(args.save_dir)
     logs_dir = Path(args.logs_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
     logs_dir.mkdir(parents=True, exist_ok=True)
+
+    hf_radar_cfg = ext_cfg.hf_radar if ext_cfg.use_hf_radar else None
+    if ext_cfg.use_hf_radar:
+        print("HF angular radar model: ENABLED (comparison runs use HF environment)")
+    else:
+        print("HF angular radar model: DISABLED (comparison runs use standard environment)")
 
     # ==================================================================
     # Phase 1: Train MAPPO (Legacy) — use_fofe=False
@@ -228,6 +253,7 @@ def main() -> None:
         ppo=copy.deepcopy(ppo_cfg),
         net=copy.deepcopy(net_cfg),
         fofe=legacy_fofe_cfg,
+        ext=copy.deepcopy(ext_cfg),
     ).finalize()
 
     print(f"  FOFE config: use_fofe={legacy_cfg.fofe.use_fofe}")
@@ -236,6 +262,7 @@ def main() -> None:
     legacy_env, legacy_policy, legacy_critic, legacy_logs, legacy_rn = train_mappo(
         legacy_cfg.env, legacy_cfg.ppo, legacy_cfg.net,
         fofe_cfg=legacy_cfg.fofe,
+        hf_radar_cfg=hf_radar_cfg,
     )
 
     _save_checkpoint(save_dir / "comparison_legacy.pt",
@@ -270,6 +297,7 @@ def main() -> None:
         ppo=copy.deepcopy(ppo_cfg),
         net=copy.deepcopy(net_cfg),
         fofe=fofe_fofe_cfg,
+        ext=copy.deepcopy(ext_cfg),
     ).finalize()
 
     print(f"  FOFE config: use_fofe={fofe_cfg.fofe.use_fofe}")
@@ -278,6 +306,7 @@ def main() -> None:
     fofe_env, fofe_policy, fofe_critic, fofe_logs, fofe_rn = train_mappo(
         fofe_cfg.env, fofe_cfg.ppo, fofe_cfg.net,
         fofe_cfg=fofe_cfg.fofe,
+        hf_radar_cfg=hf_radar_cfg,
     )
 
     _save_checkpoint(save_dir / "comparison_fofe.pt",
@@ -313,10 +342,34 @@ def main() -> None:
         try:
             for r in range(args.n_rollouts):
                 seed = 999 + r
-                legacy_tester = TestRunner(legacy_policy, env_cfg=legacy_cfg.env,
-                                           device=rollout_device, seed=seed)
-                fofe_tester = TestRunner(fofe_policy, env_cfg=fofe_cfg.env,
-                                         device=rollout_device, seed=seed)
+                if ext_cfg.use_hf_radar:
+                    legacy_tester = HFTestRunner(
+                        legacy_policy,
+                        env_cfg=legacy_cfg.env,
+                        hf_cfg=legacy_cfg.ext.hf_radar,
+                        device=rollout_device,
+                        seed=seed,
+                    )
+                    fofe_tester = HFTestRunner(
+                        fofe_policy,
+                        env_cfg=fofe_cfg.env,
+                        hf_cfg=fofe_cfg.ext.hf_radar,
+                        device=rollout_device,
+                        seed=seed,
+                    )
+                else:
+                    legacy_tester = TestRunner(
+                        legacy_policy,
+                        env_cfg=legacy_cfg.env,
+                        device=rollout_device,
+                        seed=seed,
+                    )
+                    fofe_tester = TestRunner(
+                        fofe_policy,
+                        env_cfg=fofe_cfg.env,
+                        device=rollout_device,
+                        seed=seed,
+                    )
                 legacy_frames = legacy_tester.rollout()
                 fofe_frames = fofe_tester.rollout()
                 animate_comparison_rollout(

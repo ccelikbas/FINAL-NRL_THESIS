@@ -34,11 +34,15 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 
-from .config import EnvConfig, ExperimentConfig, FOFEConfig, NetworkConfig, PPOConfig
+from .config import (
+    EnvConfig, EnvExtensionsConfig, ExperimentConfig,
+    FOFEConfig, HFRadarConfig, NetworkConfig, PPOConfig,
+)
 from .models import make_combined_critic, make_combined_policy
 from .rewards import RewardConfig
 from .trainer import build_env, evaluate_current_policy, train_mappo
 from .visualization import TestRunner, animate_rollout, plot_training
+from .HF_visualization import HFTestRunner, hf_animate_rollout
 
 
 # =====================================================================
@@ -126,7 +130,7 @@ CURRICULUM: List[CurriculumPhase] = [
     ),
     CurriculumPhase(
         name="scaling_1v2",
-        iters=(100, 250),
+        iters=(100, 300),
         config=RandomChoice([
             ScenarioConfig(n_strikers=1, n_jammers=1,
                            n_known_targets=1, n_known_radars=1),
@@ -136,7 +140,7 @@ CURRICULUM: List[CurriculumPhase] = [
     ),
     CurriculumPhase(
         name="scaling_2v2",
-        iters=(250, 400),
+        iters=(300, 700),
         config=RandomChoice([
             ScenarioConfig(n_strikers=1, n_jammers=1,
                            n_known_targets=2, n_known_radars=2),
@@ -257,17 +261,17 @@ def _adapt_checkpoint_for_stage(
     ppo_cfg: PPOConfig,
     net_cfg: NetworkConfig,
     fofe_cfg: Optional[FOFEConfig] = None,
+    hf_radar_cfg: Optional[HFRadarConfig] = None,
 ) -> Optional[Dict[str, Any]]:
     """Adapt checkpoint weights for a (possibly changed) env configuration.
 
     - Actor policy: always strict load (architecture is config-invariant).
-    - Critic: strict when FOFE is on (shapes invariant); partial shape-
-      matching when FOFE is off (critic input may change with entity count).
+    - Critic: try strict first, fall back to partial shape-matching.
     """
     if checkpoint is None:
         return None
 
-    temp_env = build_env(env_cfg, ppo_cfg)
+    temp_env = build_env(env_cfg, ppo_cfg, hf_radar_cfg=hf_radar_cfg)
     temp_policy = make_combined_policy(
         temp_env, hidden=net_cfg.actor_hidden, depth=net_cfg.depth, fofe_cfg=fofe_cfg,
     )
@@ -334,17 +338,21 @@ def _run_multi_scenario_eval(
     fofe_cfg: Optional[FOFEConfig],
     max_steps: int,
     n_eval_episodes: int,
+    hf_radar_cfg: Optional[HFRadarConfig] = None,
 ) -> Dict[str, Dict[str, float]]:
     """Evaluate current policy on every scenario. Returns {label: metrics}."""
     results: Dict[str, Dict[str, float]] = {}
 
     for scenario in eval_scenarios:
         env_cfg = _scenario_to_env_cfg(scenario, max_steps, reward_cfg, fofe_cfg)
-        adapted = _adapt_checkpoint_for_stage(checkpoint, env_cfg, ppo_template, net_cfg, fofe_cfg)
+        adapted = _adapt_checkpoint_for_stage(
+            checkpoint, env_cfg, ppo_template, net_cfg, fofe_cfg,
+            hf_radar_cfg=hf_radar_cfg,
+        )
         if adapted is None:
             continue
 
-        eval_env = build_env(env_cfg, ppo_template)
+        eval_env = build_env(env_cfg, ppo_template, hf_radar_cfg=hf_radar_cfg)
         eval_policy = make_combined_policy(
             eval_env, hidden=net_cfg.actor_hidden, depth=net_cfg.depth, fofe_cfg=fofe_cfg,
         )
@@ -353,6 +361,7 @@ def _run_multi_scenario_eval(
 
         metrics = evaluate_current_policy(
             eval_policy, env_cfg, ppo_template, n_eval_episodes=n_eval_episodes,
+            hf_radar_cfg=hf_radar_cfg,
         )
 
         results[scenario.label] = {
@@ -407,10 +416,11 @@ def _assert_actor_policy_shape_consistency(
     net_cfg: NetworkConfig,
     fofe_cfg: Optional[FOFEConfig],
     env_cfgs: List[EnvConfig],
+    hf_radar_cfg: Optional[HFRadarConfig] = None,
 ) -> None:
     if not env_cfgs:
         return
-    base_env = build_env(env_cfgs[0], ppo_template)
+    base_env = build_env(env_cfgs[0], ppo_template, hf_radar_cfg=hf_radar_cfg)
     base_policy = make_combined_policy(
         base_env, hidden=net_cfg.actor_hidden, depth=net_cfg.depth, fofe_cfg=fofe_cfg,
     )
@@ -420,7 +430,7 @@ def _assert_actor_policy_shape_consistency(
         if isinstance(v, torch.Tensor)
     }
     for idx, cfg in enumerate(env_cfgs[1:], start=2):
-        env_i = build_env(cfg, ppo_template)
+        env_i = build_env(cfg, ppo_template, hf_radar_cfg=hf_radar_cfg)
         pol_i = make_combined_policy(
             env_i, hidden=net_cfg.actor_hidden, depth=net_cfg.depth, fofe_cfg=fofe_cfg,
         )
@@ -659,6 +669,8 @@ def main() -> None:
     eval_every = args.eval_every if args.eval_every is not None else EVAL_EVERY
     eval_episodes = args.eval_episodes if args.eval_episodes is not None else EVAL_EPISODES
     fofe_cfg = FOFE_CONFIG
+    ext_cfg = EnvExtensionsConfig()          # defaults from config.py
+    hf_radar_cfg = ext_cfg.hf_radar if ext_cfg.use_hf_radar else None
 
     # ── validate curriculum ──────────────────────────────────────────
     total_iters = _get_total_iters()
@@ -703,6 +715,14 @@ def main() -> None:
         critic_hidden=args.critic_hidden,
         depth=args.depth,
     )
+
+    # ── print config check ──────────────────────────────────────────
+    print("\n" + "=" * 70)
+    print("  CONFIGURATION CHECK")
+    print("=" * 70)
+    print(f"  FOFE encoding          : {'ENABLED' if fofe_cfg.use_fofe else 'DISABLED (legacy flat MLP)'}")
+    print(f"  HF angular radar model : {'ENABLED' if hf_radar_cfg is not None else 'DISABLED (simple binary jam/kill)'}")
+    print("=" * 70)
 
     # ── print plan ───────────────────────────────────────────────────
     print("\n" + "=" * 70)
@@ -763,7 +783,10 @@ def main() -> None:
                                 ),
                                 args.max_steps, reward_cfg, fofe_cfg,
                             ))
-    _assert_actor_policy_shape_consistency(ppo_template, net_cfg, fofe_cfg, shape_check_cfgs)
+    _assert_actor_policy_shape_consistency(
+        ppo_template, net_cfg, fofe_cfg, shape_check_cfgs,
+        hf_radar_cfg=hf_radar_cfg,
+    )
     print("Actor shape consistency check: PASSED")
 
     # ── optional initial checkpoint ──────────────────────────────────
@@ -833,12 +856,13 @@ def main() -> None:
         ppo_cfg.iteration_offset = global_iter
 
         exp_cfg = ExperimentConfig(
-            env=env_cfg, ppo=ppo_cfg, net=net_cfg, fofe=fofe_cfg,
+            env=env_cfg, ppo=ppo_cfg, net=net_cfg, fofe=fofe_cfg, ext=ext_cfg,
         ).finalize()
 
         # ── adapt checkpoint ─────────────────────────────────────────
         adapted = _adapt_checkpoint_for_stage(
             incoming_checkpoint, exp_cfg.env, exp_cfg.ppo, exp_cfg.net, fofe_cfg,
+            hf_radar_cfg=hf_radar_cfg,
         )
 
         print(
@@ -850,6 +874,7 @@ def main() -> None:
         # ── train ────────────────────────────────────────────────────
         _base_env, policy, critic, logs, reward_normalizer = train_mappo(
             exp_cfg.env, exp_cfg.ppo, exp_cfg.net, fofe_cfg, adapted,
+            hf_radar_cfg=hf_radar_cfg,
         )
 
         _merge_logs(all_training_logs, logs)
@@ -876,6 +901,7 @@ def main() -> None:
                 fofe_cfg=fofe_cfg,
                 max_steps=args.max_steps,
                 n_eval_episodes=eval_episodes,
+                hf_radar_cfg=hf_radar_cfg,
             )
             eval_history[global_iter] = eval_results
             _print_eval_results(global_iter, eval_results)
@@ -891,6 +917,7 @@ def main() -> None:
             fofe_cfg=fofe_cfg,
             max_steps=args.max_steps,
             n_eval_episodes=eval_episodes,
+            hf_radar_cfg=hf_radar_cfg,
         )
         eval_history[total_iters] = eval_results
         _print_eval_results(total_iters, eval_results)
@@ -907,6 +934,7 @@ def main() -> None:
             "net_cfg": net_cfg,
             "ppo_template": ppo_template,
             "fofe_cfg": fofe_cfg,
+            "ext_cfg": ext_cfg,
             "reward_cfg": reward_cfg,
             "training_logs": all_training_logs,
             "eval_history": eval_history,
@@ -942,10 +970,11 @@ def main() -> None:
                 )
                 adapted = _adapt_checkpoint_for_stage(
                     incoming_checkpoint, anim_env_cfg, ppo_template, net_cfg, fofe_cfg,
+                    hf_radar_cfg=hf_radar_cfg,
                 )
                 if adapted is None:
                     continue
-                anim_env = build_env(anim_env_cfg, ppo_template)
+                anim_env = build_env(anim_env_cfg, ppo_template, hf_radar_cfg=hf_radar_cfg)
                 anim_policy = make_combined_policy(
                     anim_env, hidden=net_cfg.actor_hidden,
                     depth=net_cfg.depth, fofe_cfg=fofe_cfg,
@@ -954,12 +983,21 @@ def main() -> None:
                 anim_policy = anim_policy.to(ppo_template.device)
 
                 for r in range(n_rollouts):
-                    tester = TestRunner(
-                        anim_policy, env_cfg=anim_env_cfg,
-                        device=ppo_template.device, seed=999 + r,
-                    )
-                    frames = tester.rollout()
-                    animate_rollout(frames, tester.env)
+                    if hf_radar_cfg is not None:
+                        tester = HFTestRunner(
+                            anim_policy, env_cfg=anim_env_cfg,
+                            hf_cfg=hf_radar_cfg,
+                            device=ppo_template.device, seed=999 + r,
+                        )
+                        frames = tester.rollout()
+                        hf_animate_rollout(frames, tester.env)
+                    else:
+                        tester = TestRunner(
+                            anim_policy, env_cfg=anim_env_cfg,
+                            device=ppo_template.device, seed=999 + r,
+                        )
+                        frames = tester.rollout()
+                        animate_rollout(frames, tester.env)
                     counter += 1
                     print(
                         f"  Rollout {counter}/{total_vis} | "
