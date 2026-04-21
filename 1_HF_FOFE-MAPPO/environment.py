@@ -82,6 +82,7 @@ class StrikeEA2DEnv(EnvBase):
         device: Optional[torch.device] = None,
         seed:   int = 0,
         n_env_layouts: int = 0,
+        radar_min_sep: float = 0.5,
         # --- FOFE mode ---
         use_fofe: bool = False,
     ):
@@ -164,6 +165,9 @@ class StrikeEA2DEnv(EnvBase):
 
         # Layout control (pre-generated radar positions for reproducible scenarios)
         self.n_env_layouts = n_env_layouts
+        self.radar_min_sep = float(radar_min_sep)
+        if self.radar_min_sep < 0.0:
+            raise ValueError("radar_min_sep must be >= 0")
         self._layouts = self._pregenerate_layouts() if n_env_layouts > 0 else None
 
         # FOFE observation mode
@@ -264,32 +268,73 @@ class StrikeEA2DEnv(EnvBase):
         """Sample *n_radars* positions with at least *min_sep* between each pair.
 
         Uses rejection sampling: draw candidates one-by-one, reject if too
-        close to any already-placed radar.  Falls back to uniform (no spacing
-        guarantee) after *max_attempts* total draws to avoid infinite loops.
+        close to any already-placed radar.
+
+        Raises RuntimeError if the requested spacing cannot be achieved within
+        max_attempts. This avoids silently violating the separation constraint.
         """
         sample_device = device if device is not None else torch.device("cpu")
-        placed: List[torch.Tensor] = []
-        attempts = 0
-        while len(placed) < n_radars and attempts < max_attempts:
+        if n_radars <= 0:
+            return torch.zeros(0, 2, device=sample_device)
+
+        min_sep = float(min_sep)
+        if min_sep < 0.0:
+            raise ValueError("min_sep must be >= 0")
+
+        # Quick impossibility check for pairwise distance in axis-aligned box.
+        if n_radars > 1 and min_sep > 0.0:
+            max_pairwise_dist = math.hypot(x_hi - x_lo, y_hi - y_lo)
+            if min_sep > max_pairwise_dist + 1e-9:
+                raise ValueError(
+                    f"min_sep={min_sep:.3f} is impossible in box "
+                    f"x=[{x_lo:.3f},{x_hi:.3f}], y=[{y_lo:.3f},{y_hi:.3f}] "
+                    f"(max possible pairwise distance={max_pairwise_dist:.3f})."
+                )
+
+        def _draw_candidate() -> torch.Tensor:
             cx = x_lo + (x_hi - x_lo) * torch.rand(1, generator=rng, device=sample_device)
             cy = y_lo + (y_hi - y_lo) * torch.rand(1, generator=rng, device=sample_device)
-            candidate = torch.tensor([cx.item(), cy.item()], device=sample_device)
-            ok = True
-            for p in placed:
-                if torch.linalg.norm(candidate - p).item() < min_sep:
-                    ok = False
+            return torch.tensor([cx.item(), cy.item()], device=sample_device)
+
+        max_restarts = max(int(max_attempts), 1)
+        draws_per_radar = 64
+
+        for _ in range(max_restarts):
+            placed: List[torch.Tensor] = []
+            success = True
+
+            for _ in range(n_radars):
+                found = False
+                for _ in range(draws_per_radar):
+                    candidate = _draw_candidate()
+                    if all(torch.linalg.norm(candidate - p).item() >= min_sep for p in placed):
+                        placed.append(candidate)
+                        found = True
+                        break
+                if not found:
+                    success = False
                     break
-            if ok:
-                placed.append(candidate)
-            attempts += 1
 
-        # Fallback: fill remaining radars without spacing constraint
-        while len(placed) < n_radars:
-            cx = x_lo + (x_hi - x_lo) * torch.rand(1, generator=rng, device=sample_device)
-            cy = y_lo + (y_hi - y_lo) * torch.rand(1, generator=rng, device=sample_device)
-            placed.append(torch.tensor([cx.item(), cy.item()], device=sample_device))
+            if not success:
+                continue
 
-        return torch.stack(placed, dim=0)  # [R, 2]
+            radar_pos = torch.stack(placed, dim=0)  # [R, 2]
+            if n_radars > 1 and min_sep > 0.0:
+                min_actual_sep = torch.pdist(radar_pos, p=2).min().item()
+                if min_actual_sep + 1e-9 < min_sep:
+                    raise RuntimeError(
+                        f"Internal radar separation check failed: got min "
+                        f"{min_actual_sep:.6f}, expected >= {min_sep:.6f}."
+                    )
+            return radar_pos
+
+        raise RuntimeError(
+            "Could not sample radar positions satisfying minimum separation: "
+            f"n_radars={n_radars}, min_sep={min_sep:.3f}, "
+            f"box=([{x_lo:.3f},{x_hi:.3f}]x[{y_lo:.3f},{y_hi:.3f}]), "
+            f"restarts={max_restarts}, draws_per_radar={draws_per_radar}. "
+            "Increase spawn area, reduce n_radars, or lower radar_min_sep."
+        )
 
     def _pregenerate_layouts(self):
         """Pre-generate fixed radar positions for n_env_layouts distinct scenarios.
@@ -300,7 +345,7 @@ class StrikeEA2DEnv(EnvBase):
         layouts = []
         x_lo, x_hi = 0.2, 0.8
         y_lo, y_hi = 0.4, 0.8
-        min_sep = 0.1
+        min_sep = self.radar_min_sep
         for seed_idx in range(self.n_env_layouts):
             rng = torch.Generator()
             rng.manual_seed(seed_idx + 1000)  # Offset to avoid collision with main RNG
@@ -559,7 +604,7 @@ class StrikeEA2DEnv(EnvBase):
                 # Random radar positions with minimum spacing constraint
                 x_lo, x_hi = 0.2, 0.8
                 y_lo, y_hi = 0.6, 0.8
-                min_sep = 0.2
+                min_sep = self.radar_min_sep
                 for i in range(n_reset):
                     radar_pos_reset[i] = self._sample_spaced_radars(
                         R, x_lo, x_hi, y_lo, y_hi, min_sep, self._rng, device=self.device,

@@ -163,6 +163,7 @@ def _build_env_cfg(
         dt=base_cfg.dt,
         max_steps=base_cfg.max_steps,
         n_env_layouts=base_cfg.n_env_layouts,
+        radar_min_sep=getattr(base_cfg, "radar_min_sep", 0.5),
         target_spawn_angle_range=base_cfg.target_spawn_angle_range,
         v_max=base_cfg.v_max,
         accel_magnitude=base_cfg.accel_magnitude,

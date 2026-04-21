@@ -121,7 +121,7 @@ class CurriculumPhase:
 CURRICULUM: List[CurriculumPhase] = [
     CurriculumPhase(
         name="basic_1v1",
-        iters=(0, 100),
+        iters=(0, 25),
         config=Fixed(ScenarioConfig(
             n_strikers=1, n_jammers=1,
             n_known_targets=1, n_known_radars=1,
@@ -130,24 +130,24 @@ CURRICULUM: List[CurriculumPhase] = [
     ),
     CurriculumPhase(
         name="scaling_1v2",
-        iters=(100, 300),
+        iters=(25, 100),
         config=RandomChoice([
             ScenarioConfig(n_strikers=1, n_jammers=1,
-                           n_known_targets=1, n_known_radars=1),
+                           n_known_targets=2, n_known_radars=2),
             ScenarioConfig(n_strikers=1, n_jammers=1,
                            n_known_targets=2, n_known_radars=2),
         ]),
     ),
-    CurriculumPhase(
-        name="scaling_2v2",
-        iters=(300, 700),
-        config=RandomChoice([
-            ScenarioConfig(n_strikers=1, n_jammers=1,
-                           n_known_targets=2, n_known_radars=2),
-            ScenarioConfig(n_strikers=2, n_jammers=2,
-                           n_known_targets=2, n_known_radars=2),
-        ]),
-    ),
+    # CurriculumPhase(
+    #     name="scaling_2v2",
+    #     iters=(300, 700),
+    #     config=RandomChoice([
+    #         ScenarioConfig(n_strikers=1, n_jammers=1,
+    #                        n_known_targets=2, n_known_radars=2),
+    #         ScenarioConfig(n_strikers=2, n_jammers=2,
+    #                        n_known_targets=2, n_known_radars=2),
+    #     ]),
+    # ),
     # CurriculumPhase(
     #     name="domain_randomization",
     #     iters=(200, 400),

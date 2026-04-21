@@ -73,7 +73,7 @@ class FOFEConfig:
     critic_fusion_mlp_dims : tuple of int
         Fusion MLP dims for critic.
     """
-    use_fofe: bool = False
+    use_fofe: bool = True
 
     # --- Actor FOFE dims ---
     agents_see_dims:   Tuple[int, ...] = (96,) # one SEE layer
@@ -100,9 +100,9 @@ class EnvConfig:
     # Team composition
     n_strikers: int = 1
     n_jammers: int = 1
-    n_known_targets: int = 1
+    n_known_targets: int = 2
     n_unknown_targets: int = 0
-    n_known_radars: int = 1
+    n_known_radars: int = 2
     n_unknown_radars: int = 0
     n_targets: int = 0
     n_radars: int = 0
@@ -110,8 +110,9 @@ class EnvConfig:
     # World / episode
     world_bounds: Tuple[float, float] = (0.0, 1.0)
     dt: float = 1.0
-    max_steps: int = 100
+    max_steps: int = 150
     n_env_layouts: int = 0
+    radar_min_sep: float = 0.5
     target_spawn_angle_range: Tuple[float, float] = (0, 360)
 
     # Kinematics
@@ -157,11 +158,14 @@ class EnvConfig:
         self.n_unknown_targets = int(self.n_unknown_targets)
         self.n_known_radars = int(self.n_known_radars)
         self.n_unknown_radars = int(self.n_unknown_radars)
+        self.radar_min_sep = float(self.radar_min_sep)
 
         if self.n_known_targets < 0 or self.n_unknown_targets < 0:
             raise ValueError("n_known_targets and n_unknown_targets must be >= 0")
         if self.n_known_radars < 0 or self.n_unknown_radars < 0:
             raise ValueError("n_known_radars and n_unknown_radars must be >= 0")
+        if self.radar_min_sep < 0:
+            raise ValueError("radar_min_sep must be >= 0")
 
         if self.n_known_targets == 0 and self.n_unknown_targets == 0:
             self.n_targets = int(self.n_targets)
@@ -182,7 +186,7 @@ class EnvConfig:
 class PPOConfig:
     """Shared PPO hyperparameters for both striker and jammer MAPPO."""
     num_envs: int = 512
-    n_iters: int = 1
+    n_iters: int = 100
     frames_per_batch: Optional[int] = None
     num_epochs: int = 10
     minibatch_size: int = 2048

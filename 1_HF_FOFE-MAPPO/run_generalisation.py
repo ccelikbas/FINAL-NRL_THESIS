@@ -168,6 +168,7 @@ def _build_eval_env_cfg(base: EnvConfig, cfg: Dict[str, Any]) -> EnvConfig:
         dt=base.dt,
         max_steps=base.max_steps,
         n_env_layouts=base.n_env_layouts,
+        radar_min_sep=getattr(base, "radar_min_sep", 0.5),
         target_spawn_angle_range=base.target_spawn_angle_range,
         # ── Kinematics (from checkpoint) ─────────────────────────────
         v_max=base.v_max,

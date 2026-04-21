@@ -71,6 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--n_unknown_targets", type=int, default=env_defaults.n_unknown_targets)
     p.add_argument("--n_known_radars", type=int, default=env_defaults.n_known_radars)
     p.add_argument("--n_unknown_radars", type=int, default=env_defaults.n_unknown_radars)
+    p.add_argument("--radar_min_sep", type=float, default=env_defaults.radar_min_sep)
     # PPO
     p.add_argument("--num_envs", type=int, default=ppo_defaults.num_envs)
     p.add_argument("--max_steps", type=int, default=env_defaults.max_steps)
@@ -131,6 +132,7 @@ def _build_configs(args):
         n_unknown_targets=args.n_unknown_targets,
         n_known_radars=args.n_known_radars,
         n_unknown_radars=args.n_unknown_radars,
+        radar_min_sep=args.radar_min_sep,
         max_steps=args.max_steps,
         reward_config=reward_cfg,
     )
