@@ -69,6 +69,37 @@ def _finite_mean(values: List[float]) -> float:
     return float(sum(finite_vals) / len(finite_vals))
 
 
+# ------------------------------------------------------------------
+# Fine-grained profiling helpers (used only for the first N iterations)
+# ------------------------------------------------------------------
+
+def _fine_tic(active: bool):
+    if not active:
+        return None
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    return time.perf_counter()
+
+
+def _fine_lap(acc: Dict[str, float], name: str, t, active: bool):
+    if not active or t is None:
+        return t
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    now = time.perf_counter()
+    acc[name] = acc.get(name, 0.0) + (now - t)
+    return now
+
+
+def _format_buckets(acc: Dict[str, float], top: int = 10) -> str:
+    items = sorted(acc.items(), key=lambda kv: -kv[1])
+    parts = [f"{k}={v:.3f}s" for k, v in items[:top]]
+    other = sum(v for _, v in items[top:])
+    if other > 0:
+        parts.append(f"other={other:.3f}s")
+    return " ".join(parts)
+
+
 try:
     from torchrl.envs.utils import ExplorationType, set_exploration_type
     _EXPLORATION_API = "new"
@@ -573,6 +604,14 @@ def train_mappo(
         torch.cuda.synchronize()
     _t_iter_start = time.perf_counter()   # true start of iter 0 = before collector first blocks
 
+    # ── Fine-grained profiling (first _PROFILE_ITERS iterations) ──────
+    # Enables per-sub-step timing in both the env _step (rollout side)
+    # and the trainer's prep + PPO update sections.  Adds ~cuda.sync
+    # overhead per lap, so turn off after the window.
+    _env_profile_supported = hasattr(base_env, "set_profile_active")
+    if _env_profile_supported and _PROFILE_ITERS > 0:
+        base_env.set_profile_active(True)
+
     for it, td in enumerate(collector):
         # Sync GPU so the clock is read after all pending ops have finished,
         # then record when the batch was delivered by the collector.
@@ -581,7 +620,17 @@ def train_mappo(
         _t_batch_ready = time.perf_counter()
         _t_rollout_s = _t_batch_ready - _t_iter_start   # time collector spent on rollout
         _timed_out = False
+
+        # ── Fine-profile flags for this iteration ───────────────────
+        _fine = (_ITER_OFFSET + it) < _PROFILE_ITERS
+        _fine_acc: Dict[str, float] = {}
+        _env_buckets: Dict[str, float] = (
+            base_env.pop_profile_buckets() if (_fine and _env_profile_supported) else {}
+        )
+
+        _tf = _fine_tic(_fine)
         td = td.to(device)
+        _tf = _fine_lap(_fine_acc, "prep_to_device", _tf, _fine)
 
         # ── Reward normalization ─────────────────────────────────────
         if reward_normalizer is not None:
@@ -597,6 +646,7 @@ def train_mappo(
                           "normalized_reward_mean": raw_mean, "normalized_reward_std": raw_std}
 
         prepare_done_keys(td, base_env)
+        _tf = _fine_lap(_fine_acc, "prep_reward_norm", _tf, _fine)
 
         # ── Compute values for current and next states ───────────────
         with torch.no_grad():
@@ -604,12 +654,15 @@ def train_mappo(
                 critic(td)
             except Exception as e:
                 print(f"WARNING critic(td) failed: {e}")
+        _tf = _fine_lap(_fine_acc, "prep_critic_curr", _tf, _fine)
+        with torch.no_grad():
             try:
                 nxt = td.get("next").to(device)
                 critic(nxt)
                 td.set("next", nxt)
             except Exception as e:
                 print(f"WARNING critic(nxt) failed: {e}")
+        _tf = _fine_lap(_fine_acc, "prep_critic_next", _tf, _fine)
 
         # ── Extract tensors ──────────────────────────────────────────
         obs_all = td.get(("agents", "observation"))
@@ -657,6 +710,7 @@ def train_mappo(
 
         if use_fofe:
             s_fofe_actor, j_fofe_actor = _split_fofe_by_role(fofe_actor_obs, ns, nj)
+        _tf = _fine_lap(_fine_acc, "prep_extract_split", _tf, _fine)
 
         # ── GAE ──────────────────────────────────────────────────────
         with torch.no_grad():
@@ -667,6 +721,7 @@ def train_mappo(
                 from .utils import compute_gae
                 s_adv, s_ret = compute_gae(s_rew, s_val, s_nval, dones, ppo_cfg.gamma, ppo_cfg.lmbda)
                 j_adv, j_ret = compute_gae(j_rew, j_val, j_nval, dones, ppo_cfg.gamma, ppo_cfg.lmbda)
+        _tf = _fine_lap(_fine_acc, "prep_gae", _tf, _fine)
 
         # ── Flatten everything to [N, ...] ───────────────────────────
         s_obs_f = s_obs.reshape(-1, ns, s_obs.shape[-1])
@@ -695,6 +750,7 @@ def train_mappo(
                           for k, v in fofe_critic_obs.items()}
 
         n_samples = s_obs_f.shape[0]
+        _tf = _fine_lap(_fine_acc, "prep_flatten", _tf, _fine)
 
         # ── PPO update for each role ─────────────────────────────────
         _t_ppo_start = time.perf_counter()
@@ -723,6 +779,8 @@ def train_mappo(
                     )
                     break
 
+                _tfm = _fine_tic(_fine)
+
                 # ── Striker PPO update ───────────────────────────────
                 mb_s_act = s_act_f[idx]
                 mb_s_old_lp = s_old_lp_f[idx]
@@ -732,15 +790,18 @@ def train_mappo(
                 if use_fofe:
                     # FOFE path: pass structured obs dict
                     mb_s_fofe = _index_fofe_dict(s_fofe_f, idx)
+                    _tfm = _fine_lap(_fine_acc, "ppo_mb_index", _tfm, _fine)
                     s_new_lp, s_entropy = policy.striker_log_prob_entropy(mb_s_fofe, mb_s_act)
                 else:
                     mb_s_obs = s_obs_f[idx]
+                    _tfm = _fine_lap(_fine_acc, "ppo_mb_index", _tfm, _fine)
                     s_new_lp, s_entropy = policy.striker_log_prob_entropy(mb_s_obs, mb_s_act)
 
                 s_loss_info = ppo_clip_loss(
                     s_new_lp, mb_s_old_lp, mb_s_adv, s_entropy,
                     ppo_cfg.clip_eps, ppo_cfg.entropy_coef,
                 )
+                _tfm = _fine_lap(_fine_acc, "ppo_s_actor_fwd", _tfm, _fine)
 
                 if use_fofe:
                     # FOFE critic: pass entity sets
@@ -758,10 +819,12 @@ def train_mappo(
                 s_pred_val = critic._broadcast_role_values(s_pred_val, ns, "striker")
 
                 s_vloss = value_loss_fn(s_pred_val, mb_s_ret)
+                _tfm = _fine_lap(_fine_acc, "ppo_s_critic_fwd", _tfm, _fine)
 
                 striker_actor_optim.zero_grad(set_to_none=True)
                 s_loss_info["loss_total"].backward()
                 nn.utils.clip_grad_norm_(policy.striker_policy.parameters(), ppo_cfg.max_grad_norm)
+                _tfm = _fine_lap(_fine_acc, "ppo_s_actor_bwd", _tfm, _fine)
 
                 # -- FOFE KPI snapshot (striker): read grads before step --
                 if use_fofe:
@@ -770,6 +833,7 @@ def train_mappo(
                         critic.striker_critic._diag_cache,
                         mb_s_fofe, policy.striker_policy, critic.striker_critic,
                     )
+                _tfm = _fine_lap(_fine_acc, "ppo_fofe_kpi", _tfm, _fine)
 
                 striker_actor_optim.step()
 
@@ -777,12 +841,14 @@ def train_mappo(
                 s_vloss.backward()
                 nn.utils.clip_grad_norm_(critic.striker_critic.parameters(), ppo_cfg.max_grad_norm)
                 striker_critic_optim.step()
+                _tfm = _fine_lap(_fine_acc, "ppo_s_step_and_critic_bwd", _tfm, _fine)
 
                 s_pol_acc += float(s_loss_info["loss_policy"].item())
                 s_val_acc += float(s_vloss.item())
                 s_ent_acc += float(s_loss_info["entropy_mean"].item())
                 s_kl_acc += s_loss_info["approx_kl"]
                 s_clip_acc += s_loss_info["clip_fraction"]
+                _tfm = _fine_lap(_fine_acc, "ppo_s_stats", _tfm, _fine)
 
                 # ── Jammer PPO update ────────────────────────────────
                 mb_j_act = j_act_f[idx]
@@ -801,6 +867,7 @@ def train_mappo(
                     j_new_lp, mb_j_old_lp, mb_j_adv, j_entropy,
                     ppo_cfg.clip_eps, ppo_cfg.entropy_coef,
                 )
+                _tfm = _fine_lap(_fine_acc, "ppo_j_actor_fwd", _tfm, _fine)
 
                 if use_fofe:
                     # Reuse mb_crt from striker (same global state)
@@ -816,10 +883,12 @@ def train_mappo(
                 j_pred_val = critic._broadcast_role_values(j_pred_val, nj, "jammer")
 
                 j_vloss = value_loss_fn(j_pred_val, mb_j_ret)
+                _tfm = _fine_lap(_fine_acc, "ppo_j_critic_fwd", _tfm, _fine)
 
                 jammer_actor_optim.zero_grad(set_to_none=True)
                 j_loss_info["loss_total"].backward()
                 nn.utils.clip_grad_norm_(policy.jammer_policy.parameters(), ppo_cfg.max_grad_norm)
+                _tfm = _fine_lap(_fine_acc, "ppo_j_actor_bwd", _tfm, _fine)
 
                 # -- FOFE KPI snapshot (jammer): read grads before step --
                 if use_fofe:
@@ -828,6 +897,7 @@ def train_mappo(
                         critic.jammer_critic._diag_cache,
                         mb_j_fofe, policy.jammer_policy, critic.jammer_critic,
                     )
+                _tfm = _fine_lap(_fine_acc, "ppo_fofe_kpi", _tfm, _fine)
 
                 jammer_actor_optim.step()
 
@@ -835,12 +905,14 @@ def train_mappo(
                 j_vloss.backward()
                 nn.utils.clip_grad_norm_(critic.jammer_critic.parameters(), ppo_cfg.max_grad_norm)
                 jammer_critic_optim.step()
+                _tfm = _fine_lap(_fine_acc, "ppo_j_step_and_critic_bwd", _tfm, _fine)
 
                 j_pol_acc += float(j_loss_info["loss_policy"].item())
                 j_val_acc += float(j_vloss.item())
                 j_ent_acc += float(j_loss_info["entropy_mean"].item())
                 j_kl_acc += j_loss_info["approx_kl"]
                 j_clip_acc += j_loss_info["clip_fraction"]
+                _tfm = _fine_lap(_fine_acc, "ppo_j_stats", _tfm, _fine)
 
                 n_updates += 1
 
@@ -978,6 +1050,33 @@ def train_mappo(
                 + (f" | eval={_t_eval_s_val:.2f}s" if do_eval else "")
                 + (" [TIMED OUT]" if _timed_out else "")
             )
+
+        # ── Fine-grained breakdown (only for first _PROFILE_ITERS iters) ──
+        if _fine:
+            env_buckets = dict(_env_buckets)  # already popped at iter start
+            env_total = sum(env_buckets.values())
+            prep_buckets = {k: v for k, v in _fine_acc.items() if k.startswith("prep_")}
+            ppo_buckets  = {k: v for k, v in _fine_acc.items() if k.startswith("ppo_")}
+            prep_total = sum(prep_buckets.values())
+            ppo_total  = sum(ppo_buckets.values())
+            print(
+                f"  [FINE iter {global_iter_1based}] "
+                f"rollout_env_sum={env_total:.2f}s ({_format_buckets(env_buckets, top=14)})"
+            )
+            print(
+                f"  [FINE iter {global_iter_1based}] "
+                f"prep_sum={prep_total:.2f}s ({_format_buckets(prep_buckets, top=8)})"
+            )
+            print(
+                f"  [FINE iter {global_iter_1based}] "
+                f"ppo_sum={ppo_total:.2f}s ({_format_buckets(ppo_buckets, top=14)}) "
+                f"[n_updates={n_updates}]"
+            )
+
+        # ── Disable env fine-profiling once window is over ────────────
+        if _env_profile_supported and (_ITER_OFFSET + it + 1) >= _PROFILE_ITERS \
+                and getattr(base_env, "_profile_active", False):
+            base_env.set_profile_active(False)
 
         # ── Reset iteration start for next iteration ──────────────────
         _t_iter_start = _t_iter_end

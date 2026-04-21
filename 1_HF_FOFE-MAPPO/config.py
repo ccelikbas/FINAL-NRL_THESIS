@@ -182,7 +182,7 @@ class EnvConfig:
 class PPOConfig:
     """Shared PPO hyperparameters for both striker and jammer MAPPO."""
     num_envs: int = 512
-    n_iters: int = 150
+    n_iters: int = 1
     frames_per_batch: Optional[int] = None
     num_epochs: int = 10
     minibatch_size: int = 2048
@@ -281,7 +281,7 @@ class HFRadarConfig:
     jammer_tx_power: Optional[float] = None        # P_J [W], preferred name
     jammer_gain: Optional[float] = None            # G_J [dB], preferred name
     P_J: float = 1e1                              # legacy alias [W]
-    G_J: float = 30.0                              # legacy alias [dB]
+    G_J: float = 15.0                              # legacy alias [dB]
 
     # Angular lobe boundaries (degrees, converted to radians internally)
     theta_main_deg: float = 6.0    # full main-lobe width (±1.5° each side)

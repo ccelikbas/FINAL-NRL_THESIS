@@ -4,7 +4,10 @@
       "Bash(python -c \"import shutil; shutil.copy\\(r'c:\\\\Users\\\\celikbas\\\\Documents\\\\REPO GIT NLR\\\\1_HF_FOFE-MAPPO\\\\environment.py', r'c:\\\\Users\\\\celikbas\\\\Documents\\\\REPO GIT NLR\\\\1_HF_FOFE-MAPPO\\\\HF_environment.py'\\)\")",
       "Bash(echo \"exit: $?\")",
       "Bash(python -m py_compile 1_HF_FOFE-MAPPO/run_curicilum.py)",
-      "Bash(python -c \"import ast; ast.parse\\(open\\(r'c:\\\\Users\\\\celikbas\\\\Documents\\\\REPO GIT NLR\\\\1_HF_FOFE-MAPPO\\\\run_curicilum.py'\\).read\\(\\)\\); print\\('Syntax OK'\\)\")"
+      "Bash(python -c \"import ast; ast.parse\\(open\\(r'c:\\\\Users\\\\celikbas\\\\Documents\\\\REPO GIT NLR\\\\1_HF_FOFE-MAPPO\\\\run_curicilum.py'\\).read\\(\\)\\); print\\('Syntax OK'\\)\")",
+      "Bash(git -C \"c:/Users/celikbas/Documents/REPO GIT NLR\" diff HEAD -- 1_HF_FOFE-MAPPO/config.py)",
+      "Bash(cd \"c:\\\\\\\\Users\\\\\\\\celikbas\\\\\\\\Documents\\\\\\\\REPO GIT NLR\")",
+      "Bash(git.exe diff *)"
     ]
   }
 }

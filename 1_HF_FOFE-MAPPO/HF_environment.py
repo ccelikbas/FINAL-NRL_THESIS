@@ -15,8 +15,9 @@ Activated when EnvExtensionsConfig.use_hf_radar == True.
 from __future__ import annotations
 
 import math
+import time
 from math import radians
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import torch
 from tensordict import TensorDict
@@ -159,6 +160,45 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         # Kept for compatibility with HF visualization helper.
         self._gt_over_gs = radar_tx_gain / max(radar_side_lobe_gain, 1e-30)
 
+        # --- Fine-grained step profiling (off by default) ---
+        self._profile_active: bool = False
+        self._profile_buckets: Dict[str, float] = {}
+
+    # ------------------------------------------------------------------
+    # Fine-grained profiling helpers (used only when set_profile_active(True))
+    # ------------------------------------------------------------------
+
+    def set_profile_active(self, active: bool) -> None:
+        """Enable/disable fine-grained timing of _step sub-sections.
+        When enabled, each _step call accumulates per-section wall time
+        into self._profile_buckets (keys prefixed with 'env_').
+        """
+        self._profile_active = bool(active)
+        if self._profile_active:
+            self._profile_buckets = {}
+
+    def pop_profile_buckets(self) -> Dict[str, float]:
+        """Return accumulated timings and reset the buckets."""
+        out = self._profile_buckets
+        self._profile_buckets = {}
+        return out
+
+    def _prof_tic(self):
+        if not self._profile_active:
+            return None
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        return time.perf_counter()
+
+    def _prof_lap(self, name: str, t):
+        if t is None:
+            return None
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        now = time.perf_counter()
+        self._profile_buckets[name] = self._profile_buckets.get(name, 0.0) + (now - t)
+        return now
+
     # ------------------------------------------------------------------
     # HF radar model
     # ------------------------------------------------------------------
@@ -266,6 +306,7 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
     # ------------------------------------------------------------------
 
     def _step(self, tensordict: TensorDict) -> TensorDict:
+        _t = self._prof_tic()
         action = tensordict.get(self._action_key)  # [B, A, 2] discrete in {0..6}
         B, A, _ = action.shape
         rp = self.reward_params
@@ -277,6 +318,7 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         alive = self.agent_alive
         alive_before_kill = alive
         alive_float = alive.float()
+        _t = self._prof_lap("env_decode_action", _t)
 
         # ---- Velocity dynamics ----
         v_accel = acc[..., 0]
@@ -310,7 +352,9 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         dx = self.agent_speed * torch.cos(self.agent_heading) * self.dt
         dy = self.agent_speed * torch.sin(self.agent_heading) * self.dt
         self.agent_pos = (self.agent_pos + torch.stack([dx, dy], dim=-1)).clamp(self.low, self.high)
+        _t = self._prof_lap("env_dynamics", _t)
         self._update_geometry_cache()
+        _t = self._prof_lap("env_geom_cache", _t)
 
         # ================================================================
         # HF radar model (replaces simple jam + kill logic)
@@ -325,6 +369,7 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
             jam_active = self.agent_alive[:, self.n_strikers:]             # [B, nj]
         else:
             jam_active = torch.zeros(B, 0, dtype=torch.bool, device=self.device)
+        _t = self._prof_lap("env_hf_radar", _t)
 
         # ---- radar kills (probabilistic, per-agent effective range) ----
         dist_ar = self._c_dist_ar                                          # [B, A, R]
@@ -349,6 +394,7 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
 
         alive = self.agent_alive
         alive_float = alive.float()
+        _t = self._prof_lap("env_kills", _t)
 
         # ==================================================================
         # Reward computation  (identical to parent — copied verbatim)
@@ -652,6 +698,8 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
             reward += control_pen
             control_pen_full = control_pen
 
+        _t = self._prof_lap("env_rewards", _t)
+
         # Store per-component reward breakdown
         self.last_reward_components = {
             "target_destroyed":   target_destroyed_full.detach(),
@@ -677,6 +725,7 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         self._episode_team_reward += step_team_reward
         for comp_key, comp_tensor in self.last_reward_components.items():
             self._episode_component_reward[comp_key] += comp_tensor.sum(dim=-1)
+        _t = self._prof_lap("env_reward_accum", _t)
 
         # ---- done flags ----
         self.step_count += 1
@@ -691,14 +740,20 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         next_td.set(self._reward_key, reward)
         next_td.set("done", done.to(torch.bool))
         next_td.set("terminated", terminated.to(torch.bool))
+        _t = self._prof_lap("env_done_flags", _t)
         self._update_comm_cache()
+        _t = self._prof_lap("env_comm_cache", _t)
         next_td.set(self._obs_key, self._build_local_obs())
+        _t = self._prof_lap("env_build_local_obs", _t)
         next_td.set("state", self._build_global_state())
+        _t = self._prof_lap("env_build_state", _t)
         if self.use_fofe:
             for k, v in self._build_fofe_obs().items():
                 next_td.set(("agents", k), v)
+            _t = self._prof_lap("env_build_fofe_obs", _t)
             for k, v in self._build_fofe_critic_state().items():
                 next_td.set(k, v)
+            _t = self._prof_lap("env_build_fofe_critic", _t)
 
         if bool(done.any().item()):
             for b in range(B):
@@ -721,5 +776,6 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
             self._episode_team_reward[done.squeeze(-1)] = 0.0
             for comp_key in self._episode_component_reward:
                 self._episode_component_reward[comp_key][done.squeeze(-1)] = 0.0
+        _t = self._prof_lap("env_done_loop", _t)
 
         return next_td
