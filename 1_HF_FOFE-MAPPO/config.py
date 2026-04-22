@@ -289,7 +289,7 @@ class HFRadarConfig:
 
     # Angular lobe boundaries (degrees, converted to radians internally)
     theta_main_deg: float = 6.0    # full main-lobe width (±1.5° each side)
-    theta_side_deg: float = 10.0    # full side-lobe+main-lobe cone width (±4.5° each side)
+    theta_side_deg: float = 20.0    # full side-lobe+main-lobe cone width (±4.5° each side)
 
     def __post_init__(self):
         if self.radar_rx_gain is None:

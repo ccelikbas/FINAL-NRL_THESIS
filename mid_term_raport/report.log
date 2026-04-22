@@ -1,9 +1,10 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.25 (MiKTeX 24.1) (preloaded format=pdflatex 2026.4.22)  22 APR 2026 10:44
+This is pdfTeX, Version 3.141592653-2.6-1.40.25 (MiKTeX 24.1) (preloaded format=pdflatex 2026.4.22)  22 APR 2026 11:30
 entering extended mode
  restricted \write18 enabled.
+ file:line:error style messages enabled.
  %&-line parsing enabled.
-**./report.tex
-(report.tex
+**"c:/Users/celikbas/Documents/REPO GIT NLR/mid_term_raport/report.tex"
+(c:/Users/celikbas/Documents/REPO GIT NLR/mid_term_raport/report.tex
 LaTeX2e <2023-11-01> patch level 1
 L3 programming layer <2024-01-04>
 (tudelft-report.cls
@@ -25,15 +26,12 @@ File: bk10.clo 2023/05/17 v1.4n Standard LaTeX file (size option)
 \abovecaptionskip=\skip48
 \belowcaptionskip=\skip49
 \bibindent=\dimen140
-)
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/mathtools\mathtools.sty
+) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/mathtools\mathtools.sty
 Package: mathtools 2024/10/04 v1.31 mathematical typesetting tools
-
-(C:\Program Files\MiKTeX\tex/latex/graphics\keyval.sty
+ (C:\Program Files\MiKTeX\tex/latex/graphics\keyval.sty
 Package: keyval 2022/05/29 v1.15 key=value parser (DPC)
 \KV@toks@=\toks17
-)
-(C:\Program Files\MiKTeX\tex/latex/tools\calc.sty
+) (C:\Program Files\MiKTeX\tex/latex/tools\calc.sty
 Package: calc 2023/07/08 v4.3 Infix arithmetic (KKT,FJ)
 \calc@Acount=\count196
 \calc@Bcount=\count197
@@ -45,28 +43,23 @@ LaTeX Info: Redefining \setlength on input line 80.
 LaTeX Info: Redefining \addtolength on input line 81.
 \calc@Ccount=\count198
 \calc@Cskip=\skip52
-)
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/mathtools\mhsetup.sty
+) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/mathtools\mhsetup.sty
 Package: mhsetup 2021/03/18 v1.4 programming setup (MH)
-)
-(C:\Program Files\MiKTeX\tex/latex/amsmath\amsmath.sty
+) (C:\Program Files\MiKTeX\tex/latex/amsmath\amsmath.sty
 Package: amsmath 2023/05/13 v2.17o AMS math features
 \@mathmargin=\skip53
 
 For additional information on amsmath, use the `?' option.
 (C:\Program Files\MiKTeX\tex/latex/amsmath\amstext.sty
 Package: amstext 2021/08/26 v2.01 AMS text
-
-(C:\Program Files\MiKTeX\tex/latex/amsmath\amsgen.sty
+ (C:\Program Files\MiKTeX\tex/latex/amsmath\amsgen.sty
 File: amsgen.sty 1999/11/30 v2.0 generic functions
 \@emptytoks=\toks18
 \ex@=\dimen143
-))
-(C:\Program Files\MiKTeX\tex/latex/amsmath\amsbsy.sty
+)) (C:\Program Files\MiKTeX\tex/latex/amsmath\amsbsy.sty
 Package: amsbsy 1999/11/29 v1.2d Bold Symbols
 \pmbraise@=\dimen144
-)
-(C:\Program Files\MiKTeX\tex/latex/amsmath\amsopn.sty
+) (C:\Program Files\MiKTeX\tex/latex/amsmath\amsopn.sty
 Package: amsopn 2022/04/08 v2.04 operator names
 )
 \inf@bad=\count199
@@ -128,19 +121,16 @@ LaTeX Info: Redefining \] on input line 2954.
 \l_MT_below_shortintertext_sep=\dimen158
 \xmathstrut@box=\box53
 \xmathstrut@dim=\dimen159
-)
-(C:\Program Files\MiKTeX\tex/latex/amsfonts\amssymb.sty
+) (C:\Program Files\MiKTeX\tex/latex/amsfonts\amssymb.sty
 Package: amssymb 2013/01/14 v3.01 AMS font symbols
-
-(C:\Program Files\MiKTeX\tex/latex/amsfonts\amsfonts.sty
+ (C:\Program Files\MiKTeX\tex/latex/amsfonts\amsfonts.sty
 Package: amsfonts 2013/01/14 v3.01 Basic AMSFonts support
 \symAMSa=\mathgroup4
 \symAMSb=\mathgroup5
 LaTeX Font Info:    Redeclaring math symbol \hbar on input line 98.
 LaTeX Font Info:    Overwriting math alphabet `\mathfrak' in version `bold'
 (Font)                  U/euf/m/n --> U/euf/b/n on input line 106.
-))
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/siunitx\siunitx.sty
+)) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/siunitx\siunitx.sty
 Package: siunitx 2026-04-09 v3.5.3 A comprehensive (SI) units package
 \l__siunitx_number_uncert_offset_int=\count278
 \l__siunitx_number_exponent_fixed_int=\count279
@@ -154,26 +144,18 @@ Package: siunitx 2026-04-09 v3.5.3 A comprehensive (SI) units package
 \l__siunitx_number_group_min_int=\count287
 \l__siunitx_number_group_minimum_int=\count288
 \l__siunitx_compound_count_int=\count289
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/translations\translations.s
-ty
-Package: translations 2022/02/05 v1.12 internationalization of LaTeX2e packages
- (CN)
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/translations\translations.sty
+Package: translations 2022/02/05 v1.12 internationalization of LaTeX2e packages (CN)
  (C:\Program Files\MiKTeX\tex/latex/etoolbox\etoolbox.sty
 Package: etoolbox 2020/10/05 v2.5k e-TeX tools for LaTeX (JAW)
 \etb@tempcnta=\count290
-)
-(C:\Program Files\MiKTeX\tex/generic/pdftexcmds\pdftexcmds.sty
-Package: pdftexcmds 2020-06-27 v0.33 Utility functions of pdfTeX for LuaTeX (HO
-)
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/generic/infwarerr\infwarerr.sty
+) (C:\Program Files\MiKTeX\tex/generic/pdftexcmds\pdftexcmds.sty
+Package: pdftexcmds 2020-06-27 v0.33 Utility functions of pdfTeX for LuaTeX (HO)
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/generic/infwarerr\infwarerr.sty
 Package: infwarerr 2019/12/03 v1.5 Providing info/warning/error messages (HO)
-)
-(C:\Program Files\MiKTeX\tex/generic/iftex\iftex.sty
+) (C:\Program Files\MiKTeX\tex/generic/iftex\iftex.sty
 Package: iftex 2022/02/03 v1.0f TeX engine tests
-)
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/generic/ltxcmds\ltxcmds.sty
+) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/generic/ltxcmds\ltxcmds.sty
 Package: ltxcmds 2023-12-04 v1.26 LaTeX kernel commands for general use (HO)
 )
 Package pdftexcmds Info: \pdf@primitive is available.
@@ -196,8 +178,7 @@ Package pdftexcmds Info: \pdfdraftmode found.
 \l__siunitx_sexagesimal_tmp_dim=\dimen164
 \l__siunitx_sexagesimal_marker_box=\box60
 \l__siunitx_sexagesimal_unit_box=\box61
-
-(C:\Program Files\MiKTeX\tex/latex/tools\array.sty
+ (C:\Program Files\MiKTeX\tex/latex/tools\array.sty
 Package: array 2023/10/16 v2.5g Tabular extension package (FMi)
 \col@sep=\dimen165
 \ar@mcellbox=\box62
@@ -206,8 +187,7 @@ Package: array 2023/10/16 v2.5g Tabular extension package (FMi)
 \extratabsurround=\skip57
 \backup@length=\skip58
 \ar@cellbox=\box63
-))
-(C:\Program Files\MiKTeX\tex/latex/tools\tabularx.sty
+)) (C:\Program Files\MiKTeX\tex/latex/tools\tabularx.sty
 Package: tabularx 2023/07/08 v2.11c `tabularx' package (DPC)
 \TX@col@width=\dimen167
 \TX@old@table=\dimen168
@@ -216,8 +196,7 @@ Package: tabularx 2023/07/08 v2.11c `tabularx' package (DPC)
 \TX@delta=\dimen171
 \TX@cols=\count294
 \TX@ftn=\toks24
-)
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/booktabs\booktabs.sty
+) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/booktabs\booktabs.sty
 Package: booktabs 2020/01/12 v1.61803398 Publication quality tables
 \heavyrulewidth=\dimen172
 \lightrulewidth=\dimen173
@@ -236,8 +215,7 @@ Package: booktabs 2020/01/12 v1.61803398 Publication quality tables
 \@thisruleclass=\count297
 \@lastruleclass=\count298
 \@thisrulewidth=\dimen184
-)
-(C:\Program Files\MiKTeX\tex/latex/tools\longtable.sty
+) (C:\Program Files\MiKTeX\tex/latex/tools\longtable.sty
 Package: longtable 2023-11-01 v4.19 Multi-page Table package (DPC)
 \LTleft=\skip59
 \LTright=\skip60
@@ -255,46 +233,37 @@ Package: longtable 2023-11-01 v4.19 Multi-page Table package (DPC)
 \c@LT@tables=\count302
 \c@LT@chunks=\count303
 \LT@p@ftn=\toks25
-)
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/multirow\multirow.sty
+) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/multirow\multirow.sty
 Package: multirow 2024/11/12 v2.9 Span multiple rows of a table
 \multirow@colwidth=\skip63
 \multirow@cntb=\count304
 \multirow@dima=\skip64
 \bigstrutjot=\dimen186
-)
-(C:\Program Files\MiKTeX\tex/latex/graphics\graphicx.sty
+) (C:\Program Files\MiKTeX\tex/latex/graphics\graphicx.sty
 Package: graphicx 2021/09/16 v1.2d Enhanced LaTeX Graphics (DPC,SPQR)
-
-(C:\Program Files\MiKTeX\tex/latex/graphics\graphics.sty
+ (C:\Program Files\MiKTeX\tex/latex/graphics\graphics.sty
 Package: graphics 2022/03/10 v1.4e Standard LaTeX Graphics (DPC,SPQR)
-
-(C:\Program Files\MiKTeX\tex/latex/graphics\trig.sty
+ (C:\Program Files\MiKTeX\tex/latex/graphics\trig.sty
 Package: trig 2021/08/11 v1.11 sin cos tan (DPC)
-)
-(C:\Program Files\MiKTeX\tex/latex/graphics-cfg\graphics.cfg
+) (C:\Program Files\MiKTeX\tex/latex/graphics-cfg\graphics.cfg
 File: graphics.cfg 2016/06/04 v1.11 sample graphics configuration
 )
 Package graphics Info: Driver file: pdftex.def on input line 107.
-
-(C:\Program Files\MiKTeX\tex/latex/graphics-def\pdftex.def
+ (C:\Program Files\MiKTeX\tex/latex/graphics-def\pdftex.def
 File: pdftex.def 2022/09/22 v1.2b Graphics/color driver for pdftex
 ))
 \Gin@req@height=\dimen187
 \Gin@req@width=\dimen188
-)
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/float\float.sty
+) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/float\float.sty
 Package: float 2001/11/08 v1.3d Float enhancements (AL)
 \c@float@type=\count305
 \float@exts=\toks26
 \float@box=\box69
 \@float@everytoks=\toks27
 \@floatcapt=\box70
-)
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/caption\caption.sty
+) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/caption\caption.sty
 Package: caption 2023/08/05 v3.6o Customizing captions (AR)
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/caption\caption3.sty
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/caption\caption3.sty
 Package: caption3 2023/07/31 v2.4d caption3 kernel (AR)
 \caption@tempdima=\dimen189
 \captionmargin=\dimen190
@@ -310,37 +279,29 @@ Package caption Info: Standard document class detected.
 \c@continuedfloat=\count307
 Package caption Info: float package is loaded.
 Package caption Info: longtable package is loaded.
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/caption\ltcaption.sty
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/caption\ltcaption.sty
 Package: ltcaption 2021/01/08 v1.4c longtable captions (AR)
-))
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/caption\subcaption.sty
+)) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/caption\subcaption.sty
 Package: subcaption 2023/07/28 v1.6b Sub-captions (AR)
 Package caption Info: New subtype `subfigure' on input line 238.
 \c@subfigure=\count308
 Package caption Info: New subtype `subtable' on input line 238.
 \c@subtable=\count309
-)
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/pdfpages\pdfpages.sty
+) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/pdfpages\pdfpages.sty
 Package: pdfpages 2026/03/30 v0.6h Insert pages of external PDF documents (AM)
-
-(C:\Program Files\MiKTeX\tex/latex/base\ifthen.sty
+ (C:\Program Files\MiKTeX\tex/latex/base\ifthen.sty
 Package: ifthen 2022/04/13 v1.1d Standard LaTeX ifthen package (DPC)
-)
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/eso-pic\eso-pic.sty
+) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/eso-pic\eso-pic.sty
 Package: eso-pic 2025/12/10 v3.0d eso-pic (RN)
 \ESO@tempdima=\dimen197
 \ESO@tempdimb=\dimen198
-
-(C:\Program Files\MiKTeX\tex/latex/xcolor\xcolor.sty
+ (C:\Program Files\MiKTeX\tex/latex/xcolor\xcolor.sty
 Package: xcolor 2023/11/15 v3.01 LaTeX color extensions (UK)
-
-(C:\Program Files\MiKTeX\tex/latex/graphics-cfg\color.cfg
+ (C:\Program Files\MiKTeX\tex/latex/graphics-cfg\color.cfg
 File: color.cfg 2016/01/02 v1.6 sample color configuration
 )
 Package xcolor Info: Driver file: pdftex.def on input line 274.
-
-(C:\Program Files\MiKTeX\tex/latex/graphics\mathcolor.ltx)
+ (C:\Program Files\MiKTeX\tex/latex/graphics\mathcolor.ltx)
 Package xcolor Info: Model `cmy' substituted by `cmy0' on input line 1350.
 Package xcolor Info: Model `hsb' substituted by `rgb' on input line 1354.
 Package xcolor Info: Model `RGB' extended on input line 1366.
@@ -354,8 +315,7 @@ Package xcolor Info: Model `wave' substituted by `hsb' on input line 1373.
 \AM@pagewidth=\dimen199
 \AM@pageheight=\dimen256
 \AM@fboxrule=\dimen257
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/pdfpages\pppdftex.def
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/pdfpages\pppdftex.def
 File: pppdftex.def 2026/03/30 v0.6h Pdfpages driver for pdfTeX (AM)
 )
 \pdfpages@includegraphics@status=\count310
@@ -366,39 +326,27 @@ File: pppdftex.def 2026/03/30 v0.6h Pdfpages driver for pdfTeX (AM)
 \AM@lof@heading=\toks30
 \c@AM@survey=\count312
 \AM@templatesizebox=\box72
-)
-(C:\Program Files\MiKTeX\tex/latex/hyperref\hyperref.sty
+) (C:\Program Files\MiKTeX\tex/latex/hyperref\hyperref.sty
 Package: hyperref 2023-11-26 v7.01g Hypertext links for LaTeX
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/kvsetkeys\kvsetkeys.sty
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/kvsetkeys\kvsetkeys.sty
 Package: kvsetkeys 2022-10-05 v1.19 Key value parser (HO)
-)
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/generic/kvdefinekeys\kvdefinekeys
-.sty
+) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/generic/kvdefinekeys\kvdefinekeys.sty
 Package: kvdefinekeys 2019-12-19 v1.6 Define keys (HO)
-)
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/generic/pdfescape\pdfescape.sty
+) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/generic/pdfescape\pdfescape.sty
 Package: pdfescape 2019/12/09 v1.15 Implements pdfTeX's escape features (HO)
-)
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/hycolor\hycolor.sty
+) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/hycolor\hycolor.sty
 Package: hycolor 2020-01-27 v1.10 Color options for hyperref/bookmark (HO)
-)
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/letltxmacro\letltxmacro.sty
+) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/letltxmacro\letltxmacro.sty
 Package: letltxmacro 2019/12/03 v1.6 Let assignment for LaTeX macros (HO)
 ) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/auxhook\auxhook.sty
 Package: auxhook 2019-12-17 v1.6 Hooks for auxiliary files (HO)
-)
-(C:\Program Files\MiKTeX\tex/latex/hyperref\nameref.sty
+) (C:\Program Files\MiKTeX\tex/latex/hyperref\nameref.sty
 Package: nameref 2023-11-26 v2.56 Cross-referencing by name of section
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/refcount\refcount.sty
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/refcount\refcount.sty
 Package: refcount 2019/12/15 v3.6 Data extraction from label references (HO)
-)
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/generic/gettitlestring\gettitlest
-ring.sty
+) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/generic/gettitlestring\gettitlestring.sty
 Package: gettitlestring 2019/12/15 v1.6 Cleanup title references (HO)
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/kvoptions\kvoptions.sty
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/kvoptions\kvoptions.sty
 Package: kvoptions 2022-06-15 v3.15 Key value format for package options (HO)
 ))
 \c@section@level=\count313
@@ -406,18 +354,15 @@ Package: kvoptions 2022-06-15 v3.15 Key value format for package options (HO)
 \@linkdim=\dimen258
 \Hy@linkcounter=\count314
 \Hy@pagecounter=\count315
-
-(C:\Program Files\MiKTeX\tex/latex/hyperref\pd1enc.def
+ (C:\Program Files\MiKTeX\tex/latex/hyperref\pd1enc.def
 File: pd1enc.def 2023-11-26 v7.01g Hyperref: PDFDocEncoding definition (HO)
 Now handling font encoding PD1 ...
 ... no UTF-8 mapping file for font encoding PD1
-)
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/generic/intcalc\intcalc.sty
+) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/generic/intcalc\intcalc.sty
 Package: intcalc 2019/12/15 v1.3 Expandable calculations with integers (HO)
 )
 \Hy@SavedSpaceFactor=\count316
-
-(C:\Program Files\MiKTeX\tex/latex/hyperref\puenc.def
+ (C:\Program Files\MiKTeX\tex/latex/hyperref\puenc.def
 File: puenc.def 2023-11-26 v7.01g Hyperref: PDF Unicode definition (HO)
 Now handling font encoding PU ...
 ... no UTF-8 mapping file for font encoding PU
@@ -431,20 +376,16 @@ Package hyperref Info: Backreferencing OFF on input line 4201.
 Package hyperref Info: Implicit mode ON; LaTeX internals redefined.
 Package hyperref Info: Bookmarks ON on input line 4448.
 \c@Hy@tempcnt=\count317
-
-(C:\Program Files\MiKTeX\tex/latex/url\url.sty
+ (C:\Program Files\MiKTeX\tex/latex/url\url.sty
 \Urlmuskip=\muskip17
 Package: url 2013/09/16  ver 3.4  Verb mode for urls, etc.
 )
 LaTeX Info: Redefining \url on input line 4786.
 \XeTeXLinkMargin=\dimen259
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/generic/bitset\bitset.sty
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/generic/bitset\bitset.sty
 Package: bitset 2019/12/09 v1.3 Handle bit-vector datatype (HO)
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/generic/bigintcalc\bigintcalc.sty
-Package: bigintcalc 2019/12/15 v1.5 Expandable calculations on big integers (HO
-)
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/generic/bigintcalc\bigintcalc.sty
+Package: bigintcalc 2019/12/15 v1.5 Expandable calculations on big integers (HO)
 ))
 \Fld@menulength=\count318
 \Field@Width=\dimen260
@@ -465,32 +406,23 @@ package with kernel methods
 \c@Hfootnote=\count321
 )
 Package hyperref Info: Driver (autodetected): hpdftex.
-
-(C:\Program Files\MiKTeX\tex/latex/hyperref\hpdftex.def
+ (C:\Program Files\MiKTeX\tex/latex/hyperref\hpdftex.def
 File: hpdftex.def 2023-11-26 v7.01g Hyperref driver for pdfTeX
-
-(C:\Program Files\MiKTeX\tex/latex/base\atveryend-ltx.sty
-Package: atveryend-ltx 2020/08/19 v1.0a Emulation of the original atveryend pac
-kage
+ (C:\Program Files\MiKTeX\tex/latex/base\atveryend-ltx.sty
+Package: atveryend-ltx 2020/08/19 v1.0a Emulation of the original atveryend package
 with kernel methods
 )
 \Fld@listcount=\count322
 \c@bookmark@seq@number=\count323
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/rerunfilecheck\rerunfileche
-ck.sty
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/rerunfilecheck\rerunfilecheck.sty
 Package: rerunfilecheck 2025-06-21 v1.11 Rerun checks for auxiliary files (HO)
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/generic/uniquecounter\uniquecount
-er.sty
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/generic/uniquecounter\uniquecounter.sty
 Package: uniquecounter 2019/12/15 v1.4 Provide unlimited unique counter (HO)
 )
-Package uniquecounter Info: New unique counter `rerunfilecheck' on input line 2
-84.
+Package uniquecounter Info: New unique counter `rerunfilecheck' on input line 284.
 )
 \Hy@SectionHShift=\skip65
-)
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/cleveref\cleveref.sty
+) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/cleveref\cleveref.sty
 Package: cleveref 2018/03/27 v0.21.4 Intelligent cross-referencing
 Package cleveref Info: `hyperref' support loaded on input line 2370.
 LaTeX Info: Redefining \cref on input line 2370.
@@ -504,35 +436,22 @@ LaTeX Info: Redefining \Cpagerefrange on input line 2370.
 LaTeX Info: Redefining \labelcref on input line 2370.
 LaTeX Info: Redefining \labelcpageref on input line 2370.
 Package cleveref Info: no abbreviation of names on input line 7852.
-)
-(C:\Program Files\MiKTeX\tex/latex/pgf/frontendlayer\tikz.sty
-(C:\Program Files\MiKTeX\tex/latex/pgf/basiclayer\pgf.sty
-(C:\Program Files\MiKTeX\tex/latex/pgf/utilities\pgfrcs.sty
-(C:\Program Files\MiKTeX\tex/generic/pgf/utilities\pgfutil-common.tex
+) (C:\Program Files\MiKTeX\tex/latex/pgf/frontendlayer\tikz.sty (C:\Program Files\MiKTeX\tex/latex/pgf/basiclayer\pgf.sty (C:\Program Files\MiKTeX\tex/latex/pgf/utilities\pgfrcs.sty (C:\Program Files\MiKTeX\tex/generic/pgf/utilities\pgfutil-common.tex
 \pgfutil@everybye=\toks31
 \pgfutil@tempdima=\dimen262
 \pgfutil@tempdimb=\dimen263
-)
-(C:\Program Files\MiKTeX\tex/generic/pgf/utilities\pgfutil-latex.def
+) (C:\Program Files\MiKTeX\tex/generic/pgf/utilities\pgfutil-latex.def
 \pgfutil@abb=\box73
-)
-(C:\Program Files\MiKTeX\tex/generic/pgf/utilities\pgfrcs.code.tex
-(C:\Program Files\MiKTeX\tex/generic/pgf\pgf.revision.tex)
+) (C:\Program Files\MiKTeX\tex/generic/pgf/utilities\pgfrcs.code.tex (C:\Program Files\MiKTeX\tex/generic/pgf\pgf.revision.tex)
 Package: pgfrcs 2023-01-15 v3.1.10 (3.1.10)
 ))
 Package: pgf 2023-01-15 v3.1.10 (3.1.10)
-
-(C:\Program Files\MiKTeX\tex/latex/pgf/basiclayer\pgfcore.sty
-(C:\Program Files\MiKTeX\tex/latex/pgf/systemlayer\pgfsys.sty
-(C:\Program Files\MiKTeX\tex/generic/pgf/systemlayer\pgfsys.code.tex
+ (C:\Program Files\MiKTeX\tex/latex/pgf/basiclayer\pgfcore.sty (C:\Program Files\MiKTeX\tex/latex/pgf/systemlayer\pgfsys.sty (C:\Program Files\MiKTeX\tex/generic/pgf/systemlayer\pgfsys.code.tex
 Package: pgfsys 2023-01-15 v3.1.10 (3.1.10)
-
-(C:\Program Files\MiKTeX\tex/generic/pgf/utilities\pgfkeys.code.tex
+ (C:\Program Files\MiKTeX\tex/generic/pgf/utilities\pgfkeys.code.tex
 \pgfkeys@pathtoks=\toks32
 \pgfkeys@temptoks=\toks33
-
-(C:\Program Files\MiKTeX\tex/generic/pgf/utilities\pgfkeyslibraryfiltered.code.
-tex
+ (C:\Program Files\MiKTeX\tex/generic/pgf/utilities\pgfkeyslibraryfiltered.code.tex
 \pgfkeys@tmptoks=\toks34
 ))
 \pgf@x=\dimen264
@@ -559,52 +478,28 @@ tex
 File: pgf.cfg 2023-01-15 v3.1.10 (3.1.10)
 )
 Driver file for pgf: pgfsys-pdftex.def
-
-(C:\Program Files\MiKTeX\tex/generic/pgf/systemlayer\pgfsys-pdftex.def
+ (C:\Program Files\MiKTeX\tex/generic/pgf/systemlayer\pgfsys-pdftex.def
 File: pgfsys-pdftex.def 2023-01-15 v3.1.10 (3.1.10)
-
-(C:\Program Files\MiKTeX\tex/generic/pgf/systemlayer\pgfsys-common-pdf.def
+ (C:\Program Files\MiKTeX\tex/generic/pgf/systemlayer\pgfsys-common-pdf.def
 File: pgfsys-common-pdf.def 2023-01-15 v3.1.10 (3.1.10)
-)))
-(C:\Program Files\MiKTeX\tex/generic/pgf/systemlayer\pgfsyssoftpath.code.tex
+))) (C:\Program Files\MiKTeX\tex/generic/pgf/systemlayer\pgfsyssoftpath.code.tex
 File: pgfsyssoftpath.code.tex 2023-01-15 v3.1.10 (3.1.10)
 \pgfsyssoftpath@smallbuffer@items=\count329
 \pgfsyssoftpath@bigbuffer@items=\count330
-)
-(C:\Program Files\MiKTeX\tex/generic/pgf/systemlayer\pgfsysprotocol.code.tex
+) (C:\Program Files\MiKTeX\tex/generic/pgf/systemlayer\pgfsysprotocol.code.tex
 File: pgfsysprotocol.code.tex 2023-01-15 v3.1.10 (3.1.10)
-))
-(C:\Program Files\MiKTeX\tex/generic/pgf/basiclayer\pgfcore.code.tex
+)) (C:\Program Files\MiKTeX\tex/generic/pgf/basiclayer\pgfcore.code.tex
 Package: pgfcore 2023-01-15 v3.1.10 (3.1.10)
-
-(C:\Program Files\MiKTeX\tex/generic/pgf/math\pgfmath.code.tex
-(C:\Program Files\MiKTeX\tex/generic/pgf/math\pgfmathutil.code.tex)
-(C:\Program Files\MiKTeX\tex/generic/pgf/math\pgfmathparser.code.tex
+ (C:\Program Files\MiKTeX\tex/generic/pgf/math\pgfmath.code.tex (C:\Program Files\MiKTeX\tex/generic/pgf/math\pgfmathutil.code.tex) (C:\Program Files\MiKTeX\tex/generic/pgf/math\pgfmathparser.code.tex
 \pgfmath@dimen=\dimen274
 \pgfmath@count=\count331
 \pgfmath@box=\box74
 \pgfmath@toks=\toks38
 \pgfmath@stack@operand=\toks39
 \pgfmath@stack@operation=\toks40
-)
-(C:\Program Files\MiKTeX\tex/generic/pgf/math\pgfmathfunctions.code.tex)
-(C:\Program Files\MiKTeX\tex/generic/pgf/math\pgfmathfunctions.basic.code.tex)
-(C:\Program Files\MiKTeX\tex/generic/pgf/math\pgfmathfunctions.trigonometric.co
-de.tex)
-(C:\Program Files\MiKTeX\tex/generic/pgf/math\pgfmathfunctions.random.code.tex)
-
-(C:\Program Files\MiKTeX\tex/generic/pgf/math\pgfmathfunctions.comparison.code.
-tex)
-(C:\Program Files\MiKTeX\tex/generic/pgf/math\pgfmathfunctions.base.code.tex)
-(C:\Program Files\MiKTeX\tex/generic/pgf/math\pgfmathfunctions.round.code.tex)
-(C:\Program Files\MiKTeX\tex/generic/pgf/math\pgfmathfunctions.misc.code.tex)
-(C:\Program Files\MiKTeX\tex/generic/pgf/math\pgfmathfunctions.integerarithmeti
-cs.code.tex) (C:\Program Files\MiKTeX\tex/generic/pgf/math\pgfmathcalc.code.tex
-) (C:\Program Files\MiKTeX\tex/generic/pgf/math\pgfmathfloat.code.tex
+) (C:\Program Files\MiKTeX\tex/generic/pgf/math\pgfmathfunctions.code.tex) (C:\Program Files\MiKTeX\tex/generic/pgf/math\pgfmathfunctions.basic.code.tex) (C:\Program Files\MiKTeX\tex/generic/pgf/math\pgfmathfunctions.trigonometric.code.tex) (C:\Program Files\MiKTeX\tex/generic/pgf/math\pgfmathfunctions.random.code.tex) (C:\Program Files\MiKTeX\tex/generic/pgf/math\pgfmathfunctions.comparison.code.tex) (C:\Program Files\MiKTeX\tex/generic/pgf/math\pgfmathfunctions.base.code.tex) (C:\Program Files\MiKTeX\tex/generic/pgf/math\pgfmathfunctions.round.code.tex) (C:\Program Files\MiKTeX\tex/generic/pgf/math\pgfmathfunctions.misc.code.tex) (C:\Program Files\MiKTeX\tex/generic/pgf/math\pgfmathfunctions.integerarithmetics.code.tex) (C:\Program Files\MiKTeX\tex/generic/pgf/math\pgfmathcalc.code.tex) (C:\Program Files\MiKTeX\tex/generic/pgf/math\pgfmathfloat.code.tex
 \c@pgfmathroundto@lastzeros=\count332
-))
-(C:\Program Files\MiKTeX\tex/generic/pgf/math\pgfint.code.tex)
-(C:\Program Files\MiKTeX\tex/generic/pgf/basiclayer\pgfcorepoints.code.tex
+)) (C:\Program Files\MiKTeX\tex/generic/pgf/math\pgfint.code.tex) (C:\Program Files\MiKTeX\tex/generic/pgf/basiclayer\pgfcorepoints.code.tex
 File: pgfcorepoints.code.tex 2023-01-15 v3.1.10 (3.1.10)
 \pgf@picminx=\dimen275
 \pgf@picmaxx=\dimen276
@@ -620,32 +515,24 @@ File: pgfcorepoints.code.tex 2023-01-15 v3.1.10 (3.1.10)
 \pgf@yy=\dimen286
 \pgf@zx=\dimen287
 \pgf@zy=\dimen288
-)
-(C:\Program Files\MiKTeX\tex/generic/pgf/basiclayer\pgfcorepathconstruct.code.t
-ex
+) (C:\Program Files\MiKTeX\tex/generic/pgf/basiclayer\pgfcorepathconstruct.code.tex
 File: pgfcorepathconstruct.code.tex 2023-01-15 v3.1.10 (3.1.10)
 \pgf@path@lastx=\dimen289
 \pgf@path@lasty=\dimen290
-)
-(C:\Program Files\MiKTeX\tex/generic/pgf/basiclayer\pgfcorepathusage.code.tex
+) (C:\Program Files\MiKTeX\tex/generic/pgf/basiclayer\pgfcorepathusage.code.tex
 File: pgfcorepathusage.code.tex 2023-01-15 v3.1.10 (3.1.10)
 \pgf@shorten@end@additional=\dimen291
 \pgf@shorten@start@additional=\dimen292
-)
-(C:\Program Files\MiKTeX\tex/generic/pgf/basiclayer\pgfcorescopes.code.tex
+) (C:\Program Files\MiKTeX\tex/generic/pgf/basiclayer\pgfcorescopes.code.tex
 File: pgfcorescopes.code.tex 2023-01-15 v3.1.10 (3.1.10)
 \pgfpic=\box75
 \pgf@hbox=\box76
 \pgf@layerbox@main=\box77
 \pgf@picture@serial@count=\count333
-)
-(C:\Program Files\MiKTeX\tex/generic/pgf/basiclayer\pgfcoregraphicstate.code.te
-x
+) (C:\Program Files\MiKTeX\tex/generic/pgf/basiclayer\pgfcoregraphicstate.code.tex
 File: pgfcoregraphicstate.code.tex 2023-01-15 v3.1.10 (3.1.10)
 \pgflinewidth=\dimen293
-)
-(C:\Program Files\MiKTeX\tex/generic/pgf/basiclayer\pgfcoretransformations.code
-.tex
+) (C:\Program Files\MiKTeX\tex/generic/pgf/basiclayer\pgfcoretransformations.code.tex
 File: pgfcoretransformations.code.tex 2023-01-15 v3.1.10 (3.1.10)
 \pgf@pt@x=\dimen294
 \pgf@pt@y=\dimen295
@@ -654,9 +541,7 @@ File: pgfcoretransformations.code.tex 2023-01-15 v3.1.10 (3.1.10)
 File: pgfcorequick.code.tex 2023-01-15 v3.1.10 (3.1.10)
 ) (C:\Program Files\MiKTeX\tex/generic/pgf/basiclayer\pgfcoreobjects.code.tex
 File: pgfcoreobjects.code.tex 2023-01-15 v3.1.10 (3.1.10)
-)
-(C:\Program Files\MiKTeX\tex/generic/pgf/basiclayer\pgfcorepathprocessing.code.
-tex
+) (C:\Program Files\MiKTeX\tex/generic/pgf/basiclayer\pgfcorepathprocessing.code.tex
 File: pgfcorepathprocessing.code.tex 2023-01-15 v3.1.10 (3.1.10)
 ) (C:\Program Files\MiKTeX\tex/generic/pgf/basiclayer\pgfcorearrows.code.tex
 File: pgfcorearrows.code.tex 2023-01-15 v3.1.10 (3.1.10)
@@ -666,56 +551,39 @@ File: pgfcoreshade.code.tex 2023-01-15 v3.1.10 (3.1.10)
 \pgf@max=\dimen298
 \pgf@sys@shading@range@num=\count334
 \pgf@shadingcount=\count335
-)
-(C:\Program Files\MiKTeX\tex/generic/pgf/basiclayer\pgfcoreimage.code.tex
+) (C:\Program Files\MiKTeX\tex/generic/pgf/basiclayer\pgfcoreimage.code.tex
 File: pgfcoreimage.code.tex 2023-01-15 v3.1.10 (3.1.10)
-)
-(C:\Program Files\MiKTeX\tex/generic/pgf/basiclayer\pgfcoreexternal.code.tex
+) (C:\Program Files\MiKTeX\tex/generic/pgf/basiclayer\pgfcoreexternal.code.tex
 File: pgfcoreexternal.code.tex 2023-01-15 v3.1.10 (3.1.10)
 \pgfexternal@startupbox=\box78
-)
-(C:\Program Files\MiKTeX\tex/generic/pgf/basiclayer\pgfcorelayers.code.tex
+) (C:\Program Files\MiKTeX\tex/generic/pgf/basiclayer\pgfcorelayers.code.tex
 File: pgfcorelayers.code.tex 2023-01-15 v3.1.10 (3.1.10)
-)
-(C:\Program Files\MiKTeX\tex/generic/pgf/basiclayer\pgfcoretransparency.code.te
-x
+) (C:\Program Files\MiKTeX\tex/generic/pgf/basiclayer\pgfcoretransparency.code.tex
 File: pgfcoretransparency.code.tex 2023-01-15 v3.1.10 (3.1.10)
 ) (C:\Program Files\MiKTeX\tex/generic/pgf/basiclayer\pgfcorepatterns.code.tex
 File: pgfcorepatterns.code.tex 2023-01-15 v3.1.10 (3.1.10)
 ) (C:\Program Files\MiKTeX\tex/generic/pgf/basiclayer\pgfcorerdf.code.tex
 File: pgfcorerdf.code.tex 2023-01-15 v3.1.10 (3.1.10)
-)))
-(C:\Program Files\MiKTeX\tex/generic/pgf/modules\pgfmoduleshapes.code.tex
+))) (C:\Program Files\MiKTeX\tex/generic/pgf/modules\pgfmoduleshapes.code.tex
 File: pgfmoduleshapes.code.tex 2023-01-15 v3.1.10 (3.1.10)
 \pgfnodeparttextbox=\box79
-)
-(C:\Program Files\MiKTeX\tex/generic/pgf/modules\pgfmoduleplot.code.tex
+) (C:\Program Files\MiKTeX\tex/generic/pgf/modules\pgfmoduleplot.code.tex
 File: pgfmoduleplot.code.tex 2023-01-15 v3.1.10 (3.1.10)
-)
-(C:\Program Files\MiKTeX\tex/latex/pgf/compatibility\pgfcomp-version-0-65.sty
+) (C:\Program Files\MiKTeX\tex/latex/pgf/compatibility\pgfcomp-version-0-65.sty
 Package: pgfcomp-version-0-65 2023-01-15 v3.1.10 (3.1.10)
 \pgf@nodesepstart=\dimen299
 \pgf@nodesepend=\dimen300
-)
-(C:\Program Files\MiKTeX\tex/latex/pgf/compatibility\pgfcomp-version-1-18.sty
+) (C:\Program Files\MiKTeX\tex/latex/pgf/compatibility\pgfcomp-version-1-18.sty
 Package: pgfcomp-version-1-18 2023-01-15 v3.1.10 (3.1.10)
-)) (C:\Program Files\MiKTeX\tex/latex/pgf/utilities\pgffor.sty
-(C:\Program Files\MiKTeX\tex/latex/pgf/utilities\pgfkeys.sty
-(C:\Program Files\MiKTeX\tex/generic/pgf/utilities\pgfkeys.code.tex))
-(C:\Program Files\MiKTeX\tex/latex/pgf/math\pgfmath.sty
-(C:\Program Files\MiKTeX\tex/generic/pgf/math\pgfmath.code.tex))
-(C:\Program Files\MiKTeX\tex/generic/pgf/utilities\pgffor.code.tex
+)) (C:\Program Files\MiKTeX\tex/latex/pgf/utilities\pgffor.sty (C:\Program Files\MiKTeX\tex/latex/pgf/utilities\pgfkeys.sty (C:\Program Files\MiKTeX\tex/generic/pgf/utilities\pgfkeys.code.tex)) (C:\Program Files\MiKTeX\tex/latex/pgf/math\pgfmath.sty (C:\Program Files\MiKTeX\tex/generic/pgf/math\pgfmath.code.tex)) (C:\Program Files\MiKTeX\tex/generic/pgf/utilities\pgffor.code.tex
 Package: pgffor 2023-01-15 v3.1.10 (3.1.10)
 \pgffor@iter=\dimen301
 \pgffor@skip=\dimen302
 \pgffor@stack=\toks41
 \pgffor@toks=\toks42
-))
-(C:\Program Files\MiKTeX\tex/generic/pgf/frontendlayer/tikz\tikz.code.tex
+)) (C:\Program Files\MiKTeX\tex/generic/pgf/frontendlayer/tikz\tikz.code.tex
 Package: tikz 2023-01-15 v3.1.10 (3.1.10)
-
-(C:\Program Files\MiKTeX\tex/generic/pgf/libraries\pgflibraryplothandlers.code.
-tex
+ (C:\Program Files\MiKTeX\tex/generic/pgf/libraries\pgflibraryplothandlers.code.tex
 File: pgflibraryplothandlers.code.tex 2023-01-15 v3.1.10 (3.1.10)
 \pgf@plot@mark@count=\count336
 \pgfplotmarksize=\dimen303
@@ -743,14 +611,11 @@ File: pgfmodulematrix.code.tex 2023-01-15 v3.1.10 (3.1.10)
 \pgf@matrix@numberofcolumns=\count343
 )
 \tikz@expandcount=\count344
-
-(C:\Program Files\MiKTeX\tex/generic/pgf/frontendlayer/tikz/libraries\tikzlibra
-rytopaths.code.tex
+ (C:\Program Files\MiKTeX\tex/generic/pgf/frontendlayer/tikz/libraries\tikzlibrarytopaths.code.tex
 File: tikzlibrarytopaths.code.tex 2023-01-15 v3.1.10 (3.1.10)
 ))) (C:\Program Files\MiKTeX\tex/latex/tools\xspace.sty
 Package: xspace 2014/10/28 v1.13 Space after command names (DPC,MH)
-)
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/microtype\microtype.sty
+) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/microtype\microtype.sty
 Package: microtype 2026/03/01 v3.2d Micro-typographical refinements (RS)
 \MT@toks=\toks43
 \MT@tempbox=\box84
@@ -764,26 +629,20 @@ LaTeX Info: Redefining \textls on input line 1449.
 LaTeX Info: Redefining \microtypecontext on input line 2053.
 LaTeX Info: Redefining \textmicrotypecontext on input line 2070.
 \MT@listname@count=\count346
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/microtype\microtype-pdftex.
-def
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/microtype\microtype-pdftex.def
 File: microtype-pdftex.def 2026/03/01 v3.2d Definitions specific to pdftex (RS)
-
 LaTeX Info: Redefining \lsstyle on input line 944.
 LaTeX Info: Redefining \lslig on input line 944.
 \MT@outer@space=\skip66
 )
 Package microtype Info: Loading configuration file microtype.cfg.
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/microtype\microtype.cfg
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/microtype\microtype.cfg
 File: microtype.cfg 2026/03/01 v3.2d microtype main configuration file (RS)
 )
 LaTeX Info: Redefining \microtypesetup on input line 3065.
-)
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/geometry\geometry.sty
+) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/geometry\geometry.sty
 Package: geometry 2026/03/07 v6.0 Page Geometry
-
-(C:\Program Files\MiKTeX\tex/generic/iftex\ifvtex.sty
+ (C:\Program Files\MiKTeX\tex/generic/iftex\ifvtex.sty
 Package: ifvtex 2019/10/25 v1.7 ifvtex legacy package. Use iftex instead.
 )
 \Gm@cnth=\count347
@@ -798,9 +657,7 @@ Package: ifvtex 2019/10/25 v1.7 ifvtex legacy package. Use iftex instead.
 \Gm@layouthoffset=\dimen319
 \Gm@layoutvoffset=\dimen320
 \Gm@dimlist=\toks45
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/geometry\geometry.cfg))
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/titlesec\titlesec.sty
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/geometry\geometry.cfg)) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/titlesec\titlesec.sty
 Package: titlesec 2025/01/04 v2.17 Sectioning titles
 \ttl@box=\box85
 \beforetitleunit=\skip67
@@ -811,14 +668,11 @@ Package: titlesec 2025/01/04 v2.17 Sectioning titles
 \titlewidth=\dimen323
 \titlewidthlast=\dimen324
 \titlewidthfirst=\dimen325
-)
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/titlesec\titletoc.sty
+) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/titlesec\titletoc.sty
 Package: titletoc 2025/01/04 v2.17 TOC entries
 \ttl@leftsep=\dimen326
-)
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/fancyhdr\fancyhdr.sty
+) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/fancyhdr\fancyhdr.sty
 Package: fancyhdr 2025/02/07 v5.2 Extensive control of page headers and footers
-
 \f@nch@headwidth=\skip69
 \f@nch@offset@elh=\skip70
 \f@nch@offset@erh=\skip71
@@ -834,8 +688,7 @@ Package: fancyhdr 2025/02/07 v5.2 Extensive control of page headers and footers
 \f@nch@widthC=\skip81
 \f@nch@widthR=\skip82
 \@temptokenb=\toks47
-)
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/enumitem\enumitem.sty
+) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/enumitem\enumitem.sty
 Package: enumitem 2025/02/06 v3.11 Customized lists
 \labelindent=\skip83
 \enit@outerparindent=\dimen327
@@ -843,29 +696,21 @@ Package: enumitem 2025/02/06 v3.11 Customized lists
 \enit@inbox=\box86
 \enit@count@id=\count350
 \enitdp@description=\count351
-)
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/datetime\datetime.sty
+) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/datetime\datetime.sty
 Package: datetime 2015/03/20 v2.60 Date Time Package
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/fmtcount\fmtcount.sty
-Package: fmtcount 2025/12/02 v3.12 Displaying the values of LaTeX counters (NT,
-VB,NE)
-
-(C:\Program Files\MiKTeX\tex/latex/xkeyval\xkeyval.sty
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/fmtcount\fmtcount.sty
+Package: fmtcount 2025/12/02 v3.12 Displaying the values of LaTeX counters (NT,VB,NE)
+ (C:\Program Files\MiKTeX\tex/latex/xkeyval\xkeyval.sty
 Package: xkeyval 2022/06/16 v2.9 package option processing (HA)
-
-(C:\Program Files\MiKTeX\tex/generic/xkeyval\xkeyval.tex
-(C:\Program Files\MiKTeX\tex/generic/xkeyval\xkvutils.tex
+ (C:\Program Files\MiKTeX\tex/generic/xkeyval\xkeyval.tex (C:\Program Files\MiKTeX\tex/generic/xkeyval\xkvutils.tex
 \XKV@toks=\toks49
 \XKV@tempa@toks=\toks50
 )
 \XKV@depth=\count352
 File: xkeyval.tex 2014/12/03 v2.7a key=value parser (HA)
-))
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/fmtcount\fcprefix.sty
+)) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/fmtcount\fcprefix.sty
 Package: fcprefix 2012/09/28
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/fmtcount\fcnumparser.sty
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/fmtcount\fcnumparser.sty
 Package: fcnumparser 2017/06/15
 \fc@digit@counter=\count353
 ))
@@ -878,9 +723,7 @@ Package: fcnumparser 2017/06/15
 \@tmpstrctr=\count360
 \@DT@loopN=\count361
 \@DT@X=\count362
-)
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/datetime\datetime-defaults.
-sty
+) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/datetime\datetime-defaults.sty
 Package: datetime-defaults 2013/09/10
 )
 \@day=\count363
@@ -895,62 +738,47 @@ Package: datetime-defaults 2013/09/10
 \currenthour=\count372
 \currentminute=\count373
 \currentsecond=\count374
-Package datetime Info: No datetime.cfg file found, using default settings on in
-put line 308.
+Package datetime Info: No datetime.cfg file found, using default settings on input line 308.
 \@dtctr=\count375
 \dayofyear=\count376
 \dayofweek=\count377
 LaTeX Info: Redefining \today on input line 736.
 \dt@a=\toks51
 \dt@b=\toks52
-) (C:\Program Files\MiKTeX\tex/latex/base\fontenc.sty
-Package: fontenc 2021/04/29 v2.0v Standard LaTeX package
 )
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/newpx\newpxtext.sty
-Package: newpxtext 2025/06/07 v1.542 LaTeX and unicode LaTeX support for TeXGyr
-ePagellaX (Michael Sharpe)
-
-`newpxtext' v1.542, 2025/06/07 Text macros taking advantage of TeXGyre Pagella 
-and its extensions (msharpe)
 (C:\Program Files\MiKTeX\tex/latex/base\fontenc.sty
 Package: fontenc 2021/04/29 v2.0v Standard LaTeX package
-)
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/xpatch\xpatch.sty
-(C:\Program Files\MiKTeX\tex/latex/l3kernel\expl3.sty
+) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/newpx\newpxtext.sty
+Package: newpxtext 2025/06/07 v1.542 LaTeX and unicode LaTeX support for TeXGyrePagellaX (Michael Sharpe)
+ `newpxtext' v1.542, 2025/06/07 Text macros taking advantage of TeXGyre Pagella and its extensions (msharpe) (C:\Program Files\MiKTeX\tex/latex/base\fontenc.sty
+Package: fontenc 2021/04/29 v2.0v Standard LaTeX package
+) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/xpatch\xpatch.sty (C:\Program Files\MiKTeX\tex/latex/l3kernel\expl3.sty
 Package: expl3 2024-01-04 L3 programming layer (loader) 
-
-(C:\Program Files\MiKTeX\tex/latex/l3backend\l3backend-pdftex.def
+ (C:\Program Files\MiKTeX\tex/latex/l3backend\l3backend-pdftex.def
 File: l3backend-pdftex.def 2024-01-04 L3 backend support: PDF output (pdfTeX)
 \l__color_backend_stack_int=\count378
 \l__pdf_internal_box=\box87
 ))
 Package: xpatch 2020/03/25 v0.3a Extending etoolbox patching commands
-
-(C:\Program Files\MiKTeX\tex/latex/l3packages/xparse\xparse.sty
+ (C:\Program Files\MiKTeX\tex/latex/l3packages/xparse\xparse.sty
 Package: xparse 2023-10-10 L3 Experimental document command parser
-))
-(C:\Program Files\MiKTeX\tex/latex/base\textcomp.sty
+)) (C:\Program Files\MiKTeX\tex/latex/base\textcomp.sty
 Package: textcomp 2020/02/02 v2.0n Standard LaTeX package
-)
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/xstring\xstring.sty
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/generic/xstring\xstring.tex
+) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/xstring\xstring.sty (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/generic/xstring\xstring.tex
 \xs_counta=\count379
 \xs_countb=\count380
 )
 Package: xstring 2023/08/22 v1.86 String manipulations (CT)
-)
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/carlisle\scalefnt.sty)
+) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/carlisle\scalefnt.sty)
 LaTeX Font Info:    Setting zplLF sub-encoding to TS1/0 on input line 40.
 LaTeX Font Info:    Setting zplTLF sub-encoding to TS1/0 on input line 40.
 LaTeX Font Info:    Setting zplOsF sub-encoding to TS1/0 on input line 40.
 LaTeX Font Info:    Setting zplTOsF sub-encoding to TS1/0 on input line 40.
 \zpl@cnt=\count381
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/fontaxes\fontaxes.sty
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/fontaxes\fontaxes.sty
 Package: fontaxes 2026-01-02 v2.0.2 Font selection axes (deprecated)
 Applying: [0000-00-00] Fall back to v1 on input line 76.
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/fontaxes\fontaxes-v1.sty
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/fontaxes\fontaxes-v1.sty
 Package: fontaxes 2020/07/21 v1.0e Font selection axes
 LaTeX Info: Redefining \upshape on input line 29.
 LaTeX Info: Redefining \itshape on input line 31.
@@ -978,37 +806,24 @@ LaTeX Info: Redefining \textulc on input line 49.
 \zpl@dimBB=\dimen340
 \zpl@dimC=\dimen341
 LaTeX Info: Redefining \oldstylenums on input line 807.
-LaTeX Font Info:    Trying to load font information for T1+zplLF on input line 
-815.
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/newpx\t1zpllf.fd
+LaTeX Font Info:    Trying to load font information for T1+zplLF on input line 815.
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/newpx\t1zpllf.fd
 File: t1zpllf.fd 2021/05/25 v1.0 font definition file for T1/zpl/lf
 )
-LaTeX Font Info:    Trying to load font information for T1+zplTLF on input line
- 816.
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/newpx\t1zpltlf.fd
+LaTeX Font Info:    Trying to load font information for T1+zplTLF on input line 816.
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/newpx\t1zpltlf.fd
 File: t1zpltlf.fd 2021/05/25 v1.0 font definition file for T1/zpl/tlf
 )
-LaTeX Font Info:    Trying to load font information for T1+zplOsF on input line
- 817.
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/newpx\t1zplosf.fd
+LaTeX Font Info:    Trying to load font information for T1+zplOsF on input line 817.
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/newpx\t1zplosf.fd
 File: t1zplosf.fd 2021/05/25 v1.0 font definition file for T1/zpl/osf
 )
-LaTeX Font Info:    Trying to load font information for T1+zplTOsF on input lin
-e 818.
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/newpx\t1zpltosf.fd
+LaTeX Font Info:    Trying to load font information for T1+zplTOsF on input line 818.
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/newpx\t1zpltosf.fd
 File: t1zpltosf.fd 2021/05/25 v1.0 font definition file for T1/zpl/tosf
-))
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/newpx\newpxmath.sty
-Package: newpxmath 2025/10/30 v1.551 LaTeX math support for newpx (Michael Shar
-pe)
-
-`newpxmath' v1.551, 2025/10/30 Math macros based on pxfonts (msharpe)
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/generic/binhex\binhex.tex)
-(C:\Program Files\MiKTeX\tex/latex/oberdiek\centernot.sty
+)) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/newpx\newpxmath.sty
+Package: newpxmath 2025/10/30 v1.551 LaTeX math support for newpx (Michael Sharpe)
+ `newpxmath' v1.551, 2025/10/30 Math macros based on pxfonts (msharpe) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/generic/binhex\binhex.tex) (C:\Program Files\MiKTeX\tex/latex/oberdiek\centernot.sty
 Package: centernot 2016/05/16 v1.4 Centers the not symbol horizontally (HO)
 )
 \px@tA=\toks53
@@ -1084,20 +899,17 @@ Now handling font encoding LMX ...
 ... no UTF-8 mapping file for font encoding LMX
 LaTeX Font Info:    Redeclaring symbol font `largesymbols' on input line 339.
 LaTeX Font Info:    Encoding `OMX' has changed to `LMX' for symbol font
-(Font)              `largesymbols' in the math version `normal' on input line 3
-39.
+(Font)              `largesymbols' in the math version `normal' on input line 339.
 LaTeX Font Info:    Overwriting symbol font `largesymbols' in version `normal'
 (Font)                  OMX/cmex/m/n --> LMX/npxexx/m/n on input line 339.
 LaTeX Font Info:    Encoding `OMX' has changed to `LMX' for symbol font
-(Font)              `largesymbols' in the math version `bold' on input line 339
-.
+(Font)              `largesymbols' in the math version `bold' on input line 339.
 LaTeX Font Info:    Overwriting symbol font `largesymbols' in version `bold'
 (Font)                  OMX/cmex/m/n --> LMX/npxexx/m/n on input line 339.
 LaTeX Font Info:    Overwriting symbol font `largesymbols' in version `bold'
 (Font)                  LMX/npxexx/m/n --> LMX/npxexx/b/n on input line 340.
 \symlargesymbolsPXA=\mathgroup9
 LaTeX Font Info:    Overwriting symbol font `largesymbolsPXA' in version `bold'
-
 (Font)                  U/npxexa/m/n --> U/npxexa/b/n on input line 347.
 \px@cntz=\count383
 \px@IsAlNum=\count384
@@ -1140,26 +952,21 @@ LaTeX Info: Redefining \not on input line 2548.
 \lst@newlines=\count389
 \lst@lineno=\count390
 \lst@maxwidth=\dimen345
-
-(C:\Program Files\MiKTeX\tex/latex/listings\lstmisc.sty
+ (C:\Program Files\MiKTeX\tex/latex/listings\lstmisc.sty
 File: lstmisc.sty 2023/02/27 1.9 (Carsten Heinz)
 \c@lstnumber=\count391
 \lst@skipnumbers=\count392
 \lst@framebox=\box89
-)
-(C:\Program Files\MiKTeX\tex/latex/listings\listings.cfg
+) (C:\Program Files\MiKTeX\tex/latex/listings\listings.cfg
 File: listings.cfg 2023/02/27 1.9 listings configuration
 ))
 Package: listings 2023/02/27 1.9 (Carsten Heinz)
-)
-(C:\Program Files\MiKTeX\tex/latex/biblatex\biblatex.sty
+) (C:\Program Files\MiKTeX\tex/latex/biblatex\biblatex.sty
 Package: biblatex 2023/03/05 v3.19 programmable bibliographies (PK/MW)
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/logreq\logreq.sty
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/logreq\logreq.sty
 Package: logreq 2010/08/04 v1.0 xml request logger
 \lrq@indent=\count393
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/logreq\logreq.def
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/logreq\logreq.def
 File: logreq.def 2010/08/04 v1.0 logreq spec v1.0
 ))
 \c@tabx@nest=\count394
@@ -1221,8 +1028,7 @@ File: logreq.def 2010/08/04 v1.0 logreq spec v1.0
 \c@mincompwidth=\count439
 Package biblatex Info: Trying to load biblatex default data model...
 Package biblatex Info: ... file 'blx-dm.def' found.
-
-(C:\Program Files\MiKTeX\tex/latex/biblatex\blx-dm.def
+ (C:\Program Files\MiKTeX\tex/latex/biblatex\blx-dm.def
 File: blx-dm.def 2023/03/05 v3.19 biblatex localization (PK/MW)
 )
 Package biblatex Info: Trying to load biblatex style data model...
@@ -1313,14 +1119,12 @@ Package biblatex Info: ... file 'biblatex-dm.cfg' not found.
 \localshorteditorwidth=\skip105
 Package biblatex Info: Trying to load compatibility code...
 Package biblatex Info: ... file 'blx-compat.def' found.
-
-(C:\Program Files\MiKTeX\tex/latex/biblatex\blx-compat.def
+ (C:\Program Files\MiKTeX\tex/latex/biblatex\blx-compat.def
 File: blx-compat.def 2023/03/05 v3.19 biblatex compatibility (PK/MW)
 )
 Package biblatex Info: Trying to load generic definitions...
 Package biblatex Info: ... file 'biblatex.def' found.
-
-(C:\Program Files\MiKTeX\tex/latex/biblatex\biblatex.def
+ (C:\Program Files\MiKTeX\tex/latex/biblatex\biblatex.def
 File: biblatex.def 2023/03/05 v3.19 biblatex compatibility (PK/MW)
 \c@textcitecount=\count508
 \c@textcitetotal=\count509
@@ -1338,21 +1142,18 @@ File: biblatex.def 2023/03/05 v3.19 biblatex compatibility (PK/MW)
 )
 Package biblatex Info: Trying to load bibliography style 'numeric'...
 Package biblatex Info: ... file 'numeric.bbx' found.
-
-(C:\Program Files\MiKTeX\tex/latex/biblatex/bbx\numeric.bbx
+ (C:\Program Files\MiKTeX\tex/latex/biblatex/bbx\numeric.bbx
 File: numeric.bbx 2023/03/05 v3.19 biblatex bibliography style (PK/MW)
 Package biblatex Info: Trying to load bibliography style 'standard'...
 Package biblatex Info: ... file 'standard.bbx' found.
-
-(C:\Program Files\MiKTeX\tex/latex/biblatex/bbx\standard.bbx
+ (C:\Program Files\MiKTeX\tex/latex/biblatex/bbx\standard.bbx
 File: standard.bbx 2023/03/05 v3.19 biblatex bibliography style (PK/MW)
 \c@bbx:relatedcount=\count517
 \c@bbx:relatedtotal=\count518
 ))
 Package biblatex Info: Trying to load citation style 'numeric'...
 Package biblatex Info: ... file 'numeric.cbx' found.
-
-(C:\Program Files\MiKTeX\tex/latex/biblatex/cbx\numeric.cbx
+ (C:\Program Files\MiKTeX\tex/latex/biblatex/cbx\numeric.cbx
 File: numeric.cbx 2023/03/05 v3.19 biblatex citation style (PK/MW)
 Package biblatex Info: Redefining '\cite'.
 Package biblatex Info: Redefining '\parencite'.
@@ -1368,8 +1169,7 @@ Package biblatex Info: Redefining '\smartcites'.
 )
 Package biblatex Info: Trying to load configuration file...
 Package biblatex Info: ... file 'biblatex.cfg' found.
-
-(C:\Program Files\MiKTeX\tex/latex/biblatex\biblatex.cfg
+ (C:\Program Files\MiKTeX\tex/latex/biblatex\biblatex.cfg
 File: biblatex.cfg 
 )
 Package biblatex Info: Input encoding 'utf8' detected.
@@ -1378,16 +1178,12 @@ Package biblatex Info: ... and expl3
 (biblatex)             2024-01-04 L3 programming layer (loader) 
 (biblatex)             is new enough (at least 2020/04/06),
 (biblatex)             setting 'casechanger=expl3'.
-
-(C:\Program Files\MiKTeX\tex/latex/biblatex\blx-case-expl3.sty
+ (C:\Program Files\MiKTeX\tex/latex/biblatex\blx-case-expl3.sty
 Package: blx-case-expl3 2023/03/05 v3.19 expl3 case changing code for biblatex
-))
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/todonotes\todonotes.sty
+)) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/todonotes\todonotes.sty
 Package: todonotes 2024/01/05 v1.1.7 Todonotes source and documentation.
 Package: todonotes 2024/01/05
-
-(C:\Program Files\MiKTeX\tex/generic/pgf/frontendlayer/tikz/libraries\tikzlibra
-rypositioning.code.tex
+ (C:\Program Files\MiKTeX\tex/generic/pgf/frontendlayer/tikz/libraries\tikzlibrarypositioning.code.tex
 File: tikzlibrarypositioning.code.tex 2023-01-15 v3.1.10 (3.1.10)
 )
 \c@@todonotes@numberoftodonotes=\count519
@@ -1400,19 +1196,13 @@ Package: bm 2023/07/08 v1.2f Bold Symbol Support (DPC/FMi)
 Package bm Info: No bold for \U/msa/m/n, using \pmb.
 Package bm Info: No bold for \U/msb/m/n, using \pmb.
 LaTeX Font Info:    Redeclaring math alphabet \mathbf on input line 149.
-)
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/algorithms\algorithm.sty
-Package: algorithm 2009/08/24 v0.1 Document Style `algorithm' - floating enviro
-nment
+) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/algorithms\algorithm.sty
+Package: algorithm 2009/08/24 v0.1 Document Style `algorithm' - floating environment
 \@float@every@algorithm=\toks57
 \c@algorithm=\count520
-)
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/algorithmicx\algpseudocode.
-sty
+) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/algorithmicx\algpseudocode.sty
 Package: algpseudocode 
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/algorithmicx\algorithmicx.s
-ty
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/algorithmicx\algorithmicx.sty
 Package: algorithmicx 2005/04/27 v1.2 Algorithmicx
 
 Document Style algorithmicx 1.2 - a greatly improved `algorithmic' style
@@ -1429,18 +1219,14 @@ Document Style algorithmicx 1.2 - a greatly improved `algorithmic' style
 )
 Document Style - pseudocode environments for use with the `algorithmicx' style
 ) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/tex-gyre\tgadventor.sty
-Package: tgadventor 2009/09/10 v1.2 TeX Gyre Adventor as default sans serif fam
-ily
-)
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/breqn\breqn.sty
+Package: tgadventor 2009/09/10 v1.2 TeX Gyre Adventor as default sans serif family
+) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/breqn\breqn.sty
 Package: breqn 2021/10/28 v0.98l Breaking equations
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/breqn\flexisym.sty
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/breqn\flexisym.sty
 Package: flexisym 2021/10/28 v0.98l Make math characters macros
 LaTeX Info: Redefining \textprime on input line 299.
 LaTeX Info: Redefining \not on input line 357.
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/breqn\cmbase.sym
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/breqn\cmbase.sym
 File: cmbase.sym 2007/12/19 v0.92
 LaTeX Info: Redefining \hbar on input line 324.
 LaTeX Info: Redefining \surd on input line 326.
@@ -1465,8 +1251,7 @@ LaTeX Info: Redefining \Longleftrightarrow on input line 353.
 LaTeX Info: Redefining \cdots on input line 357.
 LaTeX Info: Redefining \vdots on input line 360.
 LaTeX Info: Redefining \ddots on input line 365.
-)
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/breqn\mathstyle.sty
+) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/breqn\mathstyle.sty
 Package: mathstyle 2021/10/28 v0.98l Tracking mathstyle implicitly
 LaTeX Info: Redefining \displaystyle on input line 95.
 LaTeX Info: Redefining \textstyle on input line 97.
@@ -1535,30 +1320,21 @@ LaTeX Info: Redefining \genfrac on input line 149.
 \cur@row=\count541
 \cur@col=\count542
 \conditionsep=\skip116
-)
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/nomencl\nomencl.sty
+) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/nomencl\nomencl.sty
 Package: nomencl 2021/11/10 v5.6 Nomenclature package
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/koma-script\tocbasic.sty
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/koma-script\tocbasic.sty
 Package: tocbasic 2026/02/02 v3.49.2 KOMA-Script package (handling toc-files)
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/koma-script\scrbase.sty
-Package: scrbase 2026/02/02 v3.49.2 KOMA-Script package (KOMA-Script-independen
-t basics and keyval usage)
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/koma-script\scrlfile.sty
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/koma-script\scrbase.sty
+Package: scrbase 2026/02/02 v3.49.2 KOMA-Script package (KOMA-Script-independent basics and keyval usage)
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/koma-script\scrlfile.sty
 Package: scrlfile 2026/02/02 v3.49.2 KOMA-Script package (file load hooks)
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/koma-script\scrlfile-hook.s
-ty
-Package: scrlfile-hook 2026/02/02 v3.49.2 KOMA-Script package (using LaTeX hook
-s)
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/koma-script\scrlfile-hook.sty
+Package: scrlfile-hook 2026/02/02 v3.49.2 KOMA-Script package (using LaTeX hooks)
  (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/koma-script\scrlogo.sty
 Package: scrlogo 2026/02/02 v3.49.2 KOMA-Script package (logo)
 )))
 Applying: [2021/05/01] Usage of raw or classic option list on input line 254.
-Already applied: [0000/00/00] Usage of raw or classic option list on input line
- 370.
+Already applied: [0000/00/00] Usage of raw or classic option list on input line 370.
 )
 \scr@dte@tocline@numberwidth=\skip117
 \scr@dte@tocline@numbox=\box96
@@ -1575,8 +1351,7 @@ Package tocbasic Info: omitting babel extension for `nls'
 \openout5 = `report.nlo'.
 
 Package nomencl Info: Writing nomenclature file report.nlo on input line 37.
-Package translations Info: No language package found. I am going to use `englis
-h' as default language. on input line 57.
+Package translations Info: No language package found. I am going to use `english' as default language. on input line 57.
 LaTeX Font Info:    Font shape `T1/zpltlf/m/n' will be
 (Font)              scaled to size 10.0pt on input line 57.
 \@quotelevel=\count543
@@ -1585,10 +1360,8 @@ LaTeX Font Info:    Font shape `T1/zpltlf/m/n' will be
 \openout1 = `report.aux'.
 
 LaTeX Font Info:    Checking defaults for OML/npxmi/m/it on input line 57.
-LaTeX Font Info:    Trying to load font information for OML+npxmi on input line
- 57.
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/newpx\omlnpxmi.fd
+LaTeX Font Info:    Trying to load font information for OML+npxmi on input line 57.
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/newpx\omlnpxmi.fd
 File: omlnpxmi.fd 2013/03/21 Fontinst v1.933 font definitions for OML/npxmi.
 )
 LaTeX Font Info:    ... okay on input line 57.
@@ -1603,10 +1376,8 @@ LaTeX Font Info:    ... okay on input line 57.
 LaTeX Font Info:    Checking defaults for OMX/cmex/m/n on input line 57.
 LaTeX Font Info:    ... okay on input line 57.
 LaTeX Font Info:    Checking defaults for U/npxexa/m/n on input line 57.
-LaTeX Font Info:    Trying to load font information for U+npxexa on input line 
-57.
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/newpx\unpxexa.fd
+LaTeX Font Info:    Trying to load font information for U+npxexa on input line 57.
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/newpx\unpxexa.fd
 File: unpxexa.fd 2013/03/24 Fontinst v1.933 font definitions for U/npxexa.
 )
 LaTeX Font Info:    ... okay on input line 57.
@@ -1615,33 +1386,24 @@ LaTeX Font Info:    ... okay on input line 57.
 LaTeX Font Info:    Checking defaults for PU/pdf/m/n on input line 57.
 LaTeX Font Info:    ... okay on input line 57.
 LaTeX Font Info:    Checking defaults for LMS/npxsy/m/n on input line 57.
-LaTeX Font Info:    Trying to load font information for LMS+npxsy on input line
- 57.
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/newpx\lmsnpxsy.fd
+LaTeX Font Info:    Trying to load font information for LMS+npxsy on input line 57.
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/newpx\lmsnpxsy.fd
 File: lmsnpxsy.fd 2016/07/04 Fontinst v1.933 font definitions for LMS/npxsy.
 )
 LaTeX Font Info:    ... okay on input line 57.
 LaTeX Font Info:    Checking defaults for LMX/npxexx/m/n on input line 57.
-LaTeX Font Info:    Trying to load font information for LMX+npxexx on input lin
-e 57.
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/newpx\lmxnpxexx.fd
+LaTeX Font Info:    Trying to load font information for LMX+npxexx on input line 57.
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/newpx\lmxnpxexx.fd
 File: lmxnpxexx.fd 2016/07/04 Fontinst v1.933 font definitions for LMX/npxexx.
 )
 LaTeX Font Info:    ... okay on input line 57.
 LaTeX Info: Command `\dddot' is already robust on input line 57.
 LaTeX Info: Command `\ddddot' is already robust on input line 57.
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/translations/dicts\translat
-ions-basic-dictionary-english.trsl
-File: translations-basic-dictionary-english.trsl (english translation file `tra
-nslations-basic-dictionary')
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/translations/dicts\translations-basic-dictionary-english.trsl
+File: translations-basic-dictionary-english.trsl (english translation file `translations-basic-dictionary')
 )
-Package translations Info: loading dictionary `translations-basic-dictionary' f
-or `english'. on input line 57.
-
-(C:\Program Files\MiKTeX\tex/context/base/mkii\supp-pdf.mkii
+Package translations Info: loading dictionary `translations-basic-dictionary' for `english'. on input line 57.
+ (C:\Program Files\MiKTeX\tex/context/base/mkii\supp-pdf.mkii
 [Loading MPS to PDF converter (version 2006.09.02).]
 \scratchcounter=\count545
 \scratchdimen=\dimen372
@@ -1656,32 +1418,25 @@ or `english'. on input line 57.
 \everyMPtoPDFconversion=\toks62
 ) (C:\Program Files\MiKTeX\tex/latex/epstopdf-pkg\epstopdf-base.sty
 Package: epstopdf-base 2020-01-24 v2.11 Base part for package epstopdf
-Package epstopdf-base Info: Redefining graphics rule for `.eps' on input line 4
-85.
-
-(C:\Program Files\MiKTeX\tex/latex/00miktex\epstopdf-sys.cfg
+Package epstopdf-base Info: Redefining graphics rule for `.eps' on input line 485.
+ (C:\Program Files\MiKTeX\tex/latex/00miktex\epstopdf-sys.cfg
 File: epstopdf-sys.cfg 2021/03/18 v2.0 Configuration of epstopdf for MiKTeX
 ))
 Package caption Info: Begin \AtBeginDocument code.
 Package caption Info: hyperref package is loaded.
 Package caption Info: listings package is loaded.
 Package caption Info: End \AtBeginDocument code.
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/pdflscape\pdflscape.sty
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/pdflscape\pdflscape.sty
 Package: pdflscape 2022-10-27 v0.13 Display of landscape pages in PDF
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/pdflscape\pdflscape-nometad
-ata.sty
-Package: pdflscape-nometadata 2022-10-28 v0.13 Display of landscape pages in PD
-F (HO)
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/pdflscape\pdflscape-nometadata.sty
+Package: pdflscape-nometadata 2022-10-28 v0.13 Display of landscape pages in PDF (HO)
  (C:\Program Files\MiKTeX\tex/latex/graphics\lscape.sty
 Package: lscape 2020/05/28 v3.02 Landscape Pages (DPC)
 )
 Package pdflscape Info: Auto-detected driver: pdftex on input line 81.
 ))
 Package hyperref Info: Link coloring OFF on input line 57.
- (report.out)
-(report.out)
+ (report.out) (report.out)
 \@outlinefile=\write6
 \openout6 = `report.out'.
 
@@ -1702,8 +1457,7 @@ Package microtype Info: Patching command `\showhyphens'.
 Package microtype Info: No adjustment of tracking.
 Package microtype Info: No adjustment of interword spacing.
 Package microtype Info: No adjustment of character kerning.
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/microtype\mt-ppl.cfg
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/microtype\mt-ppl.cfg
 File: mt-ppl.cfg 2005/11/16 v1.6 microtype config. file: Palatino (RS)
 )
 *geometry* driver: auto-detecting
@@ -1748,8 +1502,7 @@ File: fc-english.def 2016/01/12
 \c@lstlisting=\count553
 Package biblatex Info: Trying to load language 'english'...
 Package biblatex Info: ... file 'english.lbx' found.
-
-(C:\Program Files\MiKTeX\tex/latex/biblatex/lbx\english.lbx
+ (C:\Program Files\MiKTeX\tex/latex/biblatex/lbx\english.lbx
 File: english.lbx 2023/03/05 v3.19 biblatex localization (PK/MW)
 )
 Package biblatex Info: Input encoding 'utf8' detected.
@@ -1762,22 +1515,17 @@ Package biblatex Info: ... file 'report.bbl' found.
  (report.bbl)
 Package biblatex Info: Reference section=0 on input line 57.
 Package biblatex Info: Reference segment=0 on input line 57.
-
-(frontmatter/title-thesis.tex
-LaTeX Font Info:    Trying to load font information for T1+RobotoSlab-TLF on in
-put line 7.
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/roboto\t1robotoslab-tlf.fd
-File: T1RobotoSlab-TLF.fd 2019/12/11 (autoinst) Font definitions for T1/RobotoS
-lab-TLF.
+ (frontmatter/title-thesis.tex
+LaTeX Font Info:    Trying to load font information for T1+RobotoSlab-TLF on input line 7.
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/roboto\t1robotoslab-tlf.fd
+File: T1RobotoSlab-TLF.fd 2019/12/11 (autoinst) Font definitions for T1/RobotoSlab-TLF.
 )
 Package microtype Info: Loading generic protrusion settings for font family
 (microtype)             `RobotoSlab-TLF' (encoding: T1).
 (microtype)             For optimal results, create family-specific settings.
 (microtype)             See the microtype manual for details.
-LaTeX Font Info:    Trying to load font information for OT1+minzpl on input lin
-e 42.
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/newpx\ot1minzpl.fd
+LaTeX Font Info:    Trying to load font information for OT1+minzpl on input line 42.
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/newpx\ot1minzpl.fd
 File: ot1minzpl.fd 2021/05/25 v1.0 font definition file for OT1/minzpl/TLF
 )
 LaTeX Font Info:    Font shape `OT1/minzpl/m/n' will be
@@ -1791,39 +1539,27 @@ LaTeX Font Info:    Font shape `OT1/minzpl/m/n' will be
 LaTeX Font Info:    Font shape `OT1/minzpl/m/n' will be
 (Font)              scaled to size 5.5pt on input line 42.
 LaTeX Font Info:    Trying to load font information for U+msa on input line 42.
-
-
-(C:\Program Files\MiKTeX\tex/latex/amsfonts\umsa.fd
+ (C:\Program Files\MiKTeX\tex/latex/amsfonts\umsa.fd
 File: umsa.fd 2013/01/14 v3.01 AMS symbols A
-)
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/microtype\mt-msa.cfg
+) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/microtype\mt-msa.cfg
 File: mt-msa.cfg 2006/02/04 v1.1 microtype config. file: AMS symbols (a) (RS)
 )
 LaTeX Font Info:    Trying to load font information for U+msb on input line 42.
-
-
-(C:\Program Files\MiKTeX\tex/latex/amsfonts\umsb.fd
+ (C:\Program Files\MiKTeX\tex/latex/amsfonts\umsb.fd
 File: umsb.fd 2013/01/14 v3.01 AMS symbols B
-)
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/microtype\mt-msb.cfg
+) (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/microtype\mt-msb.cfg
 File: mt-msb.cfg 2005/06/01 v1.0 microtype config. file: AMS symbols (b) (RS)
 )
-LaTeX Font Info:    Trying to load font information for U+npxmia on input line 
-42.
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/newpx\unpxmia.fd
+LaTeX Font Info:    Trying to load font information for U+npxmia on input line 42.
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/newpx\unpxmia.fd
 File: unpxmia.fd 2013/03/24 Fontinst v1.933 font definitions for U/npxmia.
 )
-LaTeX Font Info:    Trying to load font information for U+npxsym on input line 
-42.
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/newpx\unpxsym.fd
+LaTeX Font Info:    Trying to load font information for U+npxsym on input line 42.
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/newpx\unpxsym.fd
 File: unpxsym.fd 2023/08/16 Fontinst v1.933 font definitions for U/npxsym.
 )
-LaTeX Font Info:    Trying to load font information for U+npxsyc on input line 
-42.
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/newpx\unpxsyc.fd
+LaTeX Font Info:    Trying to load font information for U+npxsyc on input line 42.
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/newpx\unpxsyc.fd
 File: unpxsyc.fd 2013/03/24 Fontinst v1.933 font definitions for U/npxsyc.
 )
 LaTeX Font Info:    Font shape `OT1/minzpl/b/n' will be
@@ -1834,7 +1570,7 @@ LaTeX Font Info:    Font shape `OT1/minzpl/b/n' will be
 (Font)              scaled to size 5.5pt on input line 42.
 LaTeX Font Info:    Font shape `T1/zpltlf/m/it' will be
 (Font)              scaled to size 10.0pt on input line 54.
-<figures/TU_P5_white.png, id=55, 259.97125pt x 159.59625pt>
+<figures/TU_P5_white.png, id=79, 259.97125pt x 159.59625pt>
 File: figures/TU_P5_white.png Graphic file (type png)
 <use figures/TU_P5_white.png>
 Package pdftex.def Info: figures/TU_P5_white.png  used on input line 79.
@@ -1843,59 +1579,57 @@ Package pdftex.def Info: figures/TU_P5_white.png  used on input line 79.
 
 
 
-{C:/Users/celikbas/AppData/Local/MiKTeX/fonts/map/pdftex/pdftex.map}{C:/Users/c
-elikbas/AppData/Roaming/MiKTeX/fonts/enc/dvips/roboto/rbto_j2bk2t.enc}{C:/Users
-/celikbas/AppData/Roaming/MiKTeX/fonts/enc/dvips/newtx/ntx-ec-tlf.enc} <./figur
-es/TU_P5_white.png>]) (mainmatter/2_Methods.tex
+{C:/Users/celikbas/AppData/Local/MiKTeX/fonts/map/pdftex/pdftex.map}{C:/Users/celikbas/AppData/Roaming/MiKTeX/fonts/enc/dvips/roboto/rbto_j2bk2t.enc}{C:/Users/celikbas/AppData/Roaming/MiKTeX/fonts/enc/dvips/newtx/ntx-ec-tlf.enc} <./figures/TU_P5_white.png>]) (mainmatter/2_Methods.tex
 Chapter 1.
 LaTeX Font Info:    Font shape `T1/zpltlf/m/n' will be
 (Font)              scaled to size 20.0pt on input line 1.
 LaTeX Font Info:    Font shape `T1/zpltlf/m/n' will be
 (Font)              scaled to size 20.74pt on input line 1.
 LaTeX Font Info:    Font shape `T1/zpltlf/m/n' will be
-(Font)              scaled to size 14.4pt on input line 5.
+(Font)              scaled to size 14.4pt on input line 8.
 LaTeX Font Info:    Font shape `T1/RobotoSlab-TLF/b/n' aliased to
-(Font)              `T1/RobotoSlab-TLF/bold/n' on input line 5.
+(Font)              `T1/RobotoSlab-TLF/bold/n' on input line 8.
 LaTeX Font Info:    Font shape `T1/zpltlf/m/n' will be
-(Font)              scaled to size 12.0pt on input line 17.
-LaTeX Font Info:    Font shape `T1/RobotoSlab-TLF/b/n' aliased to
-(Font)              `T1/RobotoSlab-TLF/bold/n' on input line 17.
-LaTeX Font Info:    Font shape `T1/RobotoSlab-TLF/b/n' aliased to
-(Font)              `T1/RobotoSlab-TLF/bold/n' on input line 23.
-LaTeX Font Info:    Font shape `T1/zpltlf/m/n' will be
-(Font)              scaled to size 7.3pt on input line 25.
-LaTeX Font Info:    Font shape `T1/zpltlf/m/n' will be
-(Font)              scaled to size 8.0pt on input line 35.
-LaTeX Font Info:    Font shape `OT1/minzpl/m/n' will be
-(Font)              scaled to size 8.0pt on input line 35.
-LaTeX Font Info:    Font shape `OT1/minzpl/m/n' will be
-(Font)              scaled to size 6.2pt on input line 35.
-LaTeX Font Info:    Font shape `OT1/minzpl/b/n' will be
-(Font)              scaled to size 8.0pt on input line 35.
-LaTeX Font Info:    Font shape `OT1/minzpl/b/n' will be
-(Font)              scaled to size 6.2pt on input line 35.
-LaTeX Font Info:    Font shape `T1/zpltlf/m/n' will be
-(Font)              scaled to size 6.2pt on input line 35.
+(Font)              scaled to size 8.0pt on input line 78.
 LaTeX Font Info:    Font shape `T1/zpltlf/b/n' will be
-(Font)              scaled to size 10.0pt on input line 92.
+(Font)              scaled to size 8.0pt on input line 78.
+LaTeX Font Info:    Font shape `OT1/minzpl/m/n' will be
+(Font)              scaled to size 8.0pt on input line 78.
+LaTeX Font Info:    Font shape `OT1/minzpl/m/n' will be
+(Font)              scaled to size 6.2pt on input line 78.
+LaTeX Font Info:    Font shape `OT1/minzpl/b/n' will be
+(Font)              scaled to size 8.0pt on input line 78.
+LaTeX Font Info:    Font shape `OT1/minzpl/b/n' will be
+(Font)              scaled to size 6.2pt on input line 78.
+LaTeX Font Info:    Font shape `T1/zpltlf/b/n' will be
+(Font)              scaled to size 10.0pt on input line 97.
 [1
 
 
-{C:/Users/celikbas/AppData/Roaming/MiKTeX/fonts/enc/dvips/newpx/px-lms.enc}{C:/
-Users/celikbas/AppData/Roaming/MiKTeX/fonts/enc/dvips/newtx/ntx-ot1-tlf.enc}] [
-2]
+{C:/Users/celikbas/AppData/Roaming/MiKTeX/fonts/enc/dvips/newpx/px-lms.enc}{C:/Users/celikbas/AppData/Roaming/MiKTeX/fonts/enc/dvips/newtx/ntx-ot1-tlf.enc}]
 LaTeX Font Info:    Font shape `T1/zpltlf/m/n' will be
-(Font)              scaled to size 5.5pt on input line 189.
- [3] [4]
-LaTeX Font Info:    Font shape `T1/zpltlf/b/n' will be
-(Font)              scaled to size 8.0pt on input line 353.
-) (mainmatter/3_Results.tex [5]
+(Font)              scaled to size 12.0pt on input line 162.
+LaTeX Font Info:    Font shape `T1/RobotoSlab-TLF/b/n' aliased to
+(Font)              `T1/RobotoSlab-TLF/bold/n' on input line 162.
+ [2] [3]
+Overfull \hbox (7.20267pt too wide) in paragraph at lines 329--333
+[] []\T1/zpltlf/b/n/10 (-20) Dense terms.[] \T1/zpltlf/m/n/10 (-20) All dense terms share a com-mon piece-wise linear-exponential shape $\OML/npxmi/m/it/10 ^^^[]\OT1/minzpl/m/n/10 (\OML/npxmi/m/it/10 d\OT1/minzpl/m/n/10 ; \OML/npxmi/b/it/10 ^^R[]\OT1/minzpl/m/n/10 )$ \T1/zpltlf/m/n/10 (-20) parametrised
+ []
+
+[4] [5]
+Package hyperref Info: bookmark level for unknown algorithm defaults to 0 on input line 511.
+
+Underfull \hbox (badness 10000) in paragraph at lines 514--517
+[]\T1/zpltlf/m/n/10 (+20) actors $\OML/npxmi/m/it/10 ^^Y[]$\T1/zpltlf/m/n/10 (+20) , crit-ics $\OML/npxmi/m/it/10 V[]$\T1/zpltlf/m/n/10 (+20) , op-ti-mis-ers $[][]\OML/npxmi/m/it/10 ; [][]$\T1/zpltlf/m/n/10 (+20) ; hy-per-pa-ram-e-ters
+ []
+
+[6] [7] [8]) (mainmatter/3_Results.tex [9]
 Chapter 2.
-) (mainmatter/4_Discussion.tex [6
+) (mainmatter/4_Discussion.tex [10
 
 ]
 Chapter 3.
-) (mainmatter/5_Conculsion.tex) [7
+) (mainmatter/5_Conculsion.tex) [11
 
 ]
 LaTeX Font Info:    Font shape `T1/zpltlf/m/sc' will be
@@ -1903,10 +1637,8 @@ LaTeX Font Info:    Font shape `T1/zpltlf/m/sc' will be
 Package microtype Info: Character `029' is missing
 (microtype)             in font `T1/zpltlf/m/sc/10'.
 (microtype)             Ignoring protrusion settings for this character.
-LaTeX Font Info:    Trying to load font information for T1+npxtt on input line 
-126.
-
-(C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/newpx\t1npxtt.fd
+LaTeX Font Info:    Trying to load font information for T1+npxtt on input line 126.
+ (C:\Users\celikbas\AppData\Roaming\MiKTeX\tex/latex/newpx\t1npxtt.fd
 File: t1npxtt.fd 2000/12/14 v1.0
 )
 LaTeX Font Info:    Font shape `T1/npxtt/m/n' will be
@@ -1915,47 +1647,35 @@ Package microtype Info: Loading generic protrusion settings for font family
 (microtype)             `npxtt' (encoding: T1).
 (microtype)             For optimal results, create family-specific settings.
 (microtype)             See the microtype manual for details.
- [8
+ [12
 
-{C:/Users/celikbas/AppData/Roaming/MiKTeX/fonts/enc/dvips/newtx/ntx-ec-tlf-pc.e
-nc}]
-(report.aux)
+{C:/Users/celikbas/AppData/Roaming/MiKTeX/fonts/enc/dvips/newtx/ntx-ec-tlf-pc.enc}] (report.aux)
  ***********
 LaTeX2e <2023-11-01> patch level 1
 L3 programming layer <2020/03/25>
  ***********
+
+
+LaTeX Warning: Label(s) may have changed. Rerun to get cross-references right.
+
 Package rerunfilecheck Info: File `report.out' has not changed.
-(rerunfilecheck)             Checksum: 494629B6D0DCEFAD89ECC293D8CCB96E;1764.
+(rerunfilecheck)             Checksum: 4942B39AF6D2C38A9E9785402D683894;2857.
 Package logreq Info: Writing requests to 'report.run.xml'.
 \openout1 = `report.run.xml'.
 
  ) 
 Here is how much of TeX's memory you used:
- 48403 strings out of 474486
- 945029 string characters out of 5753561
- 1948542 words of memory out of 5000000
- 69759 multiletter control sequences out of 15000+600000
- 698500 words of font info for 216 fonts, out of 8000000 for 9000
+ 48525 strings out of 474486
+ 946467 string characters out of 5753561
+ 1950542 words of memory out of 5000000
+ 69852 multiletter control sequences out of 15000+600000
+ 685661 words of font info for 220 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
- 110i,12n,107p,1153b,1577s stack positions out of 10000i,1000n,20000p,200000b,200000s
-<C:/Users/celikbas/AppData/Roaming/MiKTeX/fonts/type1/public/newpx/NewPXBMI.p
-fb><C:/Users/celikbas/AppData/Roaming/MiKTeX/fonts/type1/public/newpx/NewPXBMI_
-gnu.pfb><C:/Users/celikbas/AppData/Roaming/MiKTeX/fonts/type1/public/newpx/NewP
-XMI.pfb><C:/Users/celikbas/AppData/Roaming/MiKTeX/fonts/type1/public/newpx/NewP
-XMI_gnu.pfb><C:/Users/celikbas/AppData/Roaming/MiKTeX/fonts/type1/google/roboto
-/RobotoSlab-Bold.pfb><C:/Users/celikbas/AppData/Roaming/MiKTeX/fonts/type1/goog
-le/roboto/RobotoSlab-Light.pfb><C:/Users/celikbas/AppData/Roaming/MiKTeX/fonts/
-type1/google/roboto/RobotoSlab-Thin.pfb><C:/Users/celikbas/AppData/Roaming/MiKT
-eX/fonts/type1/public/newpx/pxsys.pfb><C:/Users/celikbas/AppData/Roaming/MiKTeX
-/fonts/type1/public/txfonts/t1xtt.pfb><C:/Users/celikbas/AppData/Roaming/MiKTeX
-/fonts/type1/public/newtx/txexs.pfb><C:/Users/celikbas/AppData/Roaming/MiKTeX/f
-onts/type1/public/newtx/txsym.pfb><C:/Users/celikbas/AppData/Roaming/MiKTeX/fon
-ts/type1/public/newpx/zplb.pfb><C:/Users/celikbas/AppData/Roaming/MiKTeX/fonts/
-type1/public/newpx/zplr.pfb><C:/Users/celikbas/AppData/Roaming/MiKTeX/fonts/typ
-e1/public/newpx/zplri.pfb>
-Output written on report.pdf (9 pages, 291079 bytes).
+ 110i,12n,107p,1210b,1577s stack positions out of 10000i,1000n,20000p,200000b,200000s
+<C:/Users/celikbas/AppData/Roaming/MiKTeX/fonts/type1/public/newpx/NewPXBMI_gnu.pfb><C:/Users/celikbas/AppData/Roaming/MiKTeX/fonts/type1/public/newpx/NewPXMI.pfb><C:/Users/celikbas/AppData/Roaming/MiKTeX/fonts/type1/public/newpx/NewPXMI_gnu.pfb><C:/Users/celikbas/AppData/Roaming/MiKTeX/fonts/type1/google/roboto/RobotoSlab-Bold.pfb><C:/Users/celikbas/AppData/Roaming/MiKTeX/fonts/type1/google/roboto/RobotoSlab-Light.pfb><C:/Users/celikbas/AppData/Roaming/MiKTeX/fonts/type1/google/roboto/RobotoSlab-Thin.pfb><C:/Users/celikbas/AppData/Roaming/MiKTeX/fonts/type1/public/newpx/pxsys.pfb><C:/Users/celikbas/AppData/Roaming/MiKTeX/fonts/type1/public/txfonts/t1xtt.pfb><C:/Users/celikbas/AppData/Roaming/MiKTeX/fonts/type1/public/newtx/txexs.pfb><C:/Users/celikbas/AppData/Roaming/MiKTeX/fonts/type1/public/newtx/txsym.pfb><C:/Users/celikbas/AppData/Roaming/MiKTeX/fonts/type1/public/newpx/zplb.pfb><C:/Users/celikbas/AppData/Roaming/MiKTeX/fonts/type1/public/newpx/zplr.pfb><C:/Users/celikbas/AppData/Roaming/MiKTeX/fonts/type1/public/newpx/zplri.pfb>
+Output written on report.pdf (13 pages, 321955 bytes).
 PDF statistics:
- 257 PDF objects out of 1000 (max. 8388607)
- 72 named destinations out of 1000 (max. 500000)
- 38002 words of extra memory for PDF output out of 42996 (max. 10000000)
+ 328 PDF objects out of 1000 (max. 8388607)
+ 85 named destinations out of 1000 (max. 500000)
+ 31394 words of extra memory for PDF output out of 35830 (max. 10000000)
 

@@ -372,6 +372,8 @@ INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\tex\latex\todonotes\todonotes.sty
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\tex\latex\todonotes\todonotes.sty
 INPUT C:\Program Files\MiKTeX\tex\generic\pgf\frontendlayer\tikz\libraries\tikzlibrarypositioning.code.tex
 INPUT C:\Program Files\MiKTeX\tex\generic\pgf\frontendlayer\tikz\libraries\tikzlibrarypositioning.code.tex
+INPUT C:\Program Files\MiKTeX\tex\latex\tools\bm.sty
+INPUT C:\Program Files\MiKTeX\tex\latex\tools\bm.sty
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\tex\latex\algorithms\algorithm.sty
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\tex\latex\algorithms\algorithm.sty
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\tex\latex\algorithmicx\algpseudocode.sty
@@ -436,8 +438,14 @@ INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\tex\latex\pdflscape\pdflscape-nom
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\tex\latex\pdflscape\pdflscape-nometadata.sty
 INPUT C:\Program Files\MiKTeX\tex\latex\graphics\lscape.sty
 INPUT C:\Program Files\MiKTeX\tex\latex\graphics\lscape.sty
-OUTPUT report.out
+INPUT .\report.out
+INPUT .\report.out
+INPUT report.out
+INPUT report.out
 OUTPUT report.pdf
+INPUT .\report.out
+INPUT .\report.out
+OUTPUT report.out
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\tex\latex\microtype\mt-ppl.cfg
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\tex\latex\microtype\mt-ppl.cfg
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\tex\latex\microtype\mt-ppl.cfg
@@ -520,8 +528,19 @@ INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zplsyc.tfm
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zplexa.tfm
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zplexa.tfm
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zplexa.tfm
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zpl-Bold-tlf-ot1.tfm
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zpl-Bold-tlf-ot1.tfm
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zpl-Bold-tlf-ot1.tfm
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zplbmi.tfm
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zplbmi.tfm
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zplbmi.tfm
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zplbsy.tfm
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zplbsy.tfm
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zplbsy.tfm
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zplbexx.tfm
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zplbexx.tfm
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zplbexx.tfm
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zpl-Italic-tlf-t1.tfm
-INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zpl-Bold-tlf-t1.tfm
 INPUT .\figures\TU_P5_white.png
 INPUT .\figures\TU_P5_white.png
 INPUT .\figures\TU_P5_white.png
@@ -550,11 +569,7 @@ INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zpl-Regula
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\google\roboto\RobotoSlab-Light-tlf-t1.tfm
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\google\roboto\RobotoSlab-Bold-tlf-t1.tfm
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zpl-Regular-tlf-t1.tfm
-INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\google\roboto\RobotoSlab-Light-tlf-t1.tfm
-INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\google\roboto\RobotoSlab-Bold-tlf-t1.tfm
-INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\google\roboto\RobotoSlab-Bold-tlf-t1.tfm
-INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zpl-Regular-tlf-t1.tfm
-INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zpl-Regular-tlf-t1.tfm
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zpl-Bold-tlf-t1.tfm
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zpl-Regular-tlf-ot1.tfm
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zpl-Regular-tlf-ot1.tfm
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zplmi.tfm
@@ -575,7 +590,15 @@ INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zplsyc.tfm
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zplsyc.tfm
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zplexa.tfm
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zplexa.tfm
-INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zpl-Regular-tlf-t1.tfm
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zpl-Bold-tlf-ot1.tfm
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zpl-Bold-tlf-ot1.tfm
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zplbmi.tfm
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zplbmi.tfm
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zplbsy.tfm
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zplbsy.tfm
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zplbexx.tfm
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zplbexx.tfm
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zpl-Bold-tlf-t1.tfm
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\vf\google\roboto\RobotoSlab-Light-tlf-t1.vf
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\google\roboto\RobotoSlab-Light-tlf-t1--base.tfm
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\vf\google\roboto\RobotoSlab-Bold-tlf-t1.vf
@@ -590,14 +613,6 @@ INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\NewPXMI_gn
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\NewPXMI.tfm
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newtx\stxscr.tfm
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\enc\dvips\newtx\ntx-ot1-tlf.enc
-INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\vf\google\roboto\RobotoSlab-Bold-tlf-t1.vf
-INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\google\roboto\RobotoSlab-Bold-tlf-t1--base.tfm
-INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\vf\google\roboto\RobotoSlab-Bold-tlf-t1.vf
-INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\google\roboto\RobotoSlab-Bold-tlf-t1--base.tfm
-INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\vf\public\newpx\zplmi.vf
-INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\NewPXMI_gnu.tfm
-INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\NewPXMI.tfm
-INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newtx\stxscr.tfm
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\vf\public\newpx\zplexx.vf
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newtx\ntxexx.tfm
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\vf\public\newtx\ntxexx.vf
@@ -610,9 +625,23 @@ INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newtx\stxscr.tfm
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\vf\google\roboto\RobotoSlab-Light-tlf-t1.vf
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\google\roboto\RobotoSlab-Light-tlf-t1--base.tfm
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zpl-Regular-tlf-t1.tfm
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\google\roboto\RobotoSlab-Light-tlf-t1.tfm
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\google\roboto\RobotoSlab-Bold-tlf-t1.tfm
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\vf\public\newpx\zplmi.vf
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\NewPXMI_gnu.tfm
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\NewPXMI.tfm
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newtx\stxscr.tfm
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\vf\google\roboto\RobotoSlab-Bold-tlf-t1.vf
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\google\roboto\RobotoSlab-Bold-tlf-t1--base.tfm
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\vf\public\newpx\zplbmi.vf
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\NewPXBMI_gnu.tfm
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\NewPXBMI.tfm
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\vf\public\newpx\zplsym.vf
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newtx\ntxsym.tfm
-INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zpl-Bold-tlf-t1.tfm
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\vf\public\newpx\zplmi.vf
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\NewPXMI_gnu.tfm
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\NewPXMI.tfm
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newtx\stxscr.tfm
 INPUT .\mainmatter\3_Results.tex
 INPUT .\mainmatter\3_Results.tex
 INPUT .\mainmatter\3_Results.tex
@@ -628,10 +657,19 @@ INPUT .\mainmatter\5_Conculsion.tex
 INPUT .\mainmatter\5_Conculsion.tex
 INPUT .\mainmatter\5_Conculsion.tex
 INPUT mainmatter\5_Conculsion.tex
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\newpx\zpl-Regular-tlf-sc-t1.tfm
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\tex\latex\newpx\t1npxtt.fd
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\tex\latex\newpx\t1npxtt.fd
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\tex\latex\newpx\t1npxtt.fd
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\tfm\public\txfonts\t1xtt.tfm
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\enc\dvips\newtx\ntx-ec-tlf-pc.enc
 INPUT report.aux
 INPUT .\report.out
 INPUT .\report.out
+INPUT report.run.xml
 OUTPUT report.run.xml
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\type1\public\newpx\NewPXBMI_gnu.pfb
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\type1\public\newpx\NewPXBMI_gnu.pfb
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\type1\public\newpx\NewPXMI.pfb
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\type1\public\newpx\NewPXMI.pfb
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\type1\public\newpx\NewPXMI_gnu.pfb
@@ -644,6 +682,8 @@ INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\type1\google\roboto\RobotoS
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\type1\google\roboto\RobotoSlab-Thin.pfb
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\type1\public\newpx\pxsys.pfb
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\type1\public\newpx\pxsys.pfb
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\type1\public\txfonts\t1xtt.pfb
+INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\type1\public\txfonts\t1xtt.pfb
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\type1\public\newtx\txexs.pfb
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\type1\public\newtx\txexs.pfb
 INPUT C:\Users\celikbas\AppData\Roaming\MiKTeX\fonts\type1\public\newtx\txsym.pfb
