@@ -2364,9 +2364,9 @@
     <bcf:citekey order="1" intorder="1">USAF_CCA_2025</bcf:citekey>
     <bcf:citekey order="2" intorder="1">Wang2025CooperativeUAV</bcf:citekey>
     <bcf:citekey order="3" intorder="1">schulman2017ppo</bcf:citekey>
-    <bcf:citekey order="4" intorder="1">yu2022mappo</bcf:citekey>
+    <bcf:citekey order="4" intorder="1">yu2021mappo</bcf:citekey>
     <bcf:citekey order="5" intorder="1">schulman2016gae</bcf:citekey>
-    <bcf:citekey order="6" intorder="1">wang2026fofe</bcf:citekey>
+    <bcf:citekey order="6" intorder="1">Wang2025CooperativeUAV</bcf:citekey>
   </bcf:section>
   <!-- SORTING TEMPLATES -->
   <bcf:sortingtemplate name="nty">

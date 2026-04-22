@@ -169,7 +169,7 @@ The radar coverage is then defined as a piecewise function of angle, where the d
 
 \subsection{MAPPO}
 We optimise the clipped PPO objective~\cite{schulman2017ppo} in the MAPPO
-variant~\cite{yu2022mappo}, with parameter sharing inside each role:
+variant~\cite{yu2021mappo}, with parameter sharing inside each role:
 $\pi_{\theta_\rho}$ for role $\rho\in\{s,j\}$, and role-specific centralised
 critics $V_{\phi_\rho}$.
 
@@ -233,7 +233,7 @@ independently at $\lVert g\rVert_2\le 1$ before each optimiser step.
 \subsection{Flexible Observation Feature Encoding (FOFE)}
 The observation encoder replaces a fixed top-$K$ flat vector with a
 permutation-invariant set encoder applied per observation channel, following
-the Sequence-Exchangeable Encoding (SEE) block of Wang et al.~\cite{wang2026fofe}.
+the Sequence-Exchangeable Encoding (SEE) block of Wang et al.~\cite{Wang2025CooperativeUAV}.
 Each channel $c\in\{\text{ag},\text{tg},\text{rd}\}$ provides a variable-size
 entity set $\mathcal{X}^{(c)}\!=\!\{x_1,\dots,x_n\}$ with a visibility mask
 $m\in\{0,1\}^n$.
@@ -243,8 +243,8 @@ For input $X\in\mathbb{R}^{n\times d_{\text{in}}}$ and hidden width $h$,
 \begin{align}
 \tilde X &= \mathrm{LayerNorm}(X),\\
 E &= \tilde X W_e,\qquad Z=\tilde X W_g,\qquad G=\mathrm{SiLU}(Z),\\
-E_{\text{agg}} &= \max_{i:\,m_i=1} E_{i,:} \;\in\mathbb R^{h} \quad\text{(masked max-pool),}\\
-\mathrm{SEE}(X,m)_{i,:} &= \big[\,G_{i,:}\odot E_{i,:}\,\big\Vert\,G_{i,:}\odot E_{\text{agg}}\,\big]\in\mathbb R^{2h},
+E_{\text{agg}} &= \max_{i:\,m_i=1} E_{i,:} \;\in \mathbb{R}^{h} \quad\text{(masked max-pool),}\\
+\mathrm{SEE}(X,m)_{i,:} &= \big[\,G_{i,:}\odot E_{i,:}\,\big\Vert\,G_{i,:}\odot E_{\text{agg}}\,\big] \in \mathbb{R}^{2h},
 \end{align}
 with layer-norm omitted in the first SEE block. The left branch carries
 local per-entity context, the right branch injects a gated global summary;
@@ -254,22 +254,22 @@ masked rows are zeroed after the concat.
 A channel encoder stacks $L$ SEE layers, applies a shared per-entity MLP
 $f_\psi$, then collapses the set by masked max-pool:
 \begin{equation}
-\mathrm{FOFE}(\mathcal X,m)
-= \max_{i:\,m_i=1} f_\psi\!\big(\mathrm{SEE}_L\circ\cdots\circ\mathrm{SEE}_1(X,m)\big)_i
-\;\in\mathbb R^{D_\mathrm{fofe}}.
+    \mathrm{FOFE}(\mathcal X,m)
+    = \max_{i:\,m_i=1} f_\psi\!\big(\mathrm{SEE}_L\circ\cdots\circ\mathrm{SEE}_1(X,m)\big)_i
+    \;\in \mathbb{R}^{D_{\mathrm{fofe}}}.
 \end{equation}
 By construction this is permutation-invariant and agnostic to the number of
 visible entities.
 
 \paragraph{Actor network (per role).}
-The self-observation $o^{\text{self}}\in\mathbb R^{6}$ (ego kinematics + alive
+The self-observation $o^{\text{self}}\in \mathbb{R}^{6}$ (ego kinematics + alive
 flag) bypasses FOFE and is mapped by an MLP. The three entity channels are
 encoded independently and concatenated with the self-embedding before a
 fusion MLP and a factorised action head:
 \begin{equation}
-z = \big[\,g_\xi(o^{\text{self}})\,\big\Vert\,\mathrm{FOFE}_\text{ag}\,\big\Vert\,
-        \mathrm{FOFE}_\text{tg}\,\big\Vert\,\mathrm{FOFE}_\text{rd}\,\big],\qquad
-\bm\ell = W_{\text{head}}\,\mathrm{FusionMLP}(z).
+    z = \big[\,g_\xi(o^{\text{self}})\,\big\Vert\,\mathrm{FOFE}_{\text{ag}}\,\big\Vert\,
+            \mathrm{FOFE}_{\text{tg}}\,\big\Vert\,\mathrm{FOFE}_{\text{rd}}\,\big],\qquad
+    \bm{\ell} = W_{\text{head}}\,\mathrm{FusionMLP}(z).
 \end{equation}
 
 \paragraph{Critic network (per role).}
@@ -278,9 +278,9 @@ The critic receives the decomposed \emph{global} state: all agents
 all radars ($d{=}4$: pos, active flag, effective range), plus a scalar
 time feature $\tau\in[0,1]$:
 \begin{equation}
-V_{\phi_\rho}(s) = W_v\;\mathrm{FusionMLP}\!\Big(
-\big[\,\mathrm{FOFE}_\text{ag}(s)\,\big\Vert\,\mathrm{FOFE}_\text{tg}(s)\,\big\Vert\,
-      \mathrm{FOFE}_\text{rd}(s)\,\big\Vert\,\tau\,\big]\Big).
+    V_{\phi_\rho}(s) = W_v\;\mathrm{FusionMLP}\!\Big(
+    \big[\,\mathrm{FOFE}_{\text{ag}}(s)\,\big\Vert\,\mathrm{FOFE}_{\text{tg}}(s)\,\big\Vert\,
+        \mathrm{FOFE}_{\text{rd}}(s)\,\big\Vert\,\tau\,\big]\Big).
 \end{equation}
 
 \paragraph{Adaptations from standard FOFE.}
@@ -306,75 +306,69 @@ set of three FOFE blocks (actor and critic); no weight sharing across roles.
 
 \subsection{Reward Structure}
 \label{subsec:rewards}
-Let $d^{\max}_{ij}$ denote a component-specific cutoff distance and
-$w^{\text{lin}}_{\bullet}$ the linear weight. All active shaping terms in our
-configuration reduce to the linear sub-case of the more general
-piecewise linear--exponential family (exponential weights set to zero):
-\begin{equation}
-\varphi(d;w,d^{\max})=w\cdot\max\!\left(0,\;1-\tfrac{d}{d^{\max}}\right).
-\end{equation}
+Rewards are applied only to alive agents. In the FOFE setup used here
+($1$ striker, $1$ jammer, $1$ target, $1$ radar), the implemented reward
+contains two sparse event terms, one terminal bonus, and four dense shaping
+terms plus a control penalty.
 
-\paragraph{Sparse team rewards with team-spirit mixing.}
-For a team event $e\in\{\text{kill target},\text{agent destroyed}\}$ with
-scalar value $R_e$ and individual attribution indicator
-$\mathbb{1}_{i=\text{credit}(e)}$, agent $i$'s received reward is
+\paragraph{Sparse event rewards.}
+For an event $e$, agent $i$ receives
 \begin{equation}
-r_i^{e} = \eta \cdot \frac{R_e}{|\mathcal N^\text{alive}|}
-       + (1-\eta)\cdot R_e\,\mathbb{1}_{i=\text{credit}(e)},
-\qquad \eta=0.5,
+r_i^{e} = \eta\,\bar R_e + (1-\eta)\,\tilde R_i^{e},
 \end{equation}
-with $R_{\text{target}}=+3$, $R_{\text{destroy}}=-3$. A one-shot
-\emph{terminal bonus} $R_{\text{term}}=+1$ is granted to every alive agent
-at the transition where the mission is completed (all targets killed).
+where $\bar R_e$ is the event reward shared equally across alive agents and
+$\tilde R_i^{e}$ is the individual credited part. A target kill rewards
+successful engagement, an agent loss penalises radar exposure, and a
+terminal bonus is given when all targets are destroyed.
 
-\paragraph{Per-step dense terms.}
-For each alive agent $i$ at step $t$:
+\paragraph{Dense shaping terms.}
+The per-step reward is
+\begin{equation}
+r_{i,t} = r_i^{e} + r^{\text{time}}_{i,t} + r^{\text{border}}_{i,t}
++ r^{\text{radar}}_{i,t} + r^{\text{strike}}_{i,t}
++ r^{\text{form}}_{i,t} + r^{\text{ctrl}}_{i,t}.
+\end{equation}
+The active dense terms are
 \begin{align}
-r^{\text{step}}_{i,t} &= -0.01, \\
-r^{\text{border}}_{i,t} &= -\varphi\big(d^{\text{edge}}_{i,t};\,0.05,\,0.05\big), \\
-r^{\text{radar-av}}_{i,t} &= -\sum_k \varphi\big(d^{\text{rz}}_{i,k,t};\,0.05,\,0.1\big), \\
-r^{\text{appr}}_{i,t} \;(\text{strikers only})
-   &= \varphi\big(d^{\text{tgt}}_{i,t};\,0.1,\,1.0\big)-0.1, \\
-r^{\text{form}}_{i,t} \;(\text{jammers only})
-   &= 0.1\!\cdot\!\Big(\max\!\big(0,\,1-\tfrac{d^{\text{str}}_{i,t}}{0.5}\big)-1\Big), \\
-r^{\text{sep}}_{i,t}  &= -\varphi\big(d^{\text{same-role}}_{i,t};\,0.05,\,0.1\big), \\
-r^{\text{ctrl}}_{i,t} &= -0.01\,a_{i,t}^{2} - 0.01\,\alpha_{i,t}^{2},
+    r^{\text{time}}_{i,t}   &= -c_{\text{time}}, \\
+    r^{\text{border}}_{i,t} &= -\phi_{\text{border}}(d^{\text{edge}}_{i,t}), \\
+    r^{\text{radar}}_{i,t}  &= -\sum_{k\in\mathcal R}\phi_{\text{radar}}(d^{\text{radar}}_{ik,t}), \\
+    r^{\text{strike}}_{i,t} &= -\phi_{\text{target}}(d^{\text{target}}_{i,t}),
+    \qquad i\in\mathcal N_{\text{str}}, \\
+    r^{\text{form}}_{i,t}   &= -\phi_{\text{form}}(d^{\text{ally}}_{i,t}),
+    \qquad i\in\mathcal N_{\text{jam}}, \\
+    r^{\text{ctrl}}_{i,t}   &= -\psi(u_{i,t}).
 \end{align}
-where $d^{\text{edge}}$ is the distance to the nearest map edge,
-$d^{\text{rz}}_{i,k}$ the distance to the boundary of the (fixed, jammed) zone
-of radar $k$, $d^{\text{tgt}}_{i}$ the distance to the nearest alive target,
-$d^{\text{str}}_{i}$ and $d^{\text{same-role}}_{i}$ the distances to the
-nearest cross-role and same-role teammate respectively, and
-$a,\alpha\in[-1,1]$ the discrete accel/angular-accel multipliers.
-The striker-approach shaping is sign-flipped to act as a \emph{distance
-penalty} (zero at $d{=}0$, monotonically decreasing with distance), which
-preserves the same gradient magnitude as a conventional approach reward
-while removing the positive bias that interfered with the sparse
-$R_{\text{target}}$ signal.
+$r^{\text{time}}$ discourages unnecessarily long trajectories.
+$r^{\text{border}}$ penalises flying close to the map boundary.
+$r^{\text{radar}}$ penalises entering radar threat regions.
+$r^{\text{strike}}$ pulls the striker toward the nearest alive target and is
+zero at contact. $r^{\text{form}}$ keeps the jammer close to the striker.
+$r^{\text{ctrl}}$ penalises aggressive acceleration and heading changes.
 
-\paragraph{Per-agent reward.}
-Combining the above, each agent's per-step reward is
-\begin{equation}
-r_{i,t} = r^{e}_{i,t} + r^{\text{step}}_{i,t}
-+ r^{\text{border}}_{i,t} + r^{\text{radar-av}}_{i,t}
-+ r^{\text{appr}}_{i,t} + r^{\text{form}}_{i,t}
-+ r^{\text{sep}}_{i,t} + r^{\text{ctrl}}_{i,t}
-+ R_{\text{term}}\,\mathbb{1}_{\text{terminal}},
-\end{equation}
-evaluated only over alive agents and passed per-role into the advantage
-computation of the corresponding MAPPO learner.
-
-\paragraph{Adaptations from standard shaped-reward MAPPO.}
-(i) The \emph{team-spirit} mixing~(12) interpolates between a fully
-egoistic credit-assignment scheme ($\eta=0$) and a fully cooperative one
-($\eta=1$); $\eta=0.5$ is used to balance individual responsibility with
-joint objective pursuit. (ii) Dense shaping that conventionally takes the
-form of positive approach bonuses is reformulated as a zero-at-contact
-distance penalty~(16), which removes a positive reward baseline that
-otherwise dominates the sparse engagement signal. (iii) The
-same-role separation penalty~(18) and control-effort penalty~(19) act as
-mild regularisers promoting spatial diversity and smooth trajectories
-without biasing the sparse task reward.
+\begin{table}[t]
+\centering
+\caption{Reward parameters used in the FOFE setup. Inactive code options
+(jammer-approach, progress rewards, jam bonus, same-role separation,
+striker-formation reward, and paper mission reward) are omitted.}
+\label{tab:reward_params_fofe}
+\begin{tabular}{@{}lll@{}}
+\toprule
+Component & Parameter(s) & Value \\
+\midrule
+Target kill & $R_{\text{kill}}$ & $+3$ \\
+Agent destroyed & $R_{\text{loss}}$ & $-3$ \\
+Mission complete & $R_{\text{term}}$ & $+1$ \\
+Team sharing & $\eta$ & $0.5$ \\
+Time penalty & $c_{\text{time}}$ & $0.01$ \\
+Border penalty & $w_{\text{border}},\,d^{\max}_{\text{border}}$ & $0.05,\;0.05$ \\
+Radar penalty & $w_{\text{radar}},\,d^{\max}_{\text{radar}}$ & $0.05,\;0.10$ \\
+Striker target penalty & $w_{\text{target}},\,d^{\max}_{\text{target}}$ & $0.10,\;1.00$ \\
+Jammer formation penalty & $w_{\text{form}},\,d^{\text{ref}}_{\text{form}}$ & $0.10,\;0.50$ \\
+Control effort & $\lambda_a,\,\lambda_\omega$ & $0.01,\;0.01$ \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 
 
@@ -386,6 +380,4 @@ without biasing the sparse task reward.
 \subsubsection{Emergent Tactics}
 
 What are possible tactics for the agent to take? How can these be quantized? 
-
-
 

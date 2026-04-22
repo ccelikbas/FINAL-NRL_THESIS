@@ -163,17 +163,13 @@
     %% Construct the cover page with Tikz
     \begin{tikzpicture}[overlay,remember picture]
 
-        %% Add the cover image
-        \node[above=0,inner sep=0] at (current page.south) {%
-            \includegraphics[width=\paperwidth]{\@coverimage}};
+        %% Add the cover image centered on the page and scale it to fit.
+        \node[inner sep=0] at (current page.center) {%
+            \includegraphics[width=\paperwidth,height=\paperheight,keepaspectratio]{\@coverimage}};
 
         %% Add the affiliation on the left
         \node[rotate=90,below right=40mm and 3mm] at (current page.west) {%
             \ifdefvoid{\@affiliation}{}{\color{white}\titlestyle\@affiliation}};
-
-        %% Add the logo in the bottom left
-        \node[above right=10mm] at (current page.south west) {%
-            \includegraphics[width=0.35\linewidth]{figures/logo-white.pdf}};
 
         %% Add the banner with the title, subtitle, subject and author(s)
         \node[below=2cm,fill=black!85,minimum width={\paperwidth},inner ysep=25pt,opacity=0.6,text opacity=1] at (current page.north) {%
