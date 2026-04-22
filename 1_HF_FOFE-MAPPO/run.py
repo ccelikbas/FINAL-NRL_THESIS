@@ -196,7 +196,7 @@ def main() -> None:
 
     if not args.no_animate:
         try:
-            for _ in range(1):
+            for _ in range(10):
                 if cfg.ext.use_hf_radar:
                     tester = HFTestRunner(
                         policy, env_cfg=cfg.env, hf_cfg=cfg.ext.hf_radar,

@@ -100,9 +100,9 @@ class EnvConfig:
     # Team composition
     n_strikers: int = 1
     n_jammers: int = 1
-    n_known_targets: int = 2
+    n_known_targets: int = 1
     n_unknown_targets: int = 0
-    n_known_radars: int = 2
+    n_known_radars: int = 1
     n_unknown_radars: int = 0
     n_targets: int = 0
     n_radars: int = 0
@@ -289,7 +289,7 @@ class HFRadarConfig:
 
     # Angular lobe boundaries (degrees, converted to radians internally)
     theta_main_deg: float = 6.0    # full main-lobe width (±1.5° each side)
-    theta_side_deg: float = 30.0    # full side-lobe+main-lobe cone width (±4.5° each side)
+    theta_side_deg: float = 10.0    # full side-lobe+main-lobe cone width (±4.5° each side)
 
     def __post_init__(self):
         if self.radar_rx_gain is None:

@@ -130,7 +130,7 @@ CURRICULUM: List[CurriculumPhase] = [
     ),
     CurriculumPhase(
         name="scaling_1v2",
-        iters=(25, 100),
+        iters=(25, 200),
         config=RandomChoice([
             ScenarioConfig(n_strikers=1, n_jammers=1,
                            n_known_targets=2, n_known_radars=2),
