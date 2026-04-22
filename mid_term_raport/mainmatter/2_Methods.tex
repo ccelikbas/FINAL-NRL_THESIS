@@ -1,0 +1,391 @@
+\chapter{Methodology}
+
+This chapter outlines the methodology used in this thesis. First XXXXX. 
+
+\section{Problem Formulation}
+
+The cooperative striker–jammer engagement is modelled as a
+Dec-POMDP $\langle \mathcal{N}, \mathcal{S}, \{\mathcal{A}_i\},
+\{\mathcal{O}_i\}, P, \mathcal{R}, \gamma\rangle$ in a two-dimensional
+plane. The agent set $\mathcal{N} = \mathcal{N}_s \cup \mathcal{N}_j$
+is partitioned into $N_s$ \emph{strikers} and $N_j$ \emph{jammers},
+operating in an environment containing a set of radars $\mathcal{R}$
+and a set of protected targets $\mathcal{T}$. The team objective is to
+destroy all targets in $\mathcal{T}$; jammers degrade adversary radar
+coverage to clear penetration corridors for the strikers. 
+
+\subsection{Agents}
+
+Each agent $i$ has continuous state $s_i = [x_i, y_i, v_i, \psi_i,
+\dot{\psi}_i]^{\top}$ and follows unicycle kinematics with
+piecewise-constant acceleration commands.
+
+\subsubsection{Observation Space}
+Agents are partially observed. Each agent has a sensing radius
+$R_{\text{obs}}$ inside which it directly detects other agents,
+radars, and targets. The local observation
+$o_i \in \mathcal{O}_i$ is decomposed into four entity-typed channels:
+a fixed-size ego vector
+$o_i^{\text{self}} = (x_i, y_i, v_i, \psi_i, \dot{\psi}_i, \tau)$
+with $\tau$ the normalised episode time, and three variable-length
+sets containing relative bearing, range, and entity-specific features
+for visible teammates, radars, and targets, respectively.\footnote{
+Per-entity feature dimensions are
+$d_{\text{agent}}=4$, $d_{\text{radar}}=3$, $d_{\text{target}}=3$;
+masked entries are zeroed.}
+
+\subsubsection{Communication}
+Agents share observations over a range-limited, multi-hop graph
+following \cite{Wang2025CooperativeUAV}. The set of agents in
+\emph{direct} communication with $i$ is
+\begin{equation}
+\mathcal{N}_i^{1} = \bigl\{ i' \in \mathcal{N} \setminus \{i\}
+\;\bigl|\; \rho_{ii'} \le R_{\text{comm}} \bigr\},
+\label{eq:comm_direct}
+\end{equation}
+where $\rho_{ii'}$ is the inter-agent distance. The full
+communication subgroup $\mathcal{S}_i$ is obtained by transitive
+closure (multi-hop relaying):
+\begin{equation}
+\mathcal{S}_i = \{i\} \cup \mathcal{N}_i, \qquad
+\mathcal{N}_i = \bigl\{ i'' \;\bigl|\; \exists\,
+i'' \xleftrightarrow{\mathcal{N}^1} i \bigr\}.
+\label{eq:comm_multihop}
+\end{equation}
+Members of $\mathcal{S}_i$ pool their local detections, so the set of
+entities visible to $i$ for entity type
+$\xi \in \{\text{agent}, \text{radar}, \text{target}\}$ is
+\begin{equation}
+\mathcal{D}^{\xi}_{\mathcal{S}_i} = \bigcup_{i' \in \mathcal{S}_i}
+\mathcal{D}^{\xi}_{i'},
+\qquad
+\mathcal{D}^{\xi}_{i'} = \bigl\{ e \in \xi \;\bigl|\;
+\rho_{i'e} \le R_{\text{obs}} \bigr\}.
+\label{eq:shared_obs}
+\end{equation}
+Known prior entities are always included; only unknown entities
+require detection through \eqref{eq:shared_obs}.
+
+\subsubsection{Action Space}
+Each agent $i$ commands a tangential acceleration and a yaw-rate
+acceleration through two independent categorical heads, yielding the
+factored action $a_i = (a_i^{v}, a_i^{\omega})$ with
+$a_i^{v}, a_i^{\omega} \in \{0, 1, \dots, K{-}1\}$, $K=7$. Each
+discrete index maps to a multiplier
+$c_k \in \{-1,\,-0.5,\,-0.1,\,0,\,+0.1,\,+0.5,\,+1\}$ scaling the
+maximum allowable change:
+\begin{equation}
+v_{i,t+1} = \mathrm{clip}\!\left(v_{i,t} +
+c_{a_i^{v}} \cdot \Delta v_{\max},\;v_{\min},\,v_{\max}\right),
+\label{eq:vel_update}
+\end{equation}
+\begin{equation}
+\dot{\psi}_{i,t+1} = \mathrm{clip}\!\left(\dot{\psi}_{i,t} +
+c_{a_i^{\omega}} \cdot \Delta \dot{\psi}_{\max},\;
+-\dot{\psi}_{\max},\,\dot{\psi}_{\max}\right).
+\label{eq:omega_update}
+\end{equation}
+The joint policy is therefore a product of two role-specific
+multi-categorical distributions, one shared across all strikers and
+one shared across all jammers (parameter sharing within roles).
+
+\paragraph{Strike effect.}
+Each striker $i \in \mathcal{N}_s$ has a forward engagement region
+defined by a range $r^{\text{Stk}}$ and a half-angle
+$\tfrac{1}{2}\alpha^{\text{Stk}}$ centred on its heading $\psi_i$.
+A target $j \in \mathcal{T}$ is engaged whenever
+\begin{equation}
+\mathcal{A}_i^{\mathcal{T}} = \Bigl\{ j \;\Bigl|\;
+\rho_{ji} \le r^{\text{Stk}} \;\wedge\;
+|\theta_{ji}| \le \tfrac{1}{2}\alpha^{\text{Stk}} \Bigr\},
+\label{eq:strike_set}
+\end{equation}
+where $\theta_{ji}$ is the bearing of $j$ in the body frame of $i$.
+Engagement is deterministic: any $j \in \mathcal{A}_i^{\mathcal{T}}$
+is removed from $\mathcal{T}$.
+
+\paragraph{Jamming effect.}
+Each alive jammer $i \in \mathcal{N}_j$ is assumed to continuously
+suppress every adversary radar irrespective of range. The effective
+detection range of radar $r \in \mathcal{R}$ is therefore
+\begin{equation}
+R^{\text{eff}}_r =
+\begin{cases}
+\max\!\bigl(0,\, R_r - \Delta R\bigr) & \text{if } |\mathcal{N}_j^{\text{alive}}| \ge 1, \\[2pt]
+R_r & \text{otherwise},
+\end{cases}
+\label{eq:jam_effect}
+\end{equation}
+with $R_r$ the nominal radar range and $\Delta R$ the jamming-induced
+range reduction.
+
+\subsection{Environment}
+
+
+\subsubsection{Low Fidelity Model}
+
+
+\subsubsection{Higher Fidelity Model}
+The radar detection performance is modeled using the standard monostatic radar equation combined with a simplified burn-through condition for jamming. Three effective detection ranges are defined: the unconstrained range, the main-lobe jammed range, and the side-lobe jammed range.
+
+The unconstrained radar range is obtained by equating the received target echo power to the receiver noise power:
+\begin{equation}
+R_{\text{unconstrained}} =
+\left(
+\frac{P_t G_t G_r \lambda^2 \sigma}
+{(4\pi)^3 k T_0 B_n L}
+\right)^{1/4}
+\end{equation}
+
+Jamming is modeled using a burn-through condition where the received jammer power equals the target echo power. For main-lobe jamming, the effective detection range is
+\begin{equation}
+R_{\text{main}} =
+\left(
+\frac{P_t G_t \sigma}{4\pi P_J G_J} R_J^2
+\right)^{1/4}
+\end{equation}
+
+For side-lobe jamming, accounting for reduced antenna gain toward the jammer, the effective range becomes
+\begin{equation}
+R_{\text{side}} =
+\left(
+\frac{\sigma}{4\pi}
+\cdot
+\frac{P_t G_t}{P_J G_J}
+\cdot
+\frac{G_M R_J^2}{G_S}
+\right)^{1/4}
+\end{equation}
+
+For a monostatic radar, the main-lobe receive gain satisfies $G_M = G_t$.
+
+In these expressions, $P_t$ and $P_J$ denote the radar and jammer transmit powers, $G_t$, $G_r$, and $G_J$ are the corresponding antenna gains, $\lambda$ is the wavelength, $\sigma$ is the target radar cross section, $R_J$ is the radar-to-jammer distance, $G_S$ is the radar side-lobe gain, $k$ is Boltzmann's constant, $T_0$ is the system temperature, $B_n$ is the receiver bandwidth, and $L$ represents system losses.
+
+The radar coverage is then defined as a piecewise function of angle, where the detection range is reduced to $R_{\text{main}}$ or $R_{\text{side}}$ within the jammer sector, and remains $R_{\text{unconstrained}}$ elsewhere.
+
+
+\section{Methods}
+
+
+\subsection{MAPPO}
+We optimise the clipped PPO objective~\cite{schulman2017ppo} in the MAPPO
+variant~\cite{yu2022mappo}, with parameter sharing inside each role:
+$\pi_{\theta_\rho}$ for role $\rho\in\{s,j\}$, and role-specific centralised
+critics $V_{\phi_\rho}$.
+
+\paragraph{Advantage estimation.}
+With rollouts of length $T$ collected from $B$ parallel environments, per-role
+advantages are computed by GAE~\cite{schulman2016gae}:
+\begin{equation}
+\delta_t^{\rho} = r_t^{\rho} + \gamma\, V_{\phi_\rho}(s_{t+1})(1-d_t) - V_{\phi_\rho}(s_t),
+\qquad
+\hat{A}_t^{\rho} = \sum_{l=0}^{T-t-1}(\gamma\lambda)^{l}\,\delta_{t+l}^{\rho},
+\end{equation}
+with returns $\hat{R}_t^\rho=\hat{A}_t^\rho+V_{\phi_\rho}(s_t)$.
+We use $\gamma=0.99$, $\lambda=0.95$.
+
+\paragraph{Clipped policy loss.}
+For each role, letting
+$r_t(\theta)=\exp\!\big(\log\pi_{\theta_\rho}(\bm{a}_t\mid o_t)-\log\pi_{\theta_{\rho,\text{old}}}(\bm{a}_t\mid o_t)\big)$,
+\begin{equation}
+\mathcal{L}^{\text{PPO}}_\rho(\theta)
+= -\,\mathbb{E}_t\!\left[\min\!\big(r_t(\theta)\tilde{A}_t^\rho,\;
+    \mathrm{clip}(r_t(\theta),1\!-\!\epsilon,1\!+\!\epsilon)\,\tilde{A}_t^\rho\big)\right]
+- \beta\,\mathbb{E}_t[\mathcal{H}(\pi_{\theta_\rho})],
+\end{equation}
+with clip range $\epsilon=0.2$ and entropy coefficient $\beta=0.01$.
+$\tilde{A}_t^\rho$ denotes the per-minibatch standardised advantage,
+$\tilde{A}=(\hat{A}-\mu_{\hat A})/\sigma_{\hat A}$.
+
+\paragraph{Value loss.}
+\begin{equation}
+\mathcal{L}^{V}_\rho(\phi)=\mathbb{E}_t\!\left[\big(V_{\phi_\rho}(s_t)-\hat{R}_t^\rho\big)^{2}\right].
+\end{equation}
+
+\paragraph{Reward normalisation.}
+A running second moment over per-step team-mean rewards $\bar r_t=\tfrac{1}{|\mathcal N|}\sum_i r_{i,t}$
+is tracked with a Welford estimator; rewards are then divided (no mean
+subtraction) by $\max(\sigma,\varepsilon)$ with $\varepsilon=10^{-2}$
+before advantage computation.
+
+\paragraph{Adaptations from standard MAPPO.}
+\begin{enumerate}[leftmargin=1.25em]
+\item \emph{Role-factorised critic.} Instead of a single shared centralised
+critic, we instantiate one actor $\pi_{\theta_\rho}$ \emph{and} one critic
+$V_{\phi_\rho}$ per role, each optimised by a dedicated Adam instance. The
+critics share the same global-state input but learn role-specific value
+functions, which we found necessary because the two roles receive different
+reward mixtures (Sec.~\ref{subsec:rewards}).
+\item \emph{Unclipped value loss.} We omit the PPO value clip; the plain MSE
+in~(4) was empirically stable in our setup and avoided a known pathology
+where clip-range mis-calibration freezes the critic early in training.
+\item \emph{Std-only reward scaling.} We divide rewards by the running std
+without mean subtraction, preserving the sign/zero of sparse terminal
+rewards (kill / mission-complete), which would otherwise drift to a
+non-zero baseline under a Welford-mean subtraction.
+\item \emph{Factorised MultiCategorical} action distribution with logit
+sanitisation $\mathrm{clip}(\ell,-20,20)$ and NaN guarding, to tolerate
+occasional extreme logits produced during the early exploration phase.
+\item \emph{Per-role gradient clipping.} Actor/critic gradients are clipped
+independently at $\lVert g\rVert_2\le 1$ before each optimiser step.
+\end{enumerate}
+
+\subsection{Flexible Observation Feature Encoding (FOFE)}
+The observation encoder replaces a fixed top-$K$ flat vector with a
+permutation-invariant set encoder applied per observation channel, following
+the Sequence-Exchangeable Encoding (SEE) block of Wang et al.~\cite{wang2026fofe}.
+Each channel $c\in\{\text{ag},\text{tg},\text{rd}\}$ provides a variable-size
+entity set $\mathcal{X}^{(c)}\!=\!\{x_1,\dots,x_n\}$ with a visibility mask
+$m\in\{0,1\}^n$.
+
+\paragraph{SEE layer.}
+For input $X\in\mathbb{R}^{n\times d_{\text{in}}}$ and hidden width $h$,
+\begin{align}
+\tilde X &= \mathrm{LayerNorm}(X),\\
+E &= \tilde X W_e,\qquad Z=\tilde X W_g,\qquad G=\mathrm{SiLU}(Z),\\
+E_{\text{agg}} &= \max_{i:\,m_i=1} E_{i,:} \;\in\mathbb R^{h} \quad\text{(masked max-pool),}\\
+\mathrm{SEE}(X,m)_{i,:} &= \big[\,G_{i,:}\odot E_{i,:}\,\big\Vert\,G_{i,:}\odot E_{\text{agg}}\,\big]\in\mathbb R^{2h},
+\end{align}
+with layer-norm omitted in the first SEE block. The left branch carries
+local per-entity context, the right branch injects a gated global summary;
+masked rows are zeroed after the concat.
+
+\paragraph{FOFE block.}
+A channel encoder stacks $L$ SEE layers, applies a shared per-entity MLP
+$f_\psi$, then collapses the set by masked max-pool:
+\begin{equation}
+\mathrm{FOFE}(\mathcal X,m)
+= \max_{i:\,m_i=1} f_\psi\!\big(\mathrm{SEE}_L\circ\cdots\circ\mathrm{SEE}_1(X,m)\big)_i
+\;\in\mathbb R^{D_\mathrm{fofe}}.
+\end{equation}
+By construction this is permutation-invariant and agnostic to the number of
+visible entities.
+
+\paragraph{Actor network (per role).}
+The self-observation $o^{\text{self}}\in\mathbb R^{6}$ (ego kinematics + alive
+flag) bypasses FOFE and is mapped by an MLP. The three entity channels are
+encoded independently and concatenated with the self-embedding before a
+fusion MLP and a factorised action head:
+\begin{equation}
+z = \big[\,g_\xi(o^{\text{self}})\,\big\Vert\,\mathrm{FOFE}_\text{ag}\,\big\Vert\,
+        \mathrm{FOFE}_\text{tg}\,\big\Vert\,\mathrm{FOFE}_\text{rd}\,\big],\qquad
+\bm\ell = W_{\text{head}}\,\mathrm{FusionMLP}(z).
+\end{equation}
+
+\paragraph{Critic network (per role).}
+The critic receives the decomposed \emph{global} state: all agents
+($d{=}7$: pos, speed, heading, $\omega$, role, alive), all targets ($d{=}3$),
+all radars ($d{=}4$: pos, active flag, effective range), plus a scalar
+time feature $\tau\in[0,1]$:
+\begin{equation}
+V_{\phi_\rho}(s) = W_v\;\mathrm{FusionMLP}\!\Big(
+\big[\,\mathrm{FOFE}_\text{ag}(s)\,\big\Vert\,\mathrm{FOFE}_\text{tg}(s)\,\big\Vert\,
+      \mathrm{FOFE}_\text{rd}(s)\,\big\Vert\,\tau\,\big]\Big).
+\end{equation}
+
+\paragraph{Adaptations from standard FOFE.}
+\begin{enumerate}[leftmargin=1.25em]
+\item \emph{Per-channel decomposition.} Wang's original encoder processes a
+single heterogeneous entity stream. We split the observation into
+semantically typed channels (agents, targets, radars) each with an
+independent FOFE block, and treat the ego state as a separate fixed-size
+MLP branch. This enforces a type-aware prior and makes channel-level
+diagnostics (dominance, collapse rate) tractable.
+\item \emph{Centralised FOFE critic with time feature.} The critic
+consumes the full global state as three entity sets \emph{plus} an explicit
+normalised-time scalar $\tau$, enabling the baseline to discriminate early
+from late episode phases without extending the set with a dummy entity.
+\item \emph{Masked max-pool with all-masked fallback.} When no entity in a
+channel is visible ($\sum_i m_i=0$) we substitute a zero vector rather
+than propagating $-\infty$ from the masked max, ensuring stable gradients
+under aggressive occlusion.
+\item \emph{Role-specific FOFE weights.} Striker and jammer each own a full
+set of three FOFE blocks (actor and critic); no weight sharing across roles.
+\end{enumerate}
+
+
+\subsection{Reward Structure}
+\label{subsec:rewards}
+Let $d^{\max}_{ij}$ denote a component-specific cutoff distance and
+$w^{\text{lin}}_{\bullet}$ the linear weight. All active shaping terms in our
+configuration reduce to the linear sub-case of the more general
+piecewise linear--exponential family (exponential weights set to zero):
+\begin{equation}
+\varphi(d;w,d^{\max})=w\cdot\max\!\left(0,\;1-\tfrac{d}{d^{\max}}\right).
+\end{equation}
+
+\paragraph{Sparse team rewards with team-spirit mixing.}
+For a team event $e\in\{\text{kill target},\text{agent destroyed}\}$ with
+scalar value $R_e$ and individual attribution indicator
+$\mathbb{1}_{i=\text{credit}(e)}$, agent $i$'s received reward is
+\begin{equation}
+r_i^{e} = \eta \cdot \frac{R_e}{|\mathcal N^\text{alive}|}
+       + (1-\eta)\cdot R_e\,\mathbb{1}_{i=\text{credit}(e)},
+\qquad \eta=0.5,
+\end{equation}
+with $R_{\text{target}}=+3$, $R_{\text{destroy}}=-3$. A one-shot
+\emph{terminal bonus} $R_{\text{term}}=+1$ is granted to every alive agent
+at the transition where the mission is completed (all targets killed).
+
+\paragraph{Per-step dense terms.}
+For each alive agent $i$ at step $t$:
+\begin{align}
+r^{\text{step}}_{i,t} &= -0.01, \\
+r^{\text{border}}_{i,t} &= -\varphi\big(d^{\text{edge}}_{i,t};\,0.05,\,0.05\big), \\
+r^{\text{radar-av}}_{i,t} &= -\sum_k \varphi\big(d^{\text{rz}}_{i,k,t};\,0.05,\,0.1\big), \\
+r^{\text{appr}}_{i,t} \;(\text{strikers only})
+   &= \varphi\big(d^{\text{tgt}}_{i,t};\,0.1,\,1.0\big)-0.1, \\
+r^{\text{form}}_{i,t} \;(\text{jammers only})
+   &= 0.1\!\cdot\!\Big(\max\!\big(0,\,1-\tfrac{d^{\text{str}}_{i,t}}{0.5}\big)-1\Big), \\
+r^{\text{sep}}_{i,t}  &= -\varphi\big(d^{\text{same-role}}_{i,t};\,0.05,\,0.1\big), \\
+r^{\text{ctrl}}_{i,t} &= -0.01\,a_{i,t}^{2} - 0.01\,\alpha_{i,t}^{2},
+\end{align}
+where $d^{\text{edge}}$ is the distance to the nearest map edge,
+$d^{\text{rz}}_{i,k}$ the distance to the boundary of the (fixed, jammed) zone
+of radar $k$, $d^{\text{tgt}}_{i}$ the distance to the nearest alive target,
+$d^{\text{str}}_{i}$ and $d^{\text{same-role}}_{i}$ the distances to the
+nearest cross-role and same-role teammate respectively, and
+$a,\alpha\in[-1,1]$ the discrete accel/angular-accel multipliers.
+The striker-approach shaping is sign-flipped to act as a \emph{distance
+penalty} (zero at $d{=}0$, monotonically decreasing with distance), which
+preserves the same gradient magnitude as a conventional approach reward
+while removing the positive bias that interfered with the sparse
+$R_{\text{target}}$ signal.
+
+\paragraph{Per-agent reward.}
+Combining the above, each agent's per-step reward is
+\begin{equation}
+r_{i,t} = r^{e}_{i,t} + r^{\text{step}}_{i,t}
++ r^{\text{border}}_{i,t} + r^{\text{radar-av}}_{i,t}
++ r^{\text{appr}}_{i,t} + r^{\text{form}}_{i,t}
++ r^{\text{sep}}_{i,t} + r^{\text{ctrl}}_{i,t}
++ R_{\text{term}}\,\mathbb{1}_{\text{terminal}},
+\end{equation}
+evaluated only over alive agents and passed per-role into the advantage
+computation of the corresponding MAPPO learner.
+
+\paragraph{Adaptations from standard shaped-reward MAPPO.}
+(i) The \emph{team-spirit} mixing~(12) interpolates between a fully
+egoistic credit-assignment scheme ($\eta=0$) and a fully cooperative one
+($\eta=1$); $\eta=0.5$ is used to balance individual responsibility with
+joint objective pursuit. (ii) Dense shaping that conventionally takes the
+form of positive approach bonuses is reformulated as a zero-at-contact
+distance penalty~(16), which removes a positive reward baseline that
+otherwise dominates the sparse engagement signal. (iii) The
+same-role separation penalty~(18) and control-effort penalty~(19) act as
+mild regularisers promoting spatial diversity and smooth trajectories
+without biasing the sparse task reward.
+
+
+
+\section{Performance Metrics}
+
+\subsection{KPIs}
+
+
+\subsubsection{Emergent Tactics}
+
+What are possible tactics for the agent to take? How can these be quantized? 
+
+
+

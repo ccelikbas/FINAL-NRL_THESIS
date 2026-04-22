@@ -1,0 +1,117 @@
+
+
+\chapter{Existing Research}
+
+This chapter provides an overview of existing research on combat unmanned aerial vehicles (UAVs), with a particular focus on strike and electronic warfare (EW) missions. First, the relevant literature is briefly summarized. Next, the mission types and operational constraints considered in existing studies are reviewed. Subsequently, the control methods proposed in the literature are examined and compared. Finally, this chapter identifies key research gaps and limitations in current work, thereby motivating the research directions pursued in this thesis.
+
+
+\section{Summery of Literature}
+In this section a summery of existing literature is given. First a summery of the scenario is given, followed by the proposed solution method. After a discussion on the proposed scenario and method is provided related to the objectives of this thesis. 
+
+\subsubsection{MADQN and IAPPO for EA and SEAD mission, Yue et al., 2022}
+In \cite{yue2022uav_sead_hmarl}, a team of heterogeneous fighter–jammer UAV duos, modeled as kinematic point masses, is tasked with executing a SEAD mission. Each jammer suppresses an IADS to reduce its detection range, enabling the paired fighter to approach and destroy the target. The scenario assumes full observability and unrestricted communication, with all target locations known throughout the mission.
+
+The authors propose a hierarchical MARL framework in which target allocation is solved at a high level using a multi-agent deep Q-network (MADQN), while low-level cooperative control is handled using independent asynchronous proximal policy optimization (IAPPO). Each fighter–jammer duo is controlled by a shared policy with continuous action outputs (velocity and heading for both UAVs). The learning is independent, as each duo optimizes its own policy without a centralized critic, which improves scalability but introduces non-stationarity. Asynchrony is achieved through parallel experience collection and unsynchronized policy updates, improving sample efficiency relative to standard PPO. Target allocation is performed sequentially, with each duo treated as a DQN agent, and exploration is enhanced using a Metropolis criterion \cite{yue2022uav_sead_hmarl}.
+
+Despite demonstrating scalability in simplified scenarios, the proposed approach has several limitations that reduce its applicability to realistic and dynamic environments. The fixed pairing of fighters and jammers under a shared policy constrains adaptability and enforces close-formation behavior tailored to a specific mission structure. As a result, the method does not generalize well to scenarios involving dynamic re-tasking, emerging threats, or alternative team compositions. Furthermore, the independent PPO formulation leads to a non-stationary learning environment, which is likely to become unstable as adversary complexity or agent interactions increase.
+
+The hierarchical structure also enforces a strict allocate-then-execute paradigm, preventing reallocation or mission-level adaptation during execution. These capabilities are essential in contested and uncertain operational settings. Additionally, the method assumes the existence of a central coordinating agent with global communication and perfect information during target allocation, neglecting practical limitations on communication, sensing, and information reliability in SEAD missions. Finally, adversaries are modeled as static, fully known entities, further limiting the realism of the evaluation.
+
+\subsubsection{Centralized PPO in strike mission, Yulsek et al., 2021}
+In \cite{yuksek2021cooperative}, a reinforcement learning (RL)–based centralized path-planning method for a fleet of Unmanned Combat Aerial Vehicles (UCAVs) operating in a hostile environment. The goal is for multiple UCAVs to reach a target simultaneously, avoid no-fly zones (NFZs) that represent enemy air defenses. The UCAVs are assumed to operate at constant velocity and control actions are lateral accelerations by a centlised agent. 
+
+
+
+\section{Mission types and Operational Constraints}
+
+
+\begin{table}[htbp]
+\centering
+\caption{Mapping of operational constraints to mission types addressed in the literature. Empty cells indicate limited or no explicit treatment.}
+\label{tab:mission_constraints_empty}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Operational Constraint}
+& \textbf{Strike}
+& \textbf{EW}
+& \textbf{Strike + EW} \\
+\midrule
+Partial observability 
+& \cite{Wang2025CooperativeUAV}
+& 
+& \\
+
+Communication limitations  
+& \cite{Wang2025CooperativeUAV}
+& 
+& \\
+
+Adversaries / Interceptors (fixed or mobile)
+& \cite{Wang2025CooperativeUAV}
+& 
+& \cite{xu2025mdrl_uav_combat, yue2022uav_sead_hmarl} \\
+
+No-fly-zones 
+& \cite{yuksek2021cooperative}
+& 
+& \\
+
+Temporal and spatial coordination requirements 
+& \cite{yuksek2021cooperative}
+& 
+& \\
+
+Heterogeneous agents (e.g. striker, jammer)
+& \cite{Wang2025CooperativeUAV}
+& 
+& \cite{yue2022uav_sead_hmarl} \\
+
+% GNSS-denied or degraded navigation 
+% & 
+% & 
+% & \\
+
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+
+
+\section{Overview of MARL Methods}
+
+\begin{table}[htbp]
+\centering
+\caption{Overview of multi-agent reinforcement learning control methods used in cooperative autonomous systems.}
+\label{tab:marl_methods}
+\begin{tabular}{llcc}
+\toprule
+\textbf{Method Class} 
+& \textbf{Specific Method} 
+& \textbf{Citations} 
+& \textbf{Notes} \\
+\midrule
+
+\multirow{2}{*}{Value-based}
+& MADQL 
+& \cite{yue2022uav_sead_hmarl} 
+& \cite{yue2022uav_sead_hmarl} uses MADQL for task allocation \\
+
+& QMIX 
+& -- 
+& notes \\
+
+\midrule
+\multirow{2}{*}{Actor--Critic}
+& MAPPO 
+& \cite{yue2022uav_sead_hmarl}
+& \cite{yue2022uav_sead_hmarl} uses IAPPO for continuous motion control \\
+
+& MADDPG 
+& -- 
+& notes \\
+
+\bottomrule
+\end{tabular}
+\end{table}
+

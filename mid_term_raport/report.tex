@@ -1,0 +1,149 @@
+\documentclass{tudelft-report}
+
+
+
+%% Set up the bibliography
+\usepackage[backend=biber,style=numeric]{biblatex}
+\addbibresource{report.bib}
+% \usepackage[backend=biber]{biblatex}
+% \addbibresource{report.bib}
+\usepackage[colorinlistoftodos]{todonotes}
+\usepackage{amsmath,amssymb}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{float}
+%% Additional packages and commands
+\setlist{itemsep=-2pt} % Reducing white space in lists slightly
+\renewcommand{\deg}{\si{\degree}\xspace} % Use \deg easily, everywhere
+
+%% ----------------------------------------------------------------------
+%%    Begin of document + Frontmatter (Roman page numbering)
+%% ----------------------------------------------------------------------
+
+\usepackage{tgadventor}
+\usepackage{amsmath}
+\usepackage{breqn}
+\usepackage{longtable}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{tabularx}
+\usepackage{booktabs}
+\usepackage{tikz}
+\usepackage{graphicx}
+
+% Nomenclature package
+\usepackage[intoc]{nomencl}
+\makenomenclature
+
+% Optional: group titles (Abbreviations / Symbols)
+\renewcommand{\nomgroup}[1]{%
+\ifthenelse{\equal{#1}{A}}{\item[\textbf{Abbreviations}]}{%
+\ifthenelse{\equal{#1}{S}}{\item[\textbf{Symbols}]}{}}}
+\usepackage{ifthen}
+\usepackage{graphicx}
+\usepackage{tikz}
+\usepackage{eso-pic} % <-- important
+
+% --- icons for qualitative tables ---
+\usepackage{amssymb}
+
+\newcommand{\High}{\checkmark}   % High  (✓)
+\newcommand{\Med}{$\sim$}        % Medium (single curly bar)
+\newcommand{\Low}{$\times$}      % Low (×)
+
+
+
+\begin{document}
+
+\renewcommand{\figureautorefname}{Figure}
+\renewcommand{\tableautorefname}{Table}
+\renewcommand{\partautorefname}{Part}
+\renewcommand{\appendixautorefname}{Appendix}
+\renewcommand{\chapterautorefname}{Chapter}
+\renewcommand{\sectionautorefname}{Section}
+\renewcommand{\subsectionautorefname}{Section}
+\renewcommand{\subsubsectionautorefname}{Section}
+
+\frontmatter
+
+% %% Define the main parameters
+% \title{Communication-Enhanced MAPPO for Coordinated ACP Teams in Strike–EA Missions}
+% \subtitle{Master Thesis AE}
+
+
+% \subject{} % Cover only
+% \affiliation{Delft University of Technology} % Cover only
+% \coverimage{/figures/TMA_bio_plot.png} % Aspect ratio of 2:3 (portrait) recommended
+% % \includegraphics[width=0.6\textwidth]{figures/TMA_bio_plot.png}\par\vspace{1cm}
+% \definecolor{title}{HTML}{4884d6} % Color for cover title
+
+% \makecover
+
+%% Define the main parameters
+\title{Communication-Enhanced MAPPO for Coordinated ACP Teams in Strike-EA Missions}
+\subtitle{Mid-Term Report}
+\author{Cem Celikbas}
+\date{\today} % or a fixed date
+
+\subject{} % Cover only
+% \affiliation{Delft University of Technology} % Cover only
+\coverimage{figures/cover.png} % usually no leading slash
+\definecolor{title}{HTML}{FFFFFF}
+% Put logo on the cover page (foreground)
+\AddToShipoutPictureFG*{%
+  \begin{tikzpicture}[remember picture,overlay]
+    \node[anchor=south,yshift=8mm] at (current page.south) {%
+      \includegraphics[width=4cm]{figures/TU_P5_white.png}%
+    };
+  \end{tikzpicture}%
+}
+\makecover
+
+
+\input{frontmatter/title-thesis}
+%\input{frontmatter/preface}
+%\input{frontmatter/summary}
+
+\setcounter{tocdepth}{1}
+\tableofcontents
+% \listoffigures
+% \listoftables
+\input{frontmatter/Nomenclature}
+
+%% ----------------------------------------------------------------------
+%%    Mainmatter (Arabic page numbering)
+%% ----------------------------------------------------------------------
+
+\mainmatter
+
+\input{mainmatter/1_Introduction}
+\input{mainmatter/2_Methods}
+\input{mainmatter/3_Results}
+\input{mainmatter/4_Discussion}
+\input{mainmatter/5_Conculsion}
+\input{mainmatter/8_Research_Proposal}
+
+\printbibliography[heading=bibintoc,title=References]
+
+
+%% Prevent urls running into margins in bibliography
+\setcounter{biburlnumpenalty}{7000}
+\setcounter{biburllcpenalty}{7000}
+\setcounter{biburlucpenalty}{7000}
+
+%% Add bibliography
+
+
+%% ----------------------------------------------------------------------
+%%    Appendix (Letters for chapters)
+%% ----------------------------------------------------------------------
+
+\appendix
+
+% \input{appendix/Python}
+% \input{appendix/Summeries}
+%\input{appendix/task_distribution.tex}
+%\input{appendix/appendix-b}
+%\input{appendix/appendix-c} % Create file to add
+
+\end{document}
