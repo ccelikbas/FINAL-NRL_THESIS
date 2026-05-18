@@ -190,6 +190,11 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         # Per-jammer current bearing (radians, relative to jammer heading).
         # Overwritten every _step from action[..., 2]; zero before first step.
         self.jammer_bearing = torch.zeros(self.num_envs, self.n_jammers, device=self.device)
+        # Register HF-only reward component so per-episode accumulators
+        # and the visualizer's reward subplot pick it up automatically.
+        self._episode_component_reward["jammer_directivity_bonus"] = torch.zeros(
+            self.num_envs, device=self.device,
+        )
         # Rebuild specs so action_spec reflects the new act_dim/n_choices.
         self._make_specs()
 
@@ -269,6 +274,10 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         if J == 0:
             self.radar_eff_range_per_agent.fill_(self.radar_range_unconstrained)
             self.radar_eff_range.fill_(self.radar_range_unconstrained)
+            # Empty cone-membership tensor so reward code can index it safely.
+            self._jammer_in_cone = torch.zeros(
+                B, 0, R, dtype=torch.bool, device=self.device,
+            )
             return
 
         # ----- distances -----
@@ -343,6 +352,9 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
             R_eff_jar,
             torch.full_like(R_eff_jar, R_unc_m),
         )
+        # Cache for reward computation (jammer_directivity_bonus).
+        # Dead jammers will be masked out by alive_mask at the reward site.
+        self._jammer_in_cone = in_cone_jr
 
         # Dead jammers have no effect → set to R_unc
         alive_mask = jammer_alive[:, :, None, None]                        # [B, J, 1, 1]
@@ -614,6 +626,7 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         # 7. Potential-based progress
         jammer_progress_full = torch.zeros(B, A, device=self.device)
         jammer_jam_bonus_full = torch.zeros(B, A, device=self.device)
+        jammer_directivity_full = torch.zeros(B, A, device=self.device)
         if jammer_idx.numel() > 0 and self.n_radars > 0:
             jammer_alive_f = alive[:, self.n_strikers:].float()
 
@@ -629,6 +642,20 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
                 jam_bonus = float(rp.jammer_jam_bonus) * jam_active.float() * jammer_alive_f
                 reward[:, self.n_strikers:] += jam_bonus
                 jammer_jam_bonus_full[:, self.n_strikers:] = jam_bonus
+
+            # Directivity bonus: reward a jammer whose cone currently
+            # contains its NEAREST alive radar. Uses _jammer_in_cone
+            # (set by _compute_hf_radar_eff_range earlier this step) so
+            # the geometry stays consistent with the physics gate.
+            direct_scale = float(getattr(rp, "jammer_directivity_bonus", 0.0))
+            if direct_scale != 0.0:
+                nearest_radar_idx = dist_jr.argmin(dim=-1, keepdim=True)           # [B, J, 1]
+                nearest_in_cone = self._jammer_in_cone.gather(
+                    -1, nearest_radar_idx
+                ).squeeze(-1).float()                                              # [B, J]
+                directivity_bonus = direct_scale * nearest_in_cone * jammer_alive_f
+                reward[:, self.n_strikers:] += directivity_bonus
+                jammer_directivity_full[:, self.n_strikers:] = directivity_bonus
 
             self._jammer_prev_dist = dist_jr.detach()
 
@@ -771,21 +798,22 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
 
         # Store per-component reward breakdown
         self.last_reward_components = {
-            "target_destroyed":   target_destroyed_full.detach(),
-            "terminal_bonus":     terminal_bonus_full.detach(),
-            "border_penalty":     border_pen.detach(),
-            "timestep_penalty":   timestep_rew.detach(),
-            "radar_avoidance":    radar_pen.detach(),
-            "striker_approach":   striker_approach_full.detach(),
-            "jammer_approach":    jammer_approach_full.detach(),
-            "striker_progress":   striker_progress_full.detach(),
-            "jammer_progress":    jammer_progress_full.detach(),
-            "jammer_jam_bonus":   jammer_jam_bonus_full.detach(),
-            "formation":          formation_full.detach(),
-            "agent_destroyed":    death_pen_full.detach(),
-            "paper_mission":      mission_reward_full.detach(),
-            "separation_penalty": separation_pen_full.detach(),
-            "control_effort":     control_pen_full.detach(),
+            "target_destroyed":         target_destroyed_full.detach(),
+            "terminal_bonus":           terminal_bonus_full.detach(),
+            "border_penalty":           border_pen.detach(),
+            "timestep_penalty":         timestep_rew.detach(),
+            "radar_avoidance":          radar_pen.detach(),
+            "striker_approach":         striker_approach_full.detach(),
+            "jammer_approach":          jammer_approach_full.detach(),
+            "striker_progress":         striker_progress_full.detach(),
+            "jammer_progress":          jammer_progress_full.detach(),
+            "jammer_jam_bonus":         jammer_jam_bonus_full.detach(),
+            "jammer_directivity_bonus": jammer_directivity_full.detach(),
+            "formation":                formation_full.detach(),
+            "agent_destroyed":          death_pen_full.detach(),
+            "paper_mission":            mission_reward_full.detach(),
+            "separation_penalty":       separation_pen_full.detach(),
+            "control_effort":           control_pen_full.detach(),
         }
 
         reward = reward.unsqueeze(-1).contiguous()  # [B, A, 1]

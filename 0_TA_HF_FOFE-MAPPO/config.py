@@ -306,7 +306,7 @@ class HFRadarConfig:
     #     to the jammer's own heading (same convention as the radar
     #     bearing feature in the observation space).
     jammer_main_lobe_deg: float = 30.0
-    jammer_bearing_n_choices: int = 16
+    jammer_bearing_n_choices: int = 32
 
     def __post_init__(self):
         if self.radar_rx_gain is None:
