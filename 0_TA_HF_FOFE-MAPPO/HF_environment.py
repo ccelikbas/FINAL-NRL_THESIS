@@ -95,6 +95,12 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         # Precompute angle half-widths in radians
         self._theta_main_half = radians(hf_cfg.theta_main_deg / 2)
         self._theta_side_half = radians(hf_cfg.theta_side_deg / 2)
+        # Directional-jammer cone half-width (radians). A radar is only
+        # jammed by jammer j if its bearing (from jammer j) lies within
+        # ±_jammer_main_lobe_half of jammer j's pointing direction.
+        self._jammer_main_lobe_half = radians(
+            float(getattr(hf_cfg, "jammer_main_lobe_deg", 30.0)) / 2.0
+        )
 
         # Unconstrained range from radar SNR equation (SI meters).
         # Gains/losses are entered in dB and converted to linear above.
@@ -159,6 +165,33 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
 
         # Kept for compatibility with HF visualization helper.
         self._gt_over_gs = radar_tx_gain / max(radar_side_lobe_gain, 1e-30)
+
+        # ------------------------------------------------------------------
+        # Directional-jammer action extension
+        # ------------------------------------------------------------------
+        # The HF env adds a 3rd action dimension that selects the jammer
+        # bearing (relative to the jammer's own heading). Strikers also
+        # receive this dimension but IGNORE it — see CombinedPolicy where
+        # the striker's bearing logits are masked to a constant index so
+        # the dimension is a no-op for the striker policy.
+        #
+        # Motion dims (0, 1) keep the original 7-value discrete table.
+        # Bearing dim (2) uses a separate evenly-spaced table over (-pi, pi].
+        # The shared Categorical n is the max of the two so a single tensor
+        # spec covers both — out-of-range indices on either dim are masked
+        # to near-zero probability at the policy level.
+        self._n_motion_choices = int(self.n_choices)               # 7
+        self._n_bearing_choices = int(getattr(hf_cfg, "jammer_bearing_n_choices", 16))
+        self.n_choices = max(self._n_motion_choices, self._n_bearing_choices)
+        self.act_dim = 3
+        self._bearing_table = torch.linspace(
+            -math.pi, math.pi, self._n_bearing_choices + 1, device=self.device,
+        )[:-1]  # [n_bearings] in radians, in (-pi, pi]
+        # Per-jammer current bearing (radians, relative to jammer heading).
+        # Overwritten every _step from action[..., 2]; zero before first step.
+        self.jammer_bearing = torch.zeros(self.num_envs, self.n_jammers, device=self.device)
+        # Rebuild specs so action_spec reflects the new act_dim/n_choices.
+        self._make_specs()
 
         # --- Fine-grained step profiling (off by default) ---
         self._profile_active: bool = False
@@ -288,6 +321,29 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
             ),
         )                                                                  # [B, J, A, R]
 
+        # --------------------------------------------------------------
+        # Directional-jammer gate.
+        # The physics above is radar-centric and unchanged. The only
+        # difference for a directional jammer is that it now only emits
+        # power inside its chosen cone. So for every (jammer, radar)
+        # pair where the radar lies OUTSIDE the jammer's cone, that
+        # jammer has zero effect on that radar -> R_eff = R_unc.
+        # --------------------------------------------------------------
+        # World-frame pointing direction of each jammer (heading + bearing).
+        jammer_pointing = self.agent_heading[:, ns:] + self.jammer_bearing  # [B, J]
+        # Bearing from each jammer to each radar in the world frame.
+        rel_jr_vec = self.radar_pos[:, None, :, :] - self.agent_pos[:, ns:, None, :]  # [B, J, R, 2]
+        angle_j_to_r = torch.atan2(rel_jr_vec[..., 1], rel_jr_vec[..., 0])  # [B, J, R]
+        # Wrap (angle_j_to_r - pointing) to [-pi, pi] for an absolute-value test.
+        delta_point = angle_j_to_r - jammer_pointing[:, :, None]
+        delta_point = torch.atan2(torch.sin(delta_point), torch.cos(delta_point))
+        in_cone_jr = delta_point.abs() <= self._jammer_main_lobe_half       # [B, J, R]
+        R_eff_jar = torch.where(
+            in_cone_jr[:, :, None, :],   # broadcast over A
+            R_eff_jar,
+            torch.full_like(R_eff_jar, R_unc_m),
+        )
+
         # Dead jammers have no effect → set to R_unc
         alive_mask = jammer_alive[:, :, None, None]                        # [B, J, 1, 1]
         R_eff_jar = torch.where(alive_mask, R_eff_jar, R_unc_m)
@@ -307,13 +363,26 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
 
     def _step(self, tensordict: TensorDict) -> TensorDict:
         _t = self._prof_tic()
-        action = tensordict.get(self._action_key)  # [B, A, 2] discrete in {0..6}
+        # Action layout in HF mode is [B, A, 3]:
+        #   dim 0 (motion accel)  : discrete index in {0..n_motion_choices-1}, all agents
+        #   dim 1 (heading accel) : discrete index in {0..n_motion_choices-1}, all agents
+        #   dim 2 (jammer bearing): discrete index in {0..n_bearing_choices-1}
+        #                           — strikers IGNORE this dim entirely (it is
+        #                             masked to a constant index by the policy
+        #                             and never read here for strikers).
+        action = tensordict.get(self._action_key)  # [B, A, 3] discrete
         B, A, _ = action.shape
         rp = self.reward_params
 
-        # Map discrete indices to continuous multipliers via lookup table
-        action_idx = action.long().clamp(0, self.n_choices - 1)
-        acc = self._act_table[action_idx]  # [B, A, 2]
+        # Decode motion dims via the original 7-value table.
+        motion_idx = action[..., :2].long().clamp(0, self._n_motion_choices - 1)
+        acc = self._act_table[motion_idx]  # [B, A, 2]
+
+        # Decode jammer bearing (dim 2): convert index → radians via _bearing_table.
+        # Only the jammer slice is consumed; the striker slice is discarded.
+        bearing_idx = action[..., 2].long().clamp(0, self._n_bearing_choices - 1)  # [B, A]
+        if self.n_jammers > 0:
+            self.jammer_bearing = self._bearing_table[bearing_idx[:, self.n_strikers:]]  # [B, J]
 
         alive = self.agent_alive
         alive_before_kill = alive

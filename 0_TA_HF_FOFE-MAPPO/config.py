@@ -291,6 +291,23 @@ class HFRadarConfig:
     theta_main_deg: float = 6.0    # full main-lobe width (±1.5° each side)
     theta_side_deg: float = 20.0    # full side-lobe+main-lobe cone width (±4.5° each side)
 
+    # ------------------------------------------------------------------
+    # Directional jammer model
+    # ------------------------------------------------------------------
+    # Each jammer is treated as omnidirectional within its own emission
+    # cone and silent everywhere else. The existing radar-centric
+    # main/side-lobe physics (above) is unchanged; we only gate it by
+    # whether the radar lies inside this cone.
+    #
+    # jammer_main_lobe_deg : full angular width of the cone (degrees).
+    # jammer_bearing_n_choices : number of discrete bearing actions
+    #     evenly spaced over (-pi, pi]. Each step the jammer policy
+    #     picks one of these indices; bearing is interpreted relative
+    #     to the jammer's own heading (same convention as the radar
+    #     bearing feature in the observation space).
+    jammer_main_lobe_deg: float = 30.0
+    jammer_bearing_n_choices: int = 16
+
     def __post_init__(self):
         if self.radar_rx_gain is None:
             self.radar_rx_gain = float(self.radar_tx_gain)
@@ -331,6 +348,10 @@ class HFRadarConfig:
         if (self.target_unconstrained_range_world is not None
                 and self.target_unconstrained_range_world <= 0):
             raise ValueError("target_unconstrained_range_world must be > 0 when provided")
+        if not (0.0 < float(self.jammer_main_lobe_deg) <= 360.0):
+            raise ValueError("jammer_main_lobe_deg must be in (0, 360]")
+        if int(self.jammer_bearing_n_choices) < 2:
+            raise ValueError("jammer_bearing_n_choices must be >= 2")
 
     @staticmethod
     def db_to_linear(db_value: float) -> float:

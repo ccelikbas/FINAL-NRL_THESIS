@@ -433,13 +433,27 @@ FOFE_CRITIC_KEYS = (
 # ======================================================================
 
 class CombinedPolicy(nn.Module):
-    """Wraps striker + jammer actors.  Supports both legacy and FOFE."""
+    """Wraps striker + jammer actors.  Supports both legacy and FOFE.
+
+    Directional-jammer action layout (HF radar mode, act_dim=3):
+      - dims 0,1 (motion): only the first ``n_motion_choices`` indices are
+        physically meaningful (the env's ``_act_table`` has that length).
+      - dim 2 (bearing): only meaningful for jammers; strikers MUST keep
+        this index at 0 because the env discards their bearing entirely.
+
+    Both constraints are enforced here by setting invalid logits to a
+    large negative bias so the sampled action stays inside the valid set
+    without changing the network architecture or the trainer pipeline.
+    """
+
+    _LOGIT_MASK_BIAS = -1e9
 
     def __init__(self, striker_policy, jammer_policy,
                  n_strikers, n_jammers, use_fofe=False,
                  obs_key=("agents", "observation"),
                  action_key=("agents", "action"),
-                 deterministic=False):
+                 deterministic=False,
+                 n_motion_choices=None, n_bearing_choices=None):
         super().__init__()
         self.striker_policy = striker_policy
         self.jammer_policy = jammer_policy
@@ -449,6 +463,38 @@ class CombinedPolicy(nn.Module):
         self.obs_key = obs_key
         self.action_key = action_key
         self.deterministic = deterministic
+        self.n_motion_choices = n_motion_choices
+        self.n_bearing_choices = n_bearing_choices
+
+    # --- Action-mask helpers (no-op unless act_dim == 3 and the env
+    #     reported separate motion / bearing choice counts) ----------
+    def _needs_action_mask(self, logits: torch.Tensor) -> bool:
+        return (
+            logits.shape[-2] >= 3
+            and self.n_motion_choices is not None
+            and self.n_bearing_choices is not None
+        )
+
+    def _mask_motion_and_bearing(self, logits: torch.Tensor, role: str) -> torch.Tensor:
+        """Add a large-negative bias to invalid action indices.
+        role: "striker" or "jammer". logits shape: [..., n_role, act_dim, n_choices].
+        """
+        if not self._needs_action_mask(logits):
+            return logits
+        nc = logits.shape[-1]
+        bias = torch.zeros_like(logits)
+        # Motion dims: clamp to the first n_motion_choices indices.
+        if nc > self.n_motion_choices:
+            bias[..., 0, self.n_motion_choices:] = self._LOGIT_MASK_BIAS
+            bias[..., 1, self.n_motion_choices:] = self._LOGIT_MASK_BIAS
+        # Bearing dim handling depends on role.
+        if role == "striker":
+            # Striker bearing is unused by the env; pin it to index 0.
+            bias[..., 2, 1:] = self._LOGIT_MASK_BIAS
+        elif role == "jammer":
+            if nc > self.n_bearing_choices:
+                bias[..., 2, self.n_bearing_choices:] = self._LOGIT_MASK_BIAS
+        return logits + bias
 
     # --- FOFE observation helpers ---
     def _get_fofe_obs(self, td):
@@ -480,6 +526,9 @@ class CombinedPolicy(nn.Module):
             s_logits = self.striker_policy(obs[:, :ns])
             j_logits = self.jammer_policy(obs[:, ns:])
 
+        s_logits = self._mask_motion_and_bearing(s_logits, role="striker")
+        j_logits = self._mask_motion_and_bearing(j_logits, role="jammer")
+
         all_logits = MultiCategorical._sanitize_logits(torch.cat([s_logits, j_logits], dim=1))
         dist = MultiCategorical(logits=all_logits)
         action = dist.mode if self.deterministic else dist.sample()
@@ -494,6 +543,7 @@ class CombinedPolicy(nn.Module):
             logits = self._call_fofe(self.striker_policy, obs_or_dict)
         else:
             logits = self.striker_policy(obs_or_dict)
+        logits = self._mask_motion_and_bearing(logits, role="striker")
         logits = MultiCategorical._sanitize_logits(logits)
         dist = MultiCategorical(logits=logits)
         return dist.log_prob(action), dist.entropy()
@@ -503,6 +553,7 @@ class CombinedPolicy(nn.Module):
             logits = self._call_fofe(self.jammer_policy, obs_or_dict)
         else:
             logits = self.jammer_policy(obs_or_dict)
+        logits = self._mask_motion_and_bearing(logits, role="jammer")
         logits = MultiCategorical._sanitize_logits(logits)
         dist = MultiCategorical(logits=logits)
         return dist.log_prob(action), dist.entropy()
@@ -582,9 +633,17 @@ def make_combined_policy(env: StrikeEA2DEnv, hidden=256, depth=3,
         striker_net = RolePolicyNet(env.obs_dim, env.act_dim, env.n_choices, env.n_strikers, hidden, depth).to(env.device)
         jammer_net = RolePolicyNet(env.obs_dim, env.act_dim, env.n_choices, env.n_jammers, hidden, depth).to(env.device)
 
+    # If the env exposes a separate motion / bearing choice count (HF
+    # directional-jammer model), forward them so the policy can mask
+    # invalid action indices. Base env doesn't set these → mask becomes
+    # a no-op and behaviour is unchanged.
+    n_motion = getattr(env, "_n_motion_choices", None)
+    n_bearing = getattr(env, "_n_bearing_choices", None)
+
     return CombinedPolicy(
         striker_net, jammer_net, env.n_strikers, env.n_jammers,
         use_fofe=use_fofe, obs_key=env._obs_key, action_key=env._action_key,
+        n_motion_choices=n_motion, n_bearing_choices=n_bearing,
     ).to(env.device)
 
 

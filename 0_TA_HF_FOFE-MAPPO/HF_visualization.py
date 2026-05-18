@@ -64,8 +64,14 @@ def _compute_radar_boundary_km(
     jammer_pos: np.ndarray,
     jammer_alive: np.ndarray,
     env: HFStrikeEA2DEnv,
+    jammer_pointing: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     """Compute polar boundary vertices for one radar's effective range.
+
+    The underlying radar physics (main-/side-lobe BT ranges) is unchanged.
+    With directional jammers we additionally gate each jammer's
+    contribution by whether the radar lies inside that jammer's cone —
+    matching ``HFStrikeEA2DEnv._compute_hf_radar_eff_range``.
 
     Parameters
     ----------
@@ -77,6 +83,10 @@ def _compute_radar_boundary_km(
         Which jammers are alive.
     env : HFStrikeEA2DEnv
         Environment (for hf_cfg and radar_range_unconstrained).
+    jammer_pointing : np.ndarray [J] or None
+        World-frame pointing direction (radians) for each jammer
+        (= heading + chosen bearing). If None, the boundary falls back
+        to the legacy omnidirectional behaviour for that frame.
 
     Returns
     -------
@@ -87,6 +97,7 @@ def _compute_radar_boundary_km(
     hf_cfg = env.hf_cfg
     theta_main_half = math.radians(hf_cfg.theta_main_deg / 2)
     theta_side_half = math.radians(hf_cfg.theta_side_deg / 2)
+    jammer_lobe_half = getattr(env, "_jammer_main_lobe_half", None)
     meters_per_world_unit = env._meters_per_world_unit
 
     angles = np.linspace(0, 2 * np.pi, _N_ANGLE_POINTS, endpoint=False)
@@ -100,6 +111,17 @@ def _compute_radar_boundary_km(
         R_J_world = math.hypot(jx - radar_x, jy - radar_y)
         R_J_m = max(R_J_world * meters_per_world_unit, 1e-12)
         theta_j = math.atan2(jy - radar_y, jx - radar_x)
+
+        # Directional gate: if the radar is outside this jammer's cone,
+        # the jammer contributes nothing to this radar's coverage.
+        if jammer_pointing is not None and jammer_lobe_half is not None:
+            angle_j_to_r = math.atan2(radar_y - jy, radar_x - jx)
+            d_point = math.atan2(
+                math.sin(angle_j_to_r - float(jammer_pointing[j])),
+                math.cos(angle_j_to_r - float(jammer_pointing[j])),
+            )
+            if abs(d_point) > jammer_lobe_half:
+                continue
 
         # BT ranges (direct JSR=1 formulas, clamped to R_unc)
         R_main_m = (max(env._r_main_bt_coeff * R_J_m * R_J_m, 0.0)) ** 0.25
@@ -125,6 +147,34 @@ def _compute_radar_boundary_km(
     x_km = (radar_x + r_eff * np.cos(angles)) * 1000.0
     y_km = (radar_y + r_eff * np.sin(angles)) * 1000.0
     return np.column_stack([x_km, y_km])
+
+
+def _jammer_cone_polygon_km(
+    jx_world: float,
+    jy_world: float,
+    pointing_rad: float,
+    half_width_rad: float,
+    radius_km: float,
+    n_arc: int = 32,
+) -> np.ndarray:
+    """Triangular wedge in km coordinates centered at the jammer.
+
+    The wedge fan radius (``radius_km``) is purely a display choice —
+    the directional jammer is treated as range-unlimited in the physics.
+    """
+    cx_km = jx_world * 1000.0
+    cy_km = jy_world * 1000.0
+    ang = np.linspace(
+        pointing_rad - half_width_rad,
+        pointing_rad + half_width_rad,
+        n_arc,
+    )
+    arc_x = cx_km + radius_km * np.cos(ang)
+    arc_y = cy_km + radius_km * np.sin(ang)
+    return np.vstack((
+        [cx_km, cy_km],
+        np.column_stack([arc_x, arc_y]),
+    ))
 
 
 # ------------------------------------------------------------------
@@ -211,6 +261,11 @@ class HFTestRunner:
             "radar_known": env.radar_known[0].detach().cpu(),
             "radar_eff_range": env.radar_eff_range[0].detach().cpu(),
         }
+        # Directional jammer bearings (radians, relative to jammer heading).
+        # Present when the HF env exposes them — pre-first-step they are
+        # zero, which the animation treats as "pointing along own heading".
+        if hasattr(env, "jammer_bearing"):
+            snap["jammer_bearing"] = env.jammer_bearing[0].detach().cpu()
         if hasattr(env, "last_reward_components") and env.last_reward_components:
             snap["reward_components"] = {
                 k: v[0].detach().cpu().clone() for k, v in env.last_reward_components.items()
@@ -315,6 +370,16 @@ def hf_animate_rollout(
                              fc="C2", alpha=0.18, ec="C2"))
         for _ in range(env.n_strikers)
     ]
+    # Directional-jammer cone wedges (one per jammer). Drawn behind
+    # other artists so markers stay visible on top.
+    jammer_lobe_half = getattr(env, "_jammer_main_lobe_half", 0.0)
+    jammer_cone_polys = [
+        ax.add_patch(Polygon(
+            np.empty((0, 2)), closed=True,
+            fc=(1.0, 0.85, 0.2, 0.18), ec="none", zorder=1,
+        ))
+        for _ in range(env.n_jammers)
+    ]
     heading_lines = [ax.plot([], [])[0] for _ in range(env.n_agents)]
     comm_lines = [
         ax.plot([], [], color="black", lw=1.4, alpha=0.7)[0]
@@ -323,6 +388,9 @@ def hf_animate_rollout(
     ax.plot([], [], color="black", lw=1.4, alpha=0.7, label="Comm MST (<= R_comm)")
     ax.plot([], [], color="black", lw=0.9, ls="-.", alpha=0.35, label="R_comm")
     ax.plot([], [], color="C0", lw=1.0, ls=":", alpha=0.45, label="R_obs")
+    if env.n_jammers > 0:
+        ax.plot([], [], color=(1.0, 0.85, 0.2), lw=6, alpha=0.4,
+                label=f"Jammer cone ({math.degrees(2*jammer_lobe_half):.0f} deg)")
     ax.legend(loc="upper right")
 
     # --- Reward subplot ---
@@ -359,6 +427,8 @@ def hf_animate_rollout(
             p.set_visible(False)
         for a in striker_arcs:
             a.set_visible(False)
+        for w in jammer_cone_polys:
+            w.set_visible(False)
         for ln in heading_lines:
             ln.set_data([], [])
         for cl in comm_lines:
@@ -404,6 +474,14 @@ def hf_animate_rollout(
         # ---- HF Radar coverage polygons ----
         jammer_pos_np = ap[env.n_strikers:].numpy()        # [J, 2] world
         jammer_alive_np = aa[env.n_strikers:].numpy()      # [J] bool
+        jammer_heading_np = ah[env.n_strikers:].numpy()    # [J] rad
+        jammer_bearing_np = (
+            fr["jammer_bearing"].numpy()
+            if "jammer_bearing" in fr
+            else np.zeros(env.n_jammers)
+        )
+        # World-frame pointing per jammer (heading + chosen bearing).
+        jammer_pointing_np = jammer_heading_np + jammer_bearing_np
 
         for j in range(env.n_radars):
             rx, ry = float(rp[j, 0]), float(rp[j, 1])
@@ -413,12 +491,32 @@ def hf_animate_rollout(
             radar_unc_circles[j].set_center((rx * 1000, ry * 1000))
             radar_unc_circles[j].set_radius(R_unc_km)
 
-            # Angular coverage polygon
+            # Angular coverage polygon (directional jammers only cut the
+            # boundary if the radar lies inside their cone).
             verts = _compute_radar_boundary_km(
-                rx, ry, jammer_pos_np, jammer_alive_np, env
+                rx, ry, jammer_pos_np, jammer_alive_np, env,
+                jammer_pointing=jammer_pointing_np,
             )
             radar_coverage_polys[j].set_visible(True)
             radar_coverage_polys[j].set_xy(verts)
+
+        # Directional jammer cones (drawn from each jammer in its
+        # currently-selected bearing). Length is a display-only choice;
+        # the jammer is treated as range-unlimited in the physics.
+        cone_radius_km = 1.5 * 1000.0 * (env.high - env.low)
+        for j in range(env.n_jammers):
+            if not bool(jammer_alive_np[j]):
+                jammer_cone_polys[j].set_visible(False)
+                continue
+            jx, jy = float(jammer_pos_np[j, 0]), float(jammer_pos_np[j, 1])
+            cone_verts = _jammer_cone_polygon_km(
+                jx, jy,
+                pointing_rad=float(jammer_pointing_np[j]),
+                half_width_rad=jammer_lobe_half,
+                radius_km=cone_radius_km,
+            )
+            jammer_cone_polys[j].set_visible(True)
+            jammer_cone_polys[j].set_xy(cone_verts)
 
         # Obs / comm circles
         for k, oc in enumerate(obs_circles):
@@ -616,6 +714,14 @@ def _draw_hf_world_panel(ax, env: HFStrikeEA2DEnv, frames: List[Dict[str, torch.
         ax.add_patch(Polygon(np.empty((0, 2)), closed=True, fc="C2", alpha=0.18, ec="C2"))
         for _ in range(env.n_strikers)
     ]
+    jammer_lobe_half = getattr(env, "_jammer_main_lobe_half", 0.0)
+    jammer_cone_polys = [
+        ax.add_patch(Polygon(
+            np.empty((0, 2)), closed=True,
+            fc=(1.0, 0.85, 0.2, 0.18), ec="none", zorder=1,
+        ))
+        for _ in range(env.n_jammers)
+    ]
     heading_lines = [ax.plot([], [])[0] for _ in range(env.n_agents)]
     comm_lines = [
         ax.plot([], [], color="black", lw=1.4, alpha=0.7)[0]
@@ -624,6 +730,9 @@ def _draw_hf_world_panel(ax, env: HFStrikeEA2DEnv, frames: List[Dict[str, torch.
     ax.plot([], [], color="black", lw=1.4, alpha=0.7, label="Comm MST (<= R_comm)")
     ax.plot([], [], color="black", lw=0.9, ls="-.", alpha=0.35, label="R_comm")
     ax.plot([], [], color="C0", lw=1.0, ls=":", alpha=0.45, label="R_obs")
+    if env.n_jammers > 0:
+        ax.plot([], [], color=(1.0, 0.85, 0.2), lw=6, alpha=0.4,
+                label=f"Jammer cone ({math.degrees(2*jammer_lobe_half):.0f} deg)")
     ax.legend(loc="upper right", fontsize=6)
 
     def _update_panel(i: int):
@@ -660,6 +769,13 @@ def _draw_hf_world_panel(ax, env: HFStrikeEA2DEnv, frames: List[Dict[str, torch.
         # HF angular coverage
         jammer_pos_np = ap[env.n_strikers:].numpy()
         jammer_alive_np = aa[env.n_strikers:].numpy()
+        jammer_heading_np = ah[env.n_strikers:].numpy()
+        jammer_bearing_np = (
+            fr["jammer_bearing"].numpy()
+            if "jammer_bearing" in fr
+            else np.zeros(env.n_jammers)
+        )
+        jammer_pointing_np = jammer_heading_np + jammer_bearing_np
 
         for j in range(env.n_radars):
             rx, ry = float(rp[j, 0]), float(rp[j, 1])
@@ -668,9 +784,28 @@ def _draw_hf_world_panel(ax, env: HFStrikeEA2DEnv, frames: List[Dict[str, torch.
             radar_unc_circles[j].set_center((rx * 1000, ry * 1000))
             radar_unc_circles[j].set_radius(r_unc_km)
 
-            verts = _compute_radar_boundary_km(rx, ry, jammer_pos_np, jammer_alive_np, env)
+            verts = _compute_radar_boundary_km(
+                rx, ry, jammer_pos_np, jammer_alive_np, env,
+                jammer_pointing=jammer_pointing_np,
+            )
             radar_coverage_polys[j].set_visible(True)
             radar_coverage_polys[j].set_xy(verts)
+
+        # Directional jammer cones (display-only, range-unlimited).
+        cone_radius_km = 1.5 * 1000.0 * (env.high - env.low)
+        for j in range(env.n_jammers):
+            if not bool(jammer_alive_np[j]):
+                jammer_cone_polys[j].set_visible(False)
+                continue
+            jx, jy = float(jammer_pos_np[j, 0]), float(jammer_pos_np[j, 1])
+            cone_verts = _jammer_cone_polygon_km(
+                jx, jy,
+                pointing_rad=float(jammer_pointing_np[j]),
+                half_width_rad=jammer_lobe_half,
+                radius_km=cone_radius_km,
+            )
+            jammer_cone_polys[j].set_visible(True)
+            jammer_cone_polys[j].set_xy(cone_verts)
 
         # Obs / comm circles
         for k, oc in enumerate(obs_circles):
