@@ -130,7 +130,7 @@ class RewardConfig:
     # the radar it is closest to (the most actionable target).
     # No effect in the legacy (non-HF) jammer model, which has no cone.
     # Set to 0.0 to disable.
-    jammer_directivity_bonus: float = 0.01
+    jammer_directivity_bonus: float = 0.02
 
     # ─── FORMATION COHESION  (striker ↔ jammer cross-role proximity) ──────────
     # Each striker/jammer receives a distance penalty for being far from the
