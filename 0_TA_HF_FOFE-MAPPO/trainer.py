@@ -555,6 +555,11 @@ def train_mappo(
         "float16":  torch.float16,  "fp16": torch.float16,
     }
     _amp_dtype = _amp_dtype_map.get(_amp_dtype_str, torch.bfloat16)
+    # Auto-fallback bfloat16 → float16 on hardware that doesn't support bf16
+    # (anything older than Ampere — laptop GPUs are often Turing/Pascal).
+    if _amp_enabled and _amp_dtype == torch.bfloat16 and not torch.cuda.is_bf16_supported():
+        print("AMP: bfloat16 not supported on this GPU — falling back to float16 + GradScaler.")
+        _amp_dtype = torch.float16
     _use_grad_scaler = _amp_enabled and _amp_dtype == torch.float16
     if _amp_enabled:
         try:
@@ -587,18 +592,34 @@ def train_mappo(
     # ── Optional torch.compile ────────────────────────────────────────
     # Compiles the underlying actor/critic nets in place. The wrappers
     # (CombinedPolicy / CombinedCritic) still call them through .striker_*
-    # / .jammer_* attributes, so swap is transparent. Wrapped in try/except
-    # because torch.compile can fail on edge cases (driver mismatch, side
-    # effects in forward) — fallback is uncompiled, which still trains.
+    # / .jammer_* attributes, so swap is transparent.
+    #
+    # NOTE: torch.compile() returns lazily — the actual graph is traced and
+    # compiled on the FIRST forward call, NOT at torch.compile() time. So a
+    # try/except wrapping torch.compile() does not catch backend failures
+    # (e.g. missing Triton on Windows). We probe Triton availability upfront
+    # and skip compile cleanly if it can't work. The probe is conservative;
+    # on Linux with a recent torch install, Triton is bundled.
     if bool(getattr(ppo_cfg, "compile_models", False)) and torch.cuda.is_available():
         try:
-            policy.striker_policy = torch.compile(policy.striker_policy)
-            policy.jammer_policy  = torch.compile(policy.jammer_policy)
-            critic.striker_critic = torch.compile(critic.striker_critic)
-            critic.jammer_critic  = torch.compile(critic.jammer_critic)
-            print("torch.compile: ENABLED (policy + critic). First iter will be slow (graph trace).")
-        except Exception as exc:
-            print(f"torch.compile failed (continuing uncompiled): {type(exc).__name__}: {exc}")
+            import triton  # noqa: F401
+            _triton_ok = True
+        except Exception:
+            _triton_ok = False
+            print(
+                "torch.compile: SKIPPED — Triton not available (expected on Windows; "
+                "torch.compile's Inductor backend requires Triton). On Linux + GPU, "
+                "Triton ships with torch ≥ 2.0 and you'll get the perf gain automatically."
+            )
+        if _triton_ok:
+            try:
+                policy.striker_policy = torch.compile(policy.striker_policy)
+                policy.jammer_policy  = torch.compile(policy.jammer_policy)
+                critic.striker_critic = torch.compile(critic.striker_critic)
+                critic.jammer_critic  = torch.compile(critic.jammer_critic)
+                print("torch.compile: ENABLED (policy + critic). First iter will be slow (graph trace).")
+            except Exception as exc:
+                print(f"torch.compile setup failed (continuing uncompiled): {type(exc).__name__}: {exc}")
 
     # ── Reward normalizer ────────────────────────────────────────────
     reward_normalizer: Optional[RewardNormalizer] = None
