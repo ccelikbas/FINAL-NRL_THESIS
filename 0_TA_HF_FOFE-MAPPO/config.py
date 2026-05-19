@@ -186,7 +186,7 @@ class EnvConfig:
 class PPOConfig:
     """Shared PPO hyperparameters for both striker and jammer MAPPO."""
     num_envs: int = 512
-    n_iters: int = 20
+    n_iters: int = 200
     frames_per_batch: Optional[int] = None
     num_epochs: int = 10
     minibatch_size: int = 2048
@@ -315,7 +315,7 @@ class HFRadarConfig:
     #     magnitude expressed as a fraction of beam_dpsi_max (mirrors
     #     EnvConfig.h_accel_magnitude_fraction). Default 0.1 → ~18°/step²
     #     at action=±1, so the beam needs ~10 steps to spin up from rest.
-    jammer_main_lobe_deg: float = 30.0
+    jammer_main_lobe_deg: float = 40.0
     beam_dpsi_max: float = math.pi
     beam_h_accel_magnitude_fraction: float = 0.1
 

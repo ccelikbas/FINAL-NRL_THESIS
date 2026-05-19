@@ -176,19 +176,39 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         # the zero-acceleration index so the dimension is a no-op for the
         # striker policy.
         #
-        # All three action dims (motion 0,1 and beam 2) share the same
-        # 7-value discrete table _act_table = [-1, -0.5, -0.1, 0, +0.1,
-        # +0.5, +1], so the Categorical spec keeps n_choices = 7.
+        # Action tables (decoded independently per dim):
+        #   motion dims 0,1 → 7-value table _act_table  =
+        #                     [-1, -0.5, -0.1, 0, +0.1, +0.5, +1]
+        #   beam   dim  2  → 9-value table _beam_act_table  =
+        #                     [-1, -0.2, -0.1, -0.05, 0, +0.05, +0.1, +0.2, +1]
+        #
+        # The beam table has finer resolution near zero so the policy can
+        # apply small angular accelerations and keep the beam stable.
+        # The shared Categorical n is the max of the two so a single
+        # action spec covers both — out-of-range indices on the motion
+        # dims are masked to near-zero probability at the policy level.
         #
         # The beam itself is a 2D kinematic state per jammer:
         #   jammer_bearing : current beam angle relative to jammer heading
         #                    (radians, wrapped to (-pi, pi]).
         #   beam_rate      : current beam angular velocity (rad/step).
         #
-        # On each step:  beam_rate ← clamp(beam_rate + action*beam_h_accel,
+        # On each step:  beam_rate ← clamp(beam_rate + beam_act*beam_h_accel,
         #                                  ±beam_dpsi_max)
         #                jammer_bearing ← wrap(jammer_bearing + beam_rate)
         self._n_motion_choices = int(self.n_choices)               # 7
+        self._beam_act_table = torch.tensor(
+            [-1.0, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 1.0],
+            device=self.device,
+        )
+        self._n_beam_choices = int(self._beam_act_table.numel())   # 9
+        # Index of the zero-acceleration entry in the beam table — the
+        # striker policy pins dim 2 to this index so its (discarded) beam
+        # action contributes nothing to the entropy budget.
+        self._beam_zero_idx = int(
+            torch.argmin(self._beam_act_table.abs()).item()
+        )
+        self.n_choices = max(self._n_motion_choices, self._n_beam_choices)
         self.act_dim = 3
         # Beam kinematic constants (rad/step and rad/step²).
         self._beam_dpsi_max = float(getattr(hf_cfg, "beam_dpsi_max", math.pi))
@@ -441,11 +461,16 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         B, A, _ = action.shape
         rp = self.reward_params
 
-        # Decode all three action dims via the shared 7-value table.
-        all_idx = action.long().clamp(0, self._n_motion_choices - 1)
-        acc_all = self._act_table[all_idx]  # [B, A, 3]
-        acc = acc_all[..., :2]              # [B, A, 2] motion multipliers
-        beam_acc_all = acc_all[..., 2]      # [B, A]    beam-accel multipliers
+        # Decode motion dims (0, 1) via the 7-value motion table and the
+        # beam dim (2) via the 9-value beam table. The shared Categorical
+        # n is max(motion, beam) so we clamp each dim into its own valid
+        # range before looking up the multiplier. Out-of-range indices on
+        # the motion dims are already masked by the policy, so the clamp
+        # is just a defensive no-op there.
+        motion_idx = action[..., :2].long().clamp(0, self._n_motion_choices - 1)
+        acc = self._act_table[motion_idx]                                    # [B, A, 2]
+        beam_idx = action[..., 2].long().clamp(0, self._n_beam_choices - 1)  # [B, A]
+        beam_acc_all = self._beam_act_table[beam_idx]                        # [B, A] in [-1, 1]
 
         # Integrate the jammer beam (2D kinematics) for jammers only.
         # Strikers' dim-2 entries are discarded.

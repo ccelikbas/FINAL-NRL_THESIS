@@ -436,15 +436,17 @@ class CombinedPolicy(nn.Module):
     """Wraps striker + jammer actors.  Supports both legacy and FOFE.
 
     Directional-jammer action layout (HF radar mode, act_dim=3):
-      - dims 0,1 (motion):    same 7-value table as the base env, all agents.
-      - dim 2 (beam ang accel): only meaningful for jammers; strikers MUST
-        keep this dim at the zero-acceleration index (middle of the table)
+      - dims 0,1 (motion):     7-value motion table, all agents. The
+        shared Categorical n is max(motion, beam), so indices past
+        n_motion_choices on these dims must be masked out.
+      - dim 2 (beam ang accel): 9-value beam table (finer near zero for
+        smoother control). Only meaningful for jammers; strikers MUST
+        keep this dim at the beam-table's zero-acceleration index
         because the env discards their dim-2 entry entirely.
 
-    The striker constraint is enforced here by setting all dim-2 logits
-    except the zero-accel index to a large negative bias, so the sampled
-    striker action stays inside the valid set without changing the
-    network architecture or the trainer pipeline.
+    Both constraints are enforced here by adding a large negative bias
+    to invalid logits so the sampled action always lies in the valid
+    set, without changing the network architecture or the trainer.
     """
 
     _LOGIT_MASK_BIAS = -1e9
@@ -454,7 +456,9 @@ class CombinedPolicy(nn.Module):
                  obs_key=("agents", "observation"),
                  action_key=("agents", "action"),
                  deterministic=False,
-                 n_motion_choices=None):
+                 n_motion_choices=None,
+                 n_beam_choices=None,
+                 beam_zero_idx=None):
         super().__init__()
         self.striker_policy = striker_policy
         self.jammer_policy = jammer_policy
@@ -465,6 +469,8 @@ class CombinedPolicy(nn.Module):
         self.action_key = action_key
         self.deterministic = deterministic
         self.n_motion_choices = n_motion_choices
+        self.n_beam_choices = n_beam_choices
+        self.beam_zero_idx = beam_zero_idx
 
     # --- Action-mask helpers (no-op unless act_dim >= 3 and the env
     #     reported a motion choice count) -----------------------------
@@ -477,22 +483,26 @@ class CombinedPolicy(nn.Module):
     def _mask_motion_and_bearing(self, logits: torch.Tensor, role: str) -> torch.Tensor:
         """Add a large-negative bias to invalid action indices.
         role: "striker" or "jammer". logits shape: [..., n_role, act_dim, n_choices].
-
-        With the kinematic beam model dim 2 uses the same 7-value action
-        table as motion, so the only mask that fires is on the striker:
-        its dim-2 logits are pinned to the zero-acceleration index (the
-        midpoint of the table) so the striker never explores beam-control
-        indices that the env throws away.
         """
         if not self._needs_action_mask(logits):
             return logits
+        nc = logits.shape[-1]
+        bias = torch.zeros_like(logits)
+        # Motion dims (0, 1): allow only the first n_motion_choices indices.
+        if nc > int(self.n_motion_choices):
+            bias[..., 0, int(self.n_motion_choices):] = self._LOGIT_MASK_BIAS
+            bias[..., 1, int(self.n_motion_choices):] = self._LOGIT_MASK_BIAS
+        # Beam dim (2):
         if role == "striker":
-            bias = torch.zeros_like(logits)
-            zero_idx = int(self.n_motion_choices) // 2
+            # Pin to the zero-accel index of the beam table — striker
+            # dim 2 is discarded by the env, so collapse the distribution.
+            zero_idx = int(self.beam_zero_idx) if self.beam_zero_idx is not None else 0
             bias[..., 2, :] = self._LOGIT_MASK_BIAS
             bias[..., 2, zero_idx] = 0.0
-            return logits + bias
-        return logits
+        elif role == "jammer":
+            if self.n_beam_choices is not None and nc > int(self.n_beam_choices):
+                bias[..., 2, int(self.n_beam_choices):] = self._LOGIT_MASK_BIAS
+        return logits + bias
 
     # --- FOFE observation helpers ---
     def _get_fofe_obs(self, td):
@@ -637,15 +647,19 @@ def make_combined_policy(env: StrikeEA2DEnv, hidden=256, depth=3,
         striker_net = RolePolicyNet(env.obs_dim, env.act_dim, env.n_choices, env.n_strikers, hidden, depth).to(env.device)
         jammer_net = RolePolicyNet(env.obs_dim, env.act_dim, env.n_choices, env.n_jammers, hidden, depth).to(env.device)
 
-    # If the env exposes a motion-choice count (HF directional-jammer
-    # model), forward it so the policy can mask the striker's unused
-    # dim-2 entry. Base env doesn't set this → mask becomes a no-op.
+    # If the env exposes motion/beam choice counts (HF directional-jammer
+    # model), forward them so the policy can mask invalid indices. Base
+    # env doesn't set these → mask becomes a no-op.
     n_motion = getattr(env, "_n_motion_choices", None)
+    n_beam = getattr(env, "_n_beam_choices", None)
+    beam_zero = getattr(env, "_beam_zero_idx", None)
 
     return CombinedPolicy(
         striker_net, jammer_net, env.n_strikers, env.n_jammers,
         use_fofe=use_fofe, obs_key=env._obs_key, action_key=env._action_key,
         n_motion_choices=n_motion,
+        n_beam_choices=n_beam,
+        beam_zero_idx=beam_zero,
     ).to(env.device)
 
 
