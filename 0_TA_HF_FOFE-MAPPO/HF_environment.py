@@ -204,6 +204,9 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         self._episode_component_reward["jammer_beam_on_radar_bonus"] = torch.zeros(
             self.num_envs, device=self.device,
         )
+        self._episode_component_reward["jammer_beam_alignment"] = torch.zeros(
+            self.num_envs, device=self.device,
+        )
         self._episode_component_reward["beam_control_effort"] = torch.zeros(
             self.num_envs, device=self.device,
         )
@@ -317,9 +320,13 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         if J == 0:
             self.radar_eff_range_per_agent.fill_(self.radar_range_unconstrained)
             self.radar_eff_range.fill_(self.radar_range_unconstrained)
-            # Empty cone-membership tensor so reward code can index it safely.
+            # Empty cone-membership / angular-delta tensors so reward code
+            # can index them safely.
             self._jammer_in_cone = torch.zeros(
                 B, 0, R, dtype=torch.bool, device=self.device,
+            )
+            self._jammer_abs_angular_delta = torch.zeros(
+                B, 0, R, device=self.device,
             )
             return
 
@@ -389,15 +396,20 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         # Wrap (angle_j_to_r - pointing) to [-pi, pi] for an absolute-value test.
         delta_point = angle_j_to_r - jammer_pointing[:, :, None]
         delta_point = torch.atan2(torch.sin(delta_point), torch.cos(delta_point))
-        in_cone_jr = delta_point.abs() <= self._jammer_main_lobe_half       # [B, J, R]
+        abs_delta_point = delta_point.abs()                                 # [B, J, R] in [0, pi]
+        in_cone_jr = abs_delta_point <= self._jammer_main_lobe_half         # [B, J, R]
         R_eff_jar = torch.where(
             in_cone_jr[:, :, None, :],   # broadcast over A
             R_eff_jar,
             torch.full_like(R_eff_jar, R_unc_m),
         )
-        # Cache for reward computation (jammer_beam_on_radar_bonus).
+        # Cache for reward computation:
+        #   _jammer_in_cone           — bool gate for the binary bonus.
+        #   _jammer_abs_angular_delta — |beam-to-radar| (rad, in [0, pi])
+        #                               for the smooth alignment shaping.
         # Dead jammers will be masked out by alive_mask at the reward site.
         self._jammer_in_cone = in_cone_jr
+        self._jammer_abs_angular_delta = abs_delta_point
 
         # Dead jammers have no effect → set to R_unc
         alive_mask = jammer_alive[:, :, None, None]                        # [B, J, 1, 1]
@@ -679,6 +691,7 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         jammer_progress_full = torch.zeros(B, A, device=self.device)
         jammer_jam_bonus_full = torch.zeros(B, A, device=self.device)
         jammer_beam_on_radar_full = torch.zeros(B, A, device=self.device)
+        jammer_beam_alignment_full = torch.zeros(B, A, device=self.device)
         if jammer_idx.numel() > 0 and self.n_radars > 0:
             jammer_alive_f = alive[:, self.n_strikers:].float()
 
@@ -712,6 +725,26 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
                 beam_bonus = beam_scale * any_in_cone * jammer_alive_f
                 reward[:, self.n_strikers:] += beam_bonus
                 jammer_beam_on_radar_full[:, self.n_strikers:] = beam_bonus
+
+            # Beam alignment shaping: smooth angular penalty toward the
+            # physically nearest radar. Uses _jammer_abs_angular_delta
+            # (cached by _compute_hf_radar_eff_range) so the geometry
+            # stays consistent with the physics gate.
+            #     penalty = -scale * |angle_to_nearest_radar| / pi
+            # 0 when the beam points exactly at the nearest radar, and
+            # -scale at the worst case (180° away). Applied unconditionally
+            # (no in-cone gate) so the gradient is smooth everywhere.
+            align_scale = float(getattr(rp, "jammer_beam_alignment_scale", 0.0))
+            if align_scale != 0.0:
+                # dist_jr already in scope from approach block above — used
+                # to pick the *physically nearest* radar per jammer.
+                nearest_radar_idx = dist_jr.argmin(dim=-1, keepdim=True)           # [B, J, 1]
+                nearest_abs_angle = self._jammer_abs_angular_delta.gather(
+                    -1, nearest_radar_idx
+                ).squeeze(-1)                                                      # [B, J] in [0, pi]
+                alignment_pen = -align_scale * (nearest_abs_angle / math.pi) * jammer_alive_f
+                reward[:, self.n_strikers:] += alignment_pen
+                jammer_beam_alignment_full[:, self.n_strikers:] = alignment_pen
 
             self._jammer_prev_dist = dist_jr.detach()
 
@@ -873,6 +906,7 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
             "jammer_progress":            jammer_progress_full.detach(),
             "jammer_jam_bonus":           jammer_jam_bonus_full.detach(),
             "jammer_beam_on_radar_bonus": jammer_beam_on_radar_full.detach(),
+            "jammer_beam_alignment":      jammer_beam_alignment_full.detach(),
             "formation":                  formation_full.detach(),
             "agent_destroyed":            death_pen_full.detach(),
             "paper_mission":              mission_reward_full.detach(),

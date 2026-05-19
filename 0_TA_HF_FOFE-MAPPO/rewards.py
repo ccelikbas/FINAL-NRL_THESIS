@@ -127,12 +127,24 @@ class RewardConfig:
     # ─── JAMMER BEAM-ON-RADAR BONUS  (HF directional-jammer model only) ──────
     # Per-step bonus given to a jammer when ANY alive radar lies inside the
     # jammer's directional cone (full beam width, not just the centerline).
-    # Pairs with the new kinematic beam model: the jammer policy emits a
-    # beam angular acceleration (action dim 2) and is rewarded for steering
-    # the cone onto any radar.
+    # Binary signal: useful as a sparse 'finished aligning' bonus that can
+    # stack on top of the smooth alignment shaping below.
     # No effect in the legacy (non-HF) jammer model, which has no cone.
     # Set to 0.0 to disable.
-    jammer_beam_on_radar_bonus: float = 0.02
+    jammer_beam_on_radar_bonus: float = 0.0
+
+    # ─── JAMMER BEAM ALIGNMENT SHAPING  (HF directional-jammer model only) ───
+    # Smooth angular shaping toward the *physically nearest* alive radar.
+    # For each alive jammer:
+    #     a = | wrap(angle_jammer_to_radar - (heading + jammer_bearing)) |
+    #     penalty = -jammer_beam_alignment_scale * (a / pi)
+    # so a = 0 (beam directly on the radar) → 0, and a = pi (beam pointing
+    # 180° away) → -jammer_beam_alignment_scale. Linear in |a| gives a
+    # uniform gradient across the whole angular range and avoids the
+    # discontinuity of a binary in/out-of-cone bonus.
+    # Applied unconditionally every step (no in-cone gate).
+    # Set to 0.0 to disable.
+    jammer_beam_alignment_scale: float = 0.02
 
     # ─── FORMATION COHESION  (striker ↔ jammer cross-role proximity) ──────────
     # Each striker/jammer receives a distance penalty for being far from the
