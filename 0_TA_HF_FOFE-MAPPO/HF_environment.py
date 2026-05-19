@@ -167,32 +167,44 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         self._gt_over_gs = radar_tx_gain / max(radar_side_lobe_gain, 1e-30)
 
         # ------------------------------------------------------------------
-        # Directional-jammer action extension
+        # Directional-jammer action extension (kinematic beam model)
         # ------------------------------------------------------------------
-        # The HF env adds a 3rd action dimension that selects the jammer
-        # bearing (relative to the jammer's own heading). Strikers also
-        # receive this dimension but IGNORE it — see CombinedPolicy where
-        # the striker's bearing logits are masked to a constant index so
-        # the dimension is a no-op for the striker policy.
+        # The HF env adds a 3rd action dimension that drives the jammer
+        # beam's angular acceleration (radians/step²). Strikers also
+        # receive this dimension but the env discards it — see
+        # CombinedPolicy where the striker's dim-2 logits are pinned to
+        # the zero-acceleration index so the dimension is a no-op for the
+        # striker policy.
         #
-        # Motion dims (0, 1) keep the original 7-value discrete table.
-        # Bearing dim (2) uses a separate evenly-spaced table over (-pi, pi].
-        # The shared Categorical n is the max of the two so a single tensor
-        # spec covers both — out-of-range indices on either dim are masked
-        # to near-zero probability at the policy level.
+        # All three action dims (motion 0,1 and beam 2) share the same
+        # 7-value discrete table _act_table = [-1, -0.5, -0.1, 0, +0.1,
+        # +0.5, +1], so the Categorical spec keeps n_choices = 7.
+        #
+        # The beam itself is a 2D kinematic state per jammer:
+        #   jammer_bearing : current beam angle relative to jammer heading
+        #                    (radians, wrapped to (-pi, pi]).
+        #   beam_rate      : current beam angular velocity (rad/step).
+        #
+        # On each step:  beam_rate ← clamp(beam_rate + action*beam_h_accel,
+        #                                  ±beam_dpsi_max)
+        #                jammer_bearing ← wrap(jammer_bearing + beam_rate)
         self._n_motion_choices = int(self.n_choices)               # 7
-        self._n_bearing_choices = int(getattr(hf_cfg, "jammer_bearing_n_choices", 16))
-        self.n_choices = max(self._n_motion_choices, self._n_bearing_choices)
         self.act_dim = 3
-        self._bearing_table = torch.linspace(
-            -math.pi, math.pi, self._n_bearing_choices + 1, device=self.device,
-        )[:-1]  # [n_bearings] in radians, in (-pi, pi]
-        # Per-jammer current bearing (radians, relative to jammer heading).
-        # Overwritten every _step from action[..., 2]; zero before first step.
+        # Beam kinematic constants (rad/step and rad/step²).
+        self._beam_dpsi_max = float(getattr(hf_cfg, "beam_dpsi_max", math.pi))
+        self._beam_h_accel_magnitude = (
+            self._beam_dpsi_max
+            * float(getattr(hf_cfg, "beam_h_accel_magnitude_fraction", 0.1))
+        )
+        # Per-jammer current beam state (radians / rad-per-step).
         self.jammer_bearing = torch.zeros(self.num_envs, self.n_jammers, device=self.device)
-        # Register HF-only reward component so per-episode accumulators
-        # and the visualizer's reward subplot pick it up automatically.
-        self._episode_component_reward["jammer_directivity_bonus"] = torch.zeros(
+        self.beam_rate = torch.zeros(self.num_envs, self.n_jammers, device=self.device)
+        # Register HF-only reward components so per-episode accumulators
+        # and the visualizer's reward subplot pick them up automatically.
+        self._episode_component_reward["jammer_beam_on_radar_bonus"] = torch.zeros(
+            self.num_envs, device=self.device,
+        )
+        self._episode_component_reward["beam_control_effort"] = torch.zeros(
             self.num_envs, device=self.device,
         )
         # Rebuild specs so action_spec reflects the new act_dim/n_choices.
@@ -201,6 +213,37 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         # --- Fine-grained step profiling (off by default) ---
         self._profile_active: bool = False
         self._profile_buckets: Dict[str, float] = {}
+
+    # ------------------------------------------------------------------
+    # Self-obs extension: expose beam state to the jammer policy
+    # ------------------------------------------------------------------
+
+    def _self_extra_dim(self) -> int:
+        # Two extra floats per agent: (beam_angle / pi, beam_rate / beam_dpsi_max).
+        # Both are zero for strikers (no beam).
+        return 2
+
+    def _build_self_extra(self, B: int, A: int) -> torch.Tensor:
+        extra = torch.zeros(B, A, 2, device=self.device, dtype=torch.float32)
+        if self.n_jammers > 0:
+            beam_dpsi = max(float(getattr(self, "_beam_dpsi_max", math.pi)), 1e-8)
+            extra[:, self.n_strikers:, 0] = self.jammer_bearing / math.pi
+            extra[:, self.n_strikers:, 1] = self.beam_rate / beam_dpsi
+        return extra
+
+    # ------------------------------------------------------------------
+    # Reset hook — zero the beam state on episode reset
+    # ------------------------------------------------------------------
+
+    def _reset(self, tensordict=None, **kwargs):
+        # Zero beam state for the envs being reset BEFORE building obs
+        # so the first observation post-reset reflects the cleared beam.
+        reset_mask = self._extract_reset_mask(tensordict)
+        reset_idx = reset_mask.nonzero(as_tuple=False).squeeze(-1)
+        if reset_idx.numel() > 0 and self.n_jammers > 0:
+            self.jammer_bearing[reset_idx] = 0.0
+            self.beam_rate[reset_idx] = 0.0
+        return super()._reset(tensordict, **kwargs)
 
     # ------------------------------------------------------------------
     # Fine-grained profiling helpers (used only when set_profile_active(True))
@@ -352,7 +395,7 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
             R_eff_jar,
             torch.full_like(R_eff_jar, R_unc_m),
         )
-        # Cache for reward computation (jammer_directivity_bonus).
+        # Cache for reward computation (jammer_beam_on_radar_bonus).
         # Dead jammers will be masked out by alive_mask at the reward site.
         self._jammer_in_cone = in_cone_jr
 
@@ -376,25 +419,34 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
     def _step(self, tensordict: TensorDict) -> TensorDict:
         _t = self._prof_tic()
         # Action layout in HF mode is [B, A, 3]:
-        #   dim 0 (motion accel)  : discrete index in {0..n_motion_choices-1}, all agents
-        #   dim 1 (heading accel) : discrete index in {0..n_motion_choices-1}, all agents
-        #   dim 2 (jammer bearing): discrete index in {0..n_bearing_choices-1}
-        #                           — strikers IGNORE this dim entirely (it is
-        #                             masked to a constant index by the policy
-        #                             and never read here for strikers).
+        #   dim 0 (motion accel)   : discrete index in {0..n_motion_choices-1}, all agents
+        #   dim 1 (heading accel)  : discrete index in {0..n_motion_choices-1}, all agents
+        #   dim 2 (beam ang accel) : discrete index in {0..n_motion_choices-1}, jammers only
+        #                            — strikers IGNORE this dim entirely (it is
+        #                              pinned to the zero-accel index by the
+        #                              policy and never read here for strikers).
         action = tensordict.get(self._action_key)  # [B, A, 3] discrete
         B, A, _ = action.shape
         rp = self.reward_params
 
-        # Decode motion dims via the original 7-value table.
-        motion_idx = action[..., :2].long().clamp(0, self._n_motion_choices - 1)
-        acc = self._act_table[motion_idx]  # [B, A, 2]
+        # Decode all three action dims via the shared 7-value table.
+        all_idx = action.long().clamp(0, self._n_motion_choices - 1)
+        acc_all = self._act_table[all_idx]  # [B, A, 3]
+        acc = acc_all[..., :2]              # [B, A, 2] motion multipliers
+        beam_acc_all = acc_all[..., 2]      # [B, A]    beam-accel multipliers
 
-        # Decode jammer bearing (dim 2): convert index → radians via _bearing_table.
-        # Only the jammer slice is consumed; the striker slice is discarded.
-        bearing_idx = action[..., 2].long().clamp(0, self._n_bearing_choices - 1)  # [B, A]
+        # Integrate the jammer beam (2D kinematics) for jammers only.
+        # Strikers' dim-2 entries are discarded.
         if self.n_jammers > 0:
-            self.jammer_bearing = self._bearing_table[bearing_idx[:, self.n_strikers:]]  # [B, J]
+            jammer_alive_f = self.agent_alive[:, self.n_strikers:].float()
+            beam_acc = beam_acc_all[:, self.n_strikers:]  # [B, J]
+            self.beam_rate = (
+                self.beam_rate + beam_acc * self._beam_h_accel_magnitude
+            ).clamp(-self._beam_dpsi_max, self._beam_dpsi_max)
+            self.beam_rate = self.beam_rate * jammer_alive_f
+            new_bearing = self.jammer_bearing + self.beam_rate
+            # Wrap to (-pi, pi]
+            self.jammer_bearing = torch.atan2(torch.sin(new_bearing), torch.cos(new_bearing))
 
         alive = self.agent_alive
         alive_before_kill = alive
@@ -626,7 +678,7 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         # 7. Potential-based progress
         jammer_progress_full = torch.zeros(B, A, device=self.device)
         jammer_jam_bonus_full = torch.zeros(B, A, device=self.device)
-        jammer_directivity_full = torch.zeros(B, A, device=self.device)
+        jammer_beam_on_radar_full = torch.zeros(B, A, device=self.device)
         if jammer_idx.numel() > 0 and self.n_radars > 0:
             jammer_alive_f = alive[:, self.n_strikers:].float()
 
@@ -643,19 +695,23 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
                 reward[:, self.n_strikers:] += jam_bonus
                 jammer_jam_bonus_full[:, self.n_strikers:] = jam_bonus
 
-            # Directivity bonus: reward a jammer whose cone currently
-            # contains its NEAREST alive radar. Uses _jammer_in_cone
-            # (set by _compute_hf_radar_eff_range earlier this step) so
-            # the geometry stays consistent with the physics gate.
-            direct_scale = float(getattr(rp, "jammer_directivity_bonus", 0.0))
-            if direct_scale != 0.0:
-                nearest_radar_idx = dist_jr.argmin(dim=-1, keepdim=True)           # [B, J, 1]
-                nearest_in_cone = self._jammer_in_cone.gather(
-                    -1, nearest_radar_idx
-                ).squeeze(-1).float()                                              # [B, J]
-                directivity_bonus = direct_scale * nearest_in_cone * jammer_alive_f
-                reward[:, self.n_strikers:] += directivity_bonus
-                jammer_directivity_full[:, self.n_strikers:] = directivity_bonus
+            # Beam-on-radar bonus: reward a jammer whenever ANY alive radar
+            # lies inside its directional cone (full beam width). Uses
+            # _jammer_in_cone (set by _compute_hf_radar_eff_range earlier
+            # this step) so the geometry stays consistent with the physics
+            # gate. Only alive radars count.
+            beam_scale = float(getattr(rp, "jammer_beam_on_radar_bonus", 0.0))
+            if beam_scale != 0.0:
+                # _jammer_in_cone: [B, J, R] — radar inside this jammer's cone
+                radar_alive = torch.ones(
+                    B, self.n_radars, dtype=torch.bool, device=self.device,
+                )  # radars don't die in this env
+                any_in_cone = (
+                    self._jammer_in_cone & radar_alive[:, None, :]
+                ).any(dim=-1).float()                                              # [B, J]
+                beam_bonus = beam_scale * any_in_cone * jammer_alive_f
+                reward[:, self.n_strikers:] += beam_bonus
+                jammer_beam_on_radar_full[:, self.n_strikers:] = beam_bonus
 
             self._jammer_prev_dist = dist_jr.detach()
 
@@ -784,8 +840,9 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
             reward[:, ns:] += jammer_sep
             separation_pen_full[:, ns:] += jammer_sep
 
-        # 12. Control effort penalty
+        # 12. Control effort penalty (motion: all agents; beam: jammers only)
         control_pen_full = torch.zeros(B, A, device=self.device)
+        beam_control_pen_full = torch.zeros(B, A, device=self.device)
         accel_scale = float(rp.accel_effort_scale)
         angular_scale = float(rp.angular_effort_scale)
         if (accel_scale > 0 or angular_scale > 0):
@@ -794,26 +851,34 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
             reward += control_pen
             control_pen_full = control_pen
 
+        beam_scale_eff = float(getattr(rp, "beam_accel_effort_scale", 0.0))
+        if beam_scale_eff > 0 and self.n_jammers > 0:
+            jammer_alive_f = alive[:, self.n_strikers:].float()
+            beam_pen = -beam_scale_eff * (beam_acc_all[:, self.n_strikers:] ** 2) * jammer_alive_f
+            reward[:, self.n_strikers:] += beam_pen
+            beam_control_pen_full[:, self.n_strikers:] = beam_pen
+
         _t = self._prof_lap("env_rewards", _t)
 
         # Store per-component reward breakdown
         self.last_reward_components = {
-            "target_destroyed":         target_destroyed_full.detach(),
-            "terminal_bonus":           terminal_bonus_full.detach(),
-            "border_penalty":           border_pen.detach(),
-            "timestep_penalty":         timestep_rew.detach(),
-            "radar_avoidance":          radar_pen.detach(),
-            "striker_approach":         striker_approach_full.detach(),
-            "jammer_approach":          jammer_approach_full.detach(),
-            "striker_progress":         striker_progress_full.detach(),
-            "jammer_progress":          jammer_progress_full.detach(),
-            "jammer_jam_bonus":         jammer_jam_bonus_full.detach(),
-            "jammer_directivity_bonus": jammer_directivity_full.detach(),
-            "formation":                formation_full.detach(),
-            "agent_destroyed":          death_pen_full.detach(),
-            "paper_mission":            mission_reward_full.detach(),
-            "separation_penalty":       separation_pen_full.detach(),
-            "control_effort":           control_pen_full.detach(),
+            "target_destroyed":           target_destroyed_full.detach(),
+            "terminal_bonus":             terminal_bonus_full.detach(),
+            "border_penalty":             border_pen.detach(),
+            "timestep_penalty":           timestep_rew.detach(),
+            "radar_avoidance":            radar_pen.detach(),
+            "striker_approach":           striker_approach_full.detach(),
+            "jammer_approach":            jammer_approach_full.detach(),
+            "striker_progress":           striker_progress_full.detach(),
+            "jammer_progress":            jammer_progress_full.detach(),
+            "jammer_jam_bonus":           jammer_jam_bonus_full.detach(),
+            "jammer_beam_on_radar_bonus": jammer_beam_on_radar_full.detach(),
+            "formation":                  formation_full.detach(),
+            "agent_destroyed":            death_pen_full.detach(),
+            "paper_mission":              mission_reward_full.detach(),
+            "separation_penalty":         separation_pen_full.detach(),
+            "control_effort":             control_pen_full.detach(),
+            "beam_control_effort":        beam_control_pen_full.detach(),
         }
 
         reward = reward.unsqueeze(-1).contiguous()  # [B, A, 1]

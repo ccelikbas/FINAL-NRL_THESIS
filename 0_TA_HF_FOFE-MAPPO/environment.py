@@ -182,6 +182,12 @@ class StrikeEA2DEnv(EnvBase):
         self.n_other_agent_obs_slots = 3
         self.n_radar_obs_slots = 2
         self.n_target_obs_slots = 2
+        # Self-observation dimensionality. Base self block is 6 floats
+        # (x, y, speed, heading, heading_rate, t_norm). Subclasses can
+        # append role-specific features by overriding _self_extra_dim and
+        # _build_self_extra (e.g. HF env adds (beam_angle, beam_rate) for
+        # jammers — 2 extra floats, zero for strikers).
+        self.d_self    = 6 + int(self._self_extra_dim())
         self.obs_dim   = self._compute_obs_dim()
         self.state_dim = self._compute_state_dim()
 
@@ -357,12 +363,31 @@ class StrikeEA2DEnv(EnvBase):
 
     def _compute_obs_dim(self) -> int:
         # Fixed-size ego-centric relative observations (independent of team sizes):
-        #   own state:     [x, y, speed, heading, heading_rate, t_norm]             = 6
+        #   own state:     [x, y, speed, heading, heading_rate, t_norm, *extra]    = 6 + d_extra
         #   other agents:  top-K slots [dist, rel_angle, heading, role]             = K_a * 4
         #   radars:        top-K slots [dist, rel_angle, jammed]                    = K_r * 3
         #   targets:       top-K slots [dist, rel_angle, alive]                     = K_t * 3
         # Unseen or missing entities are zero-padded in their slots.
-        return 6 + self.n_other_agent_obs_slots * 4 + self.n_radar_obs_slots * 3 + self.n_target_obs_slots * 3
+        return self.d_self + self.n_other_agent_obs_slots * 4 + self.n_radar_obs_slots * 3 + self.n_target_obs_slots * 3
+
+    # ------------------------------------------------------------------
+    # Self-observation extension hooks
+    # ------------------------------------------------------------------
+    # Subclasses can append role-specific features to the per-agent
+    # self-observation by overriding these two methods. The default
+    # implementation contributes zero extra dimensions.
+
+    def _self_extra_dim(self) -> int:
+        """Number of extra floats appended to each agent's self-obs."""
+        return 0
+
+    def _build_self_extra(self, B: int, A: int) -> torch.Tensor:
+        """Return the per-agent self-obs extension as a [B, A, d_extra] tensor.
+
+        Called from _build_local_obs and _build_fofe_obs after the base
+        kinematic state. d_extra must equal _self_extra_dim().
+        """
+        return torch.zeros(B, A, 0, device=self.device, dtype=torch.float32)
 
     def _compute_state_dim(self) -> int:
         A, T, R = self.n_agents, self.n_targets, self.n_radars
@@ -481,7 +506,7 @@ class StrikeEA2DEnv(EnvBase):
 
         if self.use_fofe:
             # FOFE actor per-channel observations (nested under "agents")
-            agents_dict["obs_self"]          = Unbounded(shape=B + torch.Size([A, 6]),    dtype=torch.float32, device=self.device)
+            agents_dict["obs_self"]          = Unbounded(shape=B + torch.Size([A, self.d_self]),    dtype=torch.float32, device=self.device)
             agents_dict["obs_agents_feat"]   = Unbounded(shape=B + torch.Size([A, A, 4]), dtype=torch.float32, device=self.device)
             agents_dict["obs_agents_mask"]   = Unbounded(shape=B + torch.Size([A, A]),    dtype=torch.bool,    device=self.device)
             agents_dict["obs_targets_feat"]  = Unbounded(shape=B + torch.Size([A, T, 3]), dtype=torch.float32, device=self.device)
@@ -1422,7 +1447,9 @@ class StrikeEA2DEnv(EnvBase):
         hrate_norm   = (self.agent_heading_rate / self.dpsi_max).unsqueeze(-1)  # [B,A,1] in ~[-1,1]
         time_norm    = (self.step_count.float() / float(self.max_steps)).clamp(0.0, 1.0)  # [B,1]
         time_exp     = time_norm.unsqueeze(1).expand(B, A, 1)                    # [B,A,1]
-        own = torch.cat([pos_norm, speed_norm, heading_norm, hrate_norm, time_exp], dim=-1)  # [B,A,6]
+        own_base = torch.cat([pos_norm, speed_norm, heading_norm, hrate_norm, time_exp], dim=-1)  # [B,A,6]
+        own_extra = self._build_self_extra(B, A)                                 # [B,A,d_extra]
+        own = torch.cat([own_base, own_extra], dim=-1)                            # [B,A,d_self]
 
         # --- Agent role vector (static): strikers = 1, jammers = 0 ---
         role = torch.zeros(A, device=self.device)
@@ -1561,7 +1588,9 @@ class StrikeEA2DEnv(EnvBase):
         hrate_norm = (self.agent_heading_rate / self.dpsi_max).unsqueeze(-1)
         time_norm = (self.step_count.float() / float(self.max_steps)).clamp(0, 1)
         time_exp = time_norm.unsqueeze(1).expand(B, A, 1)
-        obs_self = torch.cat([pos_norm, speed_norm, heading_norm, hrate_norm, time_exp], dim=-1)
+        obs_self_base = torch.cat([pos_norm, speed_norm, heading_norm, hrate_norm, time_exp], dim=-1)
+        obs_self_extra = self._build_self_extra(B, A)
+        obs_self = torch.cat([obs_self_base, obs_self_extra], dim=-1)
 
         role = torch.zeros(A, device=self.device)
         role[:self.n_strikers] = 1.0

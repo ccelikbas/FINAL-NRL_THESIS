@@ -124,13 +124,15 @@ class RewardConfig:
     # Per-step bonus when a jammer is within jam_radius of ≥ 1 radar.
     jammer_jam_bonus: float = 0   # Deactivated
 
-    # ─── JAMMER DIRECTIVITY BONUS  (HF directional-jammer model only) ────────
-    # Per-step bonus given to a jammer when its directional cone contains
-    # its NEAREST alive radar. Encourages the jammer to point its cone at
-    # the radar it is closest to (the most actionable target).
+    # ─── JAMMER BEAM-ON-RADAR BONUS  (HF directional-jammer model only) ──────
+    # Per-step bonus given to a jammer when ANY alive radar lies inside the
+    # jammer's directional cone (full beam width, not just the centerline).
+    # Pairs with the new kinematic beam model: the jammer policy emits a
+    # beam angular acceleration (action dim 2) and is rewarded for steering
+    # the cone onto any radar.
     # No effect in the legacy (non-HF) jammer model, which has no cone.
     # Set to 0.0 to disable.
-    jammer_directivity_bonus: float = 0.02
+    jammer_beam_on_radar_bonus: float = 0.02
 
     # ─── FORMATION COHESION  (striker ↔ jammer cross-role proximity) ──────────
     # Each striker/jammer receives a distance penalty for being far from the
@@ -181,6 +183,11 @@ class RewardConfig:
     accel_effort_scale:   float = 0.01   # weight on velocity-acceleration squared
     angular_effort_scale: float = 0.01   # weight on angular-acceleration squared
 
+    # ─── BEAM CONTROL EFFORT PENALTY  (HF directional-jammer model only) ────
+    # Applied only to jammers, on action dim 2 (beam angular acceleration).
+    # Penalty = −beam_accel_effort_scale × beam_accel² (per alive jammer).
+    # Set to 0.0 to disable.
+    beam_accel_effort_scale: float = 0.01
 
 
 '''

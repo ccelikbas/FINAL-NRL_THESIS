@@ -300,13 +300,24 @@ class HFRadarConfig:
     # whether the radar lies inside this cone.
     #
     # jammer_main_lobe_deg : full angular width of the cone (degrees).
-    # jammer_bearing_n_choices : number of discrete bearing actions
-    #     evenly spaced over (-pi, pi]. Each step the jammer policy
-    #     picks one of these indices; bearing is interpreted relative
-    #     to the jammer's own heading (same convention as the radar
-    #     bearing feature in the observation space).
+    #
+    # Beam kinematics (2D, mirrors the agent's heading kinematics but with
+    # looser limits — the beam can swing around the jammer faster than the
+    # jammer itself can turn). The jammer policy emits an angular
+    # acceleration (action dim 2, same 7-value table as motion). State is
+    # (beam_angle, beam_rate), where beam_angle is relative to the jammer's
+    # own heading.
+    #
+    # beam_dpsi_max : maximum |beam_rate| per step (radians/step).
+    #     Default math.pi → the beam can flip 180° in a single step at
+    #     saturation, satisfying the design brief.
+    # beam_h_accel_magnitude_fraction : per-step angular acceleration
+    #     magnitude expressed as a fraction of beam_dpsi_max (mirrors
+    #     EnvConfig.h_accel_magnitude_fraction). Default 0.1 → ~18°/step²
+    #     at action=±1, so the beam needs ~10 steps to spin up from rest.
     jammer_main_lobe_deg: float = 30.0
-    jammer_bearing_n_choices: int = 32
+    beam_dpsi_max: float = math.pi
+    beam_h_accel_magnitude_fraction: float = 0.1
 
     def __post_init__(self):
         if self.radar_rx_gain is None:
@@ -350,8 +361,10 @@ class HFRadarConfig:
             raise ValueError("target_unconstrained_range_world must be > 0 when provided")
         if not (0.0 < float(self.jammer_main_lobe_deg) <= 360.0):
             raise ValueError("jammer_main_lobe_deg must be in (0, 360]")
-        if int(self.jammer_bearing_n_choices) < 2:
-            raise ValueError("jammer_bearing_n_choices must be >= 2")
+        if not (0.0 < float(self.beam_dpsi_max) <= math.pi + 1e-9):
+            raise ValueError("beam_dpsi_max must be in (0, pi] radians/step")
+        if not (0.0 <= float(self.beam_h_accel_magnitude_fraction) <= 1.0):
+            raise ValueError("beam_h_accel_magnitude_fraction must be in [0, 1]")
 
     @staticmethod
     def db_to_linear(db_value: float) -> float:

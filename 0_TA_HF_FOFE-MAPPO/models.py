@@ -436,14 +436,15 @@ class CombinedPolicy(nn.Module):
     """Wraps striker + jammer actors.  Supports both legacy and FOFE.
 
     Directional-jammer action layout (HF radar mode, act_dim=3):
-      - dims 0,1 (motion): only the first ``n_motion_choices`` indices are
-        physically meaningful (the env's ``_act_table`` has that length).
-      - dim 2 (bearing): only meaningful for jammers; strikers MUST keep
-        this index at 0 because the env discards their bearing entirely.
+      - dims 0,1 (motion):    same 7-value table as the base env, all agents.
+      - dim 2 (beam ang accel): only meaningful for jammers; strikers MUST
+        keep this dim at the zero-acceleration index (middle of the table)
+        because the env discards their dim-2 entry entirely.
 
-    Both constraints are enforced here by setting invalid logits to a
-    large negative bias so the sampled action stays inside the valid set
-    without changing the network architecture or the trainer pipeline.
+    The striker constraint is enforced here by setting all dim-2 logits
+    except the zero-accel index to a large negative bias, so the sampled
+    striker action stays inside the valid set without changing the
+    network architecture or the trainer pipeline.
     """
 
     _LOGIT_MASK_BIAS = -1e9
@@ -453,7 +454,7 @@ class CombinedPolicy(nn.Module):
                  obs_key=("agents", "observation"),
                  action_key=("agents", "action"),
                  deterministic=False,
-                 n_motion_choices=None, n_bearing_choices=None):
+                 n_motion_choices=None):
         super().__init__()
         self.striker_policy = striker_policy
         self.jammer_policy = jammer_policy
@@ -464,37 +465,34 @@ class CombinedPolicy(nn.Module):
         self.action_key = action_key
         self.deterministic = deterministic
         self.n_motion_choices = n_motion_choices
-        self.n_bearing_choices = n_bearing_choices
 
-    # --- Action-mask helpers (no-op unless act_dim == 3 and the env
-    #     reported separate motion / bearing choice counts) ----------
+    # --- Action-mask helpers (no-op unless act_dim >= 3 and the env
+    #     reported a motion choice count) -----------------------------
     def _needs_action_mask(self, logits: torch.Tensor) -> bool:
         return (
             logits.shape[-2] >= 3
             and self.n_motion_choices is not None
-            and self.n_bearing_choices is not None
         )
 
     def _mask_motion_and_bearing(self, logits: torch.Tensor, role: str) -> torch.Tensor:
         """Add a large-negative bias to invalid action indices.
         role: "striker" or "jammer". logits shape: [..., n_role, act_dim, n_choices].
+
+        With the kinematic beam model dim 2 uses the same 7-value action
+        table as motion, so the only mask that fires is on the striker:
+        its dim-2 logits are pinned to the zero-acceleration index (the
+        midpoint of the table) so the striker never explores beam-control
+        indices that the env throws away.
         """
         if not self._needs_action_mask(logits):
             return logits
-        nc = logits.shape[-1]
-        bias = torch.zeros_like(logits)
-        # Motion dims: clamp to the first n_motion_choices indices.
-        if nc > self.n_motion_choices:
-            bias[..., 0, self.n_motion_choices:] = self._LOGIT_MASK_BIAS
-            bias[..., 1, self.n_motion_choices:] = self._LOGIT_MASK_BIAS
-        # Bearing dim handling depends on role.
         if role == "striker":
-            # Striker bearing is unused by the env; pin it to index 0.
-            bias[..., 2, 1:] = self._LOGIT_MASK_BIAS
-        elif role == "jammer":
-            if nc > self.n_bearing_choices:
-                bias[..., 2, self.n_bearing_choices:] = self._LOGIT_MASK_BIAS
-        return logits + bias
+            bias = torch.zeros_like(logits)
+            zero_idx = int(self.n_motion_choices) // 2
+            bias[..., 2, :] = self._LOGIT_MASK_BIAS
+            bias[..., 2, zero_idx] = 0.0
+            return logits + bias
+        return logits
 
     # --- FOFE observation helpers ---
     def _get_fofe_obs(self, td):
@@ -626,24 +624,28 @@ def make_combined_policy(env: StrikeEA2DEnv, hidden=256, depth=3,
                          fofe_cfg: FOFEConfig | None = None) -> CombinedPolicy:
     use_fofe = fofe_cfg is not None and fofe_cfg.use_fofe
 
+    d_self = int(getattr(env, "d_self", 6))
+
     if use_fofe:
-        striker_net = FOFEPolicyNet(fofe_cfg, env.n_strikers, env.act_dim, env.n_choices).to(env.device)
-        jammer_net = FOFEPolicyNet(fofe_cfg, env.n_jammers, env.act_dim, env.n_choices).to(env.device)
+        striker_net = FOFEPolicyNet(
+            fofe_cfg, env.n_strikers, env.act_dim, env.n_choices, d_self=d_self,
+        ).to(env.device)
+        jammer_net = FOFEPolicyNet(
+            fofe_cfg, env.n_jammers, env.act_dim, env.n_choices, d_self=d_self,
+        ).to(env.device)
     else:
         striker_net = RolePolicyNet(env.obs_dim, env.act_dim, env.n_choices, env.n_strikers, hidden, depth).to(env.device)
         jammer_net = RolePolicyNet(env.obs_dim, env.act_dim, env.n_choices, env.n_jammers, hidden, depth).to(env.device)
 
-    # If the env exposes a separate motion / bearing choice count (HF
-    # directional-jammer model), forward them so the policy can mask
-    # invalid action indices. Base env doesn't set these → mask becomes
-    # a no-op and behaviour is unchanged.
+    # If the env exposes a motion-choice count (HF directional-jammer
+    # model), forward it so the policy can mask the striker's unused
+    # dim-2 entry. Base env doesn't set this → mask becomes a no-op.
     n_motion = getattr(env, "_n_motion_choices", None)
-    n_bearing = getattr(env, "_n_bearing_choices", None)
 
     return CombinedPolicy(
         striker_net, jammer_net, env.n_strikers, env.n_jammers,
         use_fofe=use_fofe, obs_key=env._obs_key, action_key=env._action_key,
-        n_motion_choices=n_motion, n_bearing_choices=n_bearing,
+        n_motion_choices=n_motion,
     ).to(env.device)
 
 
