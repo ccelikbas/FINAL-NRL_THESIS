@@ -189,7 +189,7 @@ class PPOConfig:
     n_iters: int = 5
     frames_per_batch: Optional[int] = None
     num_epochs: int = 10
-    minibatch_size: int = 2048
+    minibatch_size: int = 8192
 
     gamma: float = 0.99
     lmbda: float = 0.95
@@ -205,6 +205,25 @@ class PPOConfig:
     seed: int = 0
     log_every: int = 5
     device: torch.device = field(default_factory=lambda: torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+
+    # ── Hardware optimization flags ─────────────────────────────────
+    # TF32 matmul on Ampere+ (A100/H100/RTX30/40). Free 10-30% on fp32 matmuls.
+    enable_tf32: bool = True
+    # cuDNN autotuner — picks best kernel for repeat shapes (stable across iters).
+    cudnn_benchmark: bool = True
+
+    # ── Training optimization flags ─────────────────────────────────
+    # torch.compile actor + critic nets. First iter is slow (graph trace).
+    compile_models: bool = True
+    # Mixed-precision autocast for forward + backward (big gain on A100/H100).
+    use_amp: bool = True
+    # "bfloat16" (recommended, Ampere+; no GradScaler needed) or "float16".
+    amp_dtype: str = "bfloat16"
+
+    # ── Diagnostics frequency ──────────────────────────────────────
+    # Collect FOFE KPI snapshot every N iterations (was: every minibatch).
+    # 1 = every iter (cheap), 5 = every 5 iters, 0 = disabled.
+    fofe_kpi_every: int = 1
 
     def __post_init__(self):
         self.num_envs = int(self.num_envs)

@@ -527,6 +527,49 @@ def train_mappo(
     nj = env_cfg.n_jammers
     use_fofe = fofe_cfg is not None and fofe_cfg.use_fofe
 
+    # ── Hardware optimization flags (set once, before any GPU work) ──
+    if torch.cuda.is_available():
+        if bool(getattr(ppo_cfg, "enable_tf32", False)):
+            try:
+                torch.set_float32_matmul_precision("high")
+                torch.backends.cuda.matmul.allow_tf32 = True
+                torch.backends.cudnn.allow_tf32 = True
+                print("TF32 matmul + cuDNN allow_tf32: ENABLED")
+            except Exception as exc:
+                print(f"TF32 enable failed (continuing): {type(exc).__name__}: {exc}")
+        if bool(getattr(ppo_cfg, "cudnn_benchmark", False)):
+            try:
+                torch.backends.cudnn.benchmark = True
+                print("cuDNN benchmark: ENABLED")
+            except Exception as exc:
+                print(f"cuDNN benchmark enable failed (continuing): {type(exc).__name__}: {exc}")
+
+    # ── AMP (autocast) setup ─────────────────────────────────────────
+    # bfloat16 has the same exponent range as fp32 → no GradScaler needed,
+    # numerically safe for PPO ratios. fp16 needs GradScaler to handle the
+    # narrower range without underflow.
+    _amp_enabled = bool(getattr(ppo_cfg, "use_amp", False)) and torch.cuda.is_available()
+    _amp_dtype_str = str(getattr(ppo_cfg, "amp_dtype", "bfloat16")).lower()
+    _amp_dtype_map = {
+        "bfloat16": torch.bfloat16, "bf16": torch.bfloat16,
+        "float16":  torch.float16,  "fp16": torch.float16,
+    }
+    _amp_dtype = _amp_dtype_map.get(_amp_dtype_str, torch.bfloat16)
+    _use_grad_scaler = _amp_enabled and _amp_dtype == torch.float16
+    if _amp_enabled:
+        try:
+            _grad_scaler = torch.amp.GradScaler("cuda") if _use_grad_scaler else None
+        except Exception:
+            _grad_scaler = torch.cuda.amp.GradScaler() if _use_grad_scaler else None
+        print(f"AMP autocast: ENABLED (dtype={_amp_dtype}, GradScaler={'on' if _use_grad_scaler else 'off'})")
+    else:
+        _grad_scaler = None
+
+    def _autocast():
+        if _amp_enabled:
+            return torch.autocast(device_type="cuda", dtype=_amp_dtype)
+        return contextlib.nullcontext()
+
     # ── Build environment ────────────────────────────────────────────
     base_env = build_env(env_cfg, ppo_cfg, hf_radar_cfg=hf_radar_cfg)
     env = TransformedEnv(
@@ -540,6 +583,22 @@ def train_mappo(
                                   depth=net_cfg.depth, fofe_cfg=fofe_cfg)
     critic = make_combined_critic(base_env, hidden=net_cfg.critic_hidden,
                                   depth=net_cfg.depth, fofe_cfg=fofe_cfg)
+
+    # ── Optional torch.compile ────────────────────────────────────────
+    # Compiles the underlying actor/critic nets in place. The wrappers
+    # (CombinedPolicy / CombinedCritic) still call them through .striker_*
+    # / .jammer_* attributes, so swap is transparent. Wrapped in try/except
+    # because torch.compile can fail on edge cases (driver mismatch, side
+    # effects in forward) — fallback is uncompiled, which still trains.
+    if bool(getattr(ppo_cfg, "compile_models", False)) and torch.cuda.is_available():
+        try:
+            policy.striker_policy = torch.compile(policy.striker_policy)
+            policy.jammer_policy  = torch.compile(policy.jammer_policy)
+            critic.striker_critic = torch.compile(critic.striker_critic)
+            critic.jammer_critic  = torch.compile(critic.jammer_critic)
+            print("torch.compile: ENABLED (policy + critic). First iter will be slow (graph trace).")
+        except Exception as exc:
+            print(f"torch.compile failed (continuing uncompiled): {type(exc).__name__}: {exc}")
 
     # ── Reward normalizer ────────────────────────────────────────────
     reward_normalizer: Optional[RewardNormalizer] = None
@@ -758,9 +817,19 @@ def train_mappo(
         s_pol_acc = s_val_acc = s_ent_acc = s_kl_acc = s_clip_acc = 0.0
         j_pol_acc = j_val_acc = j_ent_acc = j_kl_acc = j_clip_acc = 0.0
         n_updates = 0
-        # FOFE KPI snapshot (overwritten each minibatch; last MB is kept)
+        # FOFE KPI snapshot — collected ONCE per iteration on the first
+        # minibatch of the first epoch (was: every minibatch, ~3 s/iter cost).
+        # Gated by ppo_cfg.fofe_kpi_every: 1 = every iter, 5 = every 5 iters,
+        # 0 = disabled.
         _fofe_kpi_s: Dict[str, float] = {}
         _fofe_kpi_j: Dict[str, float] = {}
+        _fofe_every = int(getattr(ppo_cfg, "fofe_kpi_every", 1))
+        _global_iter_1based = _ITER_OFFSET + it + 1
+        _capture_fofe_this_iter = bool(
+            use_fofe and _fofe_every > 0 and (_global_iter_1based % _fofe_every == 0)
+        )
+        _fofe_captured_s = False
+        _fofe_captured_j = False
 
         for _ in range(ppo_cfg.num_epochs):
             if _timed_out:
@@ -792,14 +861,17 @@ def train_mappo(
                     # FOFE path: pass structured obs dict
                     mb_s_fofe = _index_fofe_dict(s_fofe_f, idx)
                     _tfm = _fine_lap(_fine_acc, "ppo_mb_index", _tfm, _fine)
-                    s_new_lp, s_entropy = policy.striker_log_prob_entropy(mb_s_fofe, mb_s_act)
+                    with _autocast():
+                        s_new_lp, s_entropy = policy.striker_log_prob_entropy(mb_s_fofe, mb_s_act)
                 else:
                     mb_s_obs = s_obs_f[idx]
                     _tfm = _fine_lap(_fine_acc, "ppo_mb_index", _tfm, _fine)
-                    s_new_lp, s_entropy = policy.striker_log_prob_entropy(mb_s_obs, mb_s_act)
+                    with _autocast():
+                        s_new_lp, s_entropy = policy.striker_log_prob_entropy(mb_s_obs, mb_s_act)
 
+                # PPO loss in fp32 for numerical stability of ratio/exp.
                 s_loss_info = ppo_clip_loss(
-                    s_new_lp, mb_s_old_lp, mb_s_adv, s_entropy,
+                    s_new_lp.float(), mb_s_old_lp, mb_s_adv, s_entropy.float(),
                     ppo_cfg.clip_eps, ppo_cfg.entropy_coef,
                 )
                 _tfm = _fine_lap(_fine_acc, "ppo_s_actor_fwd", _tfm, _fine)
@@ -807,41 +879,60 @@ def train_mappo(
                 if use_fofe:
                     # FOFE critic: pass entity sets
                     mb_crt = _index_fofe_dict(crt_fofe_f, idx)
-                    s_pred_val = critic.striker_critic(
-                        mb_crt["crt_agents_feat"], mb_crt["crt_agents_mask"],
-                        mb_crt["crt_targets_feat"], mb_crt["crt_targets_mask"],
-                        mb_crt["crt_radars_feat"], mb_crt["crt_radars_mask"],
-                        mb_crt["crt_time_feat"],
-                    )
+                    with _autocast():
+                        s_pred_val = critic.striker_critic(
+                            mb_crt["crt_agents_feat"], mb_crt["crt_agents_mask"],
+                            mb_crt["crt_targets_feat"], mb_crt["crt_targets_mask"],
+                            mb_crt["crt_radars_feat"], mb_crt["crt_radars_mask"],
+                            mb_crt["crt_time_feat"],
+                        )
                 else:
                     mb_state = state_f[idx]
-                    s_pred_val = critic.striker_critic(mb_state)
+                    with _autocast():
+                        s_pred_val = critic.striker_critic(mb_state)
 
-                s_pred_val = critic._broadcast_role_values(s_pred_val, ns, "striker")
+                s_pred_val = critic._broadcast_role_values(s_pred_val.float(), ns, "striker")
 
                 s_vloss = value_loss_fn(s_pred_val, mb_s_ret)
                 _tfm = _fine_lap(_fine_acc, "ppo_s_critic_fwd", _tfm, _fine)
 
                 striker_actor_optim.zero_grad(set_to_none=True)
-                s_loss_info["loss_total"].backward()
+                if _grad_scaler is not None:
+                    _grad_scaler.scale(s_loss_info["loss_total"]).backward()
+                    _grad_scaler.unscale_(striker_actor_optim)
+                else:
+                    s_loss_info["loss_total"].backward()
                 nn.utils.clip_grad_norm_(policy.striker_policy.parameters(), ppo_cfg.max_grad_norm)
                 _tfm = _fine_lap(_fine_acc, "ppo_s_actor_bwd", _tfm, _fine)
 
-                # -- FOFE KPI snapshot (striker): read grads before step --
-                if use_fofe:
+                # -- FOFE KPI snapshot (striker): ONCE per iter, on the first
+                #    eligible minibatch. Grads must be read between backward
+                #    and optim.step() (zero_grad on the next mb wipes them).
+                if _capture_fofe_this_iter and not _fofe_captured_s:
                     _fofe_kpi_s = _collect_fofe_kpis(
                         policy.striker_policy._diag_cache,
                         critic.striker_critic._diag_cache,
                         mb_s_fofe, policy.striker_policy, critic.striker_critic,
                     )
+                    _fofe_captured_s = True
                 _tfm = _fine_lap(_fine_acc, "ppo_fofe_kpi", _tfm, _fine)
 
-                striker_actor_optim.step()
+                if _grad_scaler is not None:
+                    _grad_scaler.step(striker_actor_optim)
+                else:
+                    striker_actor_optim.step()
 
                 striker_critic_optim.zero_grad(set_to_none=True)
-                s_vloss.backward()
+                if _grad_scaler is not None:
+                    _grad_scaler.scale(s_vloss).backward()
+                    _grad_scaler.unscale_(striker_critic_optim)
+                else:
+                    s_vloss.backward()
                 nn.utils.clip_grad_norm_(critic.striker_critic.parameters(), ppo_cfg.max_grad_norm)
-                striker_critic_optim.step()
+                if _grad_scaler is not None:
+                    _grad_scaler.step(striker_critic_optim)
+                else:
+                    striker_critic_optim.step()
                 _tfm = _fine_lap(_fine_acc, "ppo_s_step_and_critic_bwd", _tfm, _fine)
 
                 s_pol_acc += float(s_loss_info["loss_policy"].item())
@@ -859,53 +950,76 @@ def train_mappo(
 
                 if use_fofe:
                     mb_j_fofe = _index_fofe_dict(j_fofe_f, idx)
-                    j_new_lp, j_entropy = policy.jammer_log_prob_entropy(mb_j_fofe, mb_j_act)
+                    with _autocast():
+                        j_new_lp, j_entropy = policy.jammer_log_prob_entropy(mb_j_fofe, mb_j_act)
                 else:
                     mb_j_obs = j_obs_f[idx]
-                    j_new_lp, j_entropy = policy.jammer_log_prob_entropy(mb_j_obs, mb_j_act)
+                    with _autocast():
+                        j_new_lp, j_entropy = policy.jammer_log_prob_entropy(mb_j_obs, mb_j_act)
 
                 j_loss_info = ppo_clip_loss(
-                    j_new_lp, mb_j_old_lp, mb_j_adv, j_entropy,
+                    j_new_lp.float(), mb_j_old_lp, mb_j_adv, j_entropy.float(),
                     ppo_cfg.clip_eps, ppo_cfg.entropy_coef,
                 )
                 _tfm = _fine_lap(_fine_acc, "ppo_j_actor_fwd", _tfm, _fine)
 
                 if use_fofe:
                     # Reuse mb_crt from striker (same global state)
-                    j_pred_val = critic.jammer_critic(
-                        mb_crt["crt_agents_feat"], mb_crt["crt_agents_mask"],
-                        mb_crt["crt_targets_feat"], mb_crt["crt_targets_mask"],
-                        mb_crt["crt_radars_feat"], mb_crt["crt_radars_mask"],
-                        mb_crt["crt_time_feat"],
-                    )
+                    with _autocast():
+                        j_pred_val = critic.jammer_critic(
+                            mb_crt["crt_agents_feat"], mb_crt["crt_agents_mask"],
+                            mb_crt["crt_targets_feat"], mb_crt["crt_targets_mask"],
+                            mb_crt["crt_radars_feat"], mb_crt["crt_radars_mask"],
+                            mb_crt["crt_time_feat"],
+                        )
                 else:
-                    j_pred_val = critic.jammer_critic(state_f[idx])
+                    with _autocast():
+                        j_pred_val = critic.jammer_critic(state_f[idx])
 
-                j_pred_val = critic._broadcast_role_values(j_pred_val, nj, "jammer")
+                j_pred_val = critic._broadcast_role_values(j_pred_val.float(), nj, "jammer")
 
                 j_vloss = value_loss_fn(j_pred_val, mb_j_ret)
                 _tfm = _fine_lap(_fine_acc, "ppo_j_critic_fwd", _tfm, _fine)
 
                 jammer_actor_optim.zero_grad(set_to_none=True)
-                j_loss_info["loss_total"].backward()
+                if _grad_scaler is not None:
+                    _grad_scaler.scale(j_loss_info["loss_total"]).backward()
+                    _grad_scaler.unscale_(jammer_actor_optim)
+                else:
+                    j_loss_info["loss_total"].backward()
                 nn.utils.clip_grad_norm_(policy.jammer_policy.parameters(), ppo_cfg.max_grad_norm)
                 _tfm = _fine_lap(_fine_acc, "ppo_j_actor_bwd", _tfm, _fine)
 
-                # -- FOFE KPI snapshot (jammer): read grads before step --
-                if use_fofe:
+                # -- FOFE KPI snapshot (jammer): ONCE per iter, gated by
+                #    _capture_fofe_this_iter / fofe_kpi_every (see striker).
+                if _capture_fofe_this_iter and not _fofe_captured_j:
                     _fofe_kpi_j = _collect_fofe_kpis(
                         policy.jammer_policy._diag_cache,
                         critic.jammer_critic._diag_cache,
                         mb_j_fofe, policy.jammer_policy, critic.jammer_critic,
                     )
+                    _fofe_captured_j = True
                 _tfm = _fine_lap(_fine_acc, "ppo_fofe_kpi", _tfm, _fine)
 
-                jammer_actor_optim.step()
+                if _grad_scaler is not None:
+                    _grad_scaler.step(jammer_actor_optim)
+                else:
+                    jammer_actor_optim.step()
 
                 jammer_critic_optim.zero_grad(set_to_none=True)
-                j_vloss.backward()
+                if _grad_scaler is not None:
+                    _grad_scaler.scale(j_vloss).backward()
+                    _grad_scaler.unscale_(jammer_critic_optim)
+                else:
+                    j_vloss.backward()
                 nn.utils.clip_grad_norm_(critic.jammer_critic.parameters(), ppo_cfg.max_grad_norm)
-                jammer_critic_optim.step()
+                if _grad_scaler is not None:
+                    _grad_scaler.step(jammer_critic_optim)
+                    # GradScaler.update() should be called once per minibatch
+                    # AFTER all step() calls — here, after the last optimizer.
+                    _grad_scaler.update()
+                else:
+                    jammer_critic_optim.step()
                 _tfm = _fine_lap(_fine_acc, "ppo_j_step_and_critic_bwd", _tfm, _fine)
 
                 j_pol_acc += float(j_loss_info["loss_policy"].item())
