@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import contextlib
 import math
-from typing import Dict, List
+from pathlib import Path
+from typing import Dict, List, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -32,13 +33,34 @@ def _deterministic_context():
     return contextlib.nullcontext()
 
 
-def plot_training(logs: Dict[str, List[float]]) -> None:
+def plot_training(
+    logs: Dict[str, List[float]],
+    save_dir: Optional[str] = None,
+    show: Optional[bool] = None,
+) -> None:
     """Plot training curves with combined striker/jammer diagnostics.
 
     Layout (2×3):
         Row 0: Training reward | Combined policy+value loss | Combined entropy/KL/clip/EV
         Row 1: Eval return | Eval survival+completion | Eval duration
+
+    Parameters
+    ----------
+    save_dir : str | None
+        If provided, the directory is created (if missing) and the figure is
+        saved as ``training_dashboard.png``. FOFE diagnostics (if available)
+        are saved as ``fofe_diagnostics.png`` in the same directory.
+    show : bool | None
+        Whether to display the figure interactively. Defaults to True when
+        ``save_dir`` is None and False when ``save_dir`` is set, so headless
+        runs don't block. Pass an explicit bool to override.
     """
+    if show is None:
+        show = save_dir is None
+    save_path: Optional[Path] = None
+    if save_dir is not None:
+        save_path = Path(save_dir)
+        save_path.mkdir(parents=True, exist_ok=True)
     def _plot_valid(ax, series: List[float], label: str, **kwargs):
         y = np.asarray(series, dtype=float)
         if y.size == 0:
@@ -149,13 +171,24 @@ def plot_training(logs: Dict[str, List[float]]) -> None:
 
     fig.suptitle("Dual-MAPPO Training Dashboard (Striker + Jammer)", fontsize=14, fontweight="bold")
     fig.tight_layout(rect=[0, 0, 1, 0.95])
-    plt.show()
+    if save_path is not None:
+        out_file = save_path / "training_dashboard.png"
+        fig.savefig(out_file, dpi=150, bbox_inches="tight")
+        print(f"Saved plot: {out_file}")
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
 
-    # Show FOFE diagnostics if FOFE log keys have finite data
-    _plot_fofe_diagnostics(logs)
+    # Show / save FOFE diagnostics if FOFE log keys have finite data
+    _plot_fofe_diagnostics(logs, save_dir=save_dir, show=show)
 
 
-def _plot_fofe_diagnostics(logs: Dict[str, List[float]]) -> None:
+def _plot_fofe_diagnostics(
+    logs: Dict[str, List[float]],
+    save_dir: Optional[str] = None,
+    show: Optional[bool] = None,
+) -> None:
     """Optional FOFE KPI diagnostics dashboard (2x3 grid).
 
     Only displays if the logs contain FOFE keys with at least some finite data.
@@ -172,6 +205,13 @@ def _plot_fofe_diagnostics(logs: Dict[str, List[float]]) -> None:
     y = np.asarray(logs[test_key], dtype=float)
     if y.size == 0 or not np.any(np.isfinite(y)):
         return
+
+    if show is None:
+        show = save_dir is None
+    save_path: Optional[Path] = None
+    if save_dir is not None:
+        save_path = Path(save_dir)
+        save_path.mkdir(parents=True, exist_ok=True)
 
     def _plot_valid(ax, series, label, **kwargs):
         y = np.asarray(series, dtype=float)
@@ -264,7 +304,14 @@ def _plot_fofe_diagnostics(logs: Dict[str, List[float]]) -> None:
 
     fig.suptitle("FOFE Diagnostics Dashboard", fontsize=14, fontweight="bold")
     fig.tight_layout(rect=[0, 0, 1, 0.95])
-    plt.show()
+    if save_path is not None:
+        out_file = save_path / "fofe_diagnostics.png"
+        fig.savefig(out_file, dpi=150, bbox_inches="tight")
+        print(f"Saved plot: {out_file}")
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
 
 
 # ------------------------------------------------------------------
@@ -347,7 +394,13 @@ class TestRunner:
         return snap
 
 
-def animate_rollout(frames: List[Dict[str, torch.Tensor]], env: StrikeEA2DEnv, interval_ms: int = 70):
+def animate_rollout(
+    frames: List[Dict[str, torch.Tensor]],
+    env: StrikeEA2DEnv,
+    interval_ms: int = 70,
+    save_path: Optional[str] = None,
+    show: Optional[bool] = None,
+):
     # --- Pre-compute reward time-series from frames ---
     reward_ts: Dict[str, List[float]] = {}
     total_ts: List[float] = []
@@ -639,7 +692,20 @@ def animate_rollout(frames: List[Dict[str, torch.Tensor]], env: StrikeEA2DEnv, i
         ]
 
     ani = animation.FuncAnimation(fig, update, frames=len(frames), init_func=init, interval=interval_ms, blit=False, repeat=False)
-    plt.show()
+    # Save to GIF first (if requested), then optionally display. Saving after
+    # plt.show() doesn't work because the figure may be closed by then.
+    if show is None:
+        show = save_path is None
+    if save_path is not None:
+        out_file = Path(save_path)
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+        writer = animation.PillowWriter(fps=max(1, int(round(1000 / max(1, interval_ms)))))
+        ani.save(str(out_file), writer=writer)
+        print(f"Saved rollout GIF: {out_file}")
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
     return ani
 
 

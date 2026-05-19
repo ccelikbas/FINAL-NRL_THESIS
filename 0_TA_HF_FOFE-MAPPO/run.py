@@ -188,27 +188,40 @@ def main() -> None:
         print(f"  eval_survival_rate              = {logs['eval_survival_rate'][-1]:.4f}")
         print(f"  eval_mean_duration              = {logs['eval_mean_duration'][-1]:.4f}")
 
+    # Output directories live alongside the project package, not the cwd from
+    # which the script was launched. This keeps artifacts grouped with the
+    # run code regardless of where you invoke it from.
+    project_dir = Path(__file__).resolve().parent
+    plots_dir = project_dir / "plots"
+    vis_dir = project_dir / "visualisations"
+
     if not args.no_plot:
         try:
-            plot_training(logs)
+            plot_training(logs, save_dir=str(plots_dir))
         except Exception as exc:
             print(f"plot_training warning (continuing): {type(exc).__name__}: {exc}")
 
     if not args.no_animate:
         try:
-            for _ in range(10):
+            vis_dir.mkdir(parents=True, exist_ok=True)
+            n_rollouts = 10
+            for i in range(n_rollouts):
+                # Different seed per rollout → domain-randomised env layout.
+                # Without this all 10 visualisations would be the same scene.
+                rollout_seed = 999 + i
+                gif_path = vis_dir / f"rollout_{i + 1:02d}.gif"
                 if cfg.ext.use_hf_radar:
                     tester = HFTestRunner(
                         policy, env_cfg=cfg.env, hf_cfg=cfg.ext.hf_radar,
-                        device=cfg.ppo.device, seed=999,
+                        device=cfg.ppo.device, seed=rollout_seed,
                     )
                     frames = tester.rollout()
-                    hf_animate_rollout(frames, tester.env)
+                    hf_animate_rollout(frames, tester.env, save_path=str(gif_path))
                 else:
-                    tester = TestRunner(policy, env_cfg=cfg.env, device=cfg.ppo.device, seed=999)
+                    tester = TestRunner(policy, env_cfg=cfg.env, device=cfg.ppo.device, seed=rollout_seed)
                     frames = tester.rollout()
-                    animate_rollout(frames, tester.env)
-                print(f"Visualized rollout with {len(frames)} frames")
+                    animate_rollout(frames, tester.env, save_path=str(gif_path))
+                print(f"Visualised rollout {i + 1}/{n_rollouts} ({len(frames)} frames) → {gif_path.name}")
         except Exception as exc:
             print(f"animate_rollout warning (continuing): {type(exc).__name__}: {exc}")
 

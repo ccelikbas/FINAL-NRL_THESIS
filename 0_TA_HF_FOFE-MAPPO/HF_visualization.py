@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import contextlib
 import math
+from pathlib import Path
 from typing import Dict, List, Optional
 
 import matplotlib.pyplot as plt
@@ -281,6 +282,8 @@ def hf_animate_rollout(
     frames: List[Dict[str, torch.Tensor]],
     env: HFStrikeEA2DEnv,
     interval_ms: int = 70,
+    save_path: Optional[str] = None,
+    show: Optional[bool] = None,
 ):
     """Animate a rollout with angular radar coverage rendering.
 
@@ -288,6 +291,15 @@ def hf_animate_rollout(
       - Thin red dashed circle at R_unconstrained (full range)
       - Filled light-red polygon showing the actual effective detection boundary
         with notches cut by active jammers (white = safe zones)
+
+    Parameters
+    ----------
+    save_path : str | None
+        If provided, the rollout is saved as a GIF at this path (parents
+        created if needed). If None, the animation is shown interactively.
+    show : bool | None
+        Display the figure window. Defaults to True when ``save_path`` is None
+        and False otherwise so headless runs don't block.
     """
     # --- Pre-compute reward time-series ---
     reward_ts: Dict[str, List[float]] = {}
@@ -651,7 +663,20 @@ def hf_animate_rollout(
         fig, update, frames=len(frames), init_func=init,
         interval=interval_ms, blit=False, repeat=False,
     )
-    plt.show()
+    # Save first (if requested), then optionally display. Saving after
+    # plt.show() doesn't work because the figure may be closed by then.
+    if show is None:
+        show = save_path is None
+    if save_path is not None:
+        out_file = Path(save_path)
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+        writer = animation.PillowWriter(fps=max(1, int(round(1000 / max(1, interval_ms)))))
+        ani.save(str(out_file), writer=writer)
+        print(f"Saved rollout GIF: {out_file}")
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
     return ani
 
 
