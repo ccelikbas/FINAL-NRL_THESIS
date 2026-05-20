@@ -975,17 +975,28 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         _t = self._prof_lap("env_done_flags", _t)
         self._update_comm_cache()
         _t = self._prof_lap("env_comm_cache", _t)
-        next_td.set(self._obs_key, self._build_local_obs())
+        # Build outputs ONCE here, reuse for the returned TD and the cached
+        # persistent buffers (Step 4 — partial-reset optimisation).
+        _local_obs = self._build_local_obs()
+        next_td.set(self._obs_key, _local_obs)
         _t = self._prof_lap("env_build_local_obs", _t)
-        next_td.set("state", self._build_global_state())
+        _global_state = self._build_global_state()
+        next_td.set("state", _global_state)
         _t = self._prof_lap("env_build_state", _t)
+        _fofe_obs_dict = None
+        _fofe_critic_dict = None
         if self.use_fofe:
-            for k, v in self._build_fofe_obs().items():
+            _fofe_obs_dict = self._build_fofe_obs()
+            for k, v in _fofe_obs_dict.items():
                 next_td.set(("agents", k), v)
             _t = self._prof_lap("env_build_fofe_obs", _t)
-            for k, v in self._build_fofe_critic_state().items():
+            _fofe_critic_dict = self._build_fofe_critic_state()
+            for k, v in _fofe_critic_dict.items():
                 next_td.set(k, v)
             _t = self._prof_lap("env_build_fofe_critic", _t)
+        # Persist the freshly built outputs so the next _reset only has to
+        # refresh rows for the envs that actually terminated.
+        self._cache_step_outputs_(_local_obs, _global_state, _fofe_obs_dict, _fofe_critic_dict)
 
         # Track completed episode stats in Python list (immune to auto-reset).
         # Vectorised: gather all per-env stats for done envs into ONE tensor,

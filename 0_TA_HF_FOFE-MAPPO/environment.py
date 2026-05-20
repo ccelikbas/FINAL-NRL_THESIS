@@ -21,7 +21,7 @@ step() returns a "next" nested TD (time t+1):
 from __future__ import annotations
 
 import math
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import torch
 from tensordict import TensorDict
@@ -253,6 +253,37 @@ class StrikeEA2DEnv(EnvBase):
         self._c_angle_aa:  Optional[torch.Tensor] = None  # [B, A, A]
         self._c_comm_reach: Optional[torch.Tensor] = None  # [B, A, A]
 
+        # ------------------------------------------------------------------
+        # Persistent output buffers (Step 4 — partial-reset optimisation).
+        #
+        # Idea: _reset is called every time at least one env emits done. Most
+        # rollout steps reset only a handful of envs, but the original code
+        # rebuilt obs / state / FOFE for ALL B envs on every reset. Those
+        # rebuilds are tensor ops over the full batch and cost ~tens of ms
+        # per call.
+        #
+        # We avoid that cost by:
+        #   1. At the end of every _step, caching the just-built local_obs,
+        #      global_state, and (if use_fofe) FOFE channels into these
+        #      persistent buffers. The clone() detaches them from the TD
+        #      that the step returned so we can mutate them freely.
+        #   2. In _reset, only rebuilding outputs for the rows in reset_idx
+        #      via the temp-slice helper (_update_subset_outputs_), and
+        #      writing those rows back into the buffers in place.
+        #   3. Returning the buffers as the reset TD. The non-reset rows
+        #      carry over unchanged from the previous _step, which is exactly
+        #      what their obs/state should be (they haven't moved).
+        #
+        # Lazy allocation: buffers are None until the first build runs, at
+        # which point we allocate them at full [B, ...] shape. The first
+        # reset (before any _step) falls back to a full-B build to populate
+        # them — that one-time cost is identical to the old behaviour.
+        # ------------------------------------------------------------------
+        self._obs_buf:           Optional[torch.Tensor] = None      # [B, A, obs_dim]
+        self._state_buf:         Optional[torch.Tensor] = None      # [B, state_dim]
+        self._fofe_obs_buf:      Dict[str, torch.Tensor] = {}       # FOFE actor channels
+        self._fofe_critic_buf:   Dict[str, torch.Tensor] = {}       # FOFE critic channels
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -429,62 +460,81 @@ class StrikeEA2DEnv(EnvBase):
         """
         # Constrained range = base range - jamming effect (minimum detectable range when jammed)
         unconstrained_range = self.radar_range
-        
+
         # Target spawn distance: 90% of detection range (safe annulus)
         spawn_distance = 0.7 * unconstrained_range
-        
-        target_pos = torch.zeros(B, T, 2, device=self.device)
-        
-        known_radar_idx = torch.arange(self.n_known_radars, device=self.device)
-        unknown_radar_idx = torch.arange(self.n_known_radars, self.n_radars, device=self.device)
 
-        # For each batch, create radar assignments while keeping known/unknown grouped
-        for b in range(B):
-            radar_assignments = torch.zeros(T, dtype=torch.long, device=self.device)
+        if T == 0:
+            return torch.zeros(B, 0, 2, device=self.device)
 
-            def _assign_group(start_idx: int, count: int, group_radar_idx: torch.Tensor):
-                if count <= 0:
-                    return
-                if group_radar_idx.numel() == 0:
-                    base = torch.arange(count, device=self.device) % max(R, 1)
-                else:
-                    base_local = torch.arange(count, device=self.device) % group_radar_idx.numel()
-                    base = group_radar_idx[base_local]
-                perm_local = torch.randperm(count, device=self.device)
-                radar_assignments[start_idx:start_idx + count] = base[perm_local]
+        # ------------------------------------------------------------------
+        # Vectorised version of the old `for b in range(B): for t in range(T)`
+        # loop. Two ideas:
+        #   (1) The base radar-assignment template (known-group then unknown-
+        #       group, each cycled to fill its slot range) is the SAME across
+        #       envs. Compute it once.
+        #   (2) Per-env shuffling within each group is just argsort(rand(...)),
+        #       which gives independent random permutations along dim -1.
+        #   (3) Angles and offsets are independent samples per (env, target).
+        # Everything below is a single batched tensor op; no Python loops,
+        # no .item() syncs. Same outputs distributionally as the old code.
+        # ------------------------------------------------------------------
+        known_target_count   = min(self.n_known_targets, T)
+        unknown_target_count = max(0, T - known_target_count)
 
-            known_target_count = min(self.n_known_targets, T)
-            unknown_target_count = max(0, T - known_target_count)
+        # ---- Build the cross-env "base" radar-index template (length T) ----
+        base_parts: List[torch.Tensor] = []
+        if known_target_count > 0:
+            if self.n_known_radars > 0:
+                known_radar_idx = torch.arange(self.n_known_radars, device=self.device)
+                base_known = known_radar_idx[
+                    torch.arange(known_target_count, device=self.device) % self.n_known_radars
+                ]
+            else:
+                base_known = torch.arange(known_target_count, device=self.device) % max(R, 1)
+            base_parts.append(base_known)
+        if unknown_target_count > 0:
+            n_unk = self.n_radars - self.n_known_radars
+            if n_unk > 0:
+                unknown_radar_idx = torch.arange(self.n_known_radars, self.n_radars, device=self.device)
+                base_unknown = unknown_radar_idx[
+                    torch.arange(unknown_target_count, device=self.device) % n_unk
+                ]
+            else:
+                base_unknown = torch.arange(unknown_target_count, device=self.device) % max(R, 1)
+            base_parts.append(base_unknown)
+        base = torch.cat(base_parts, dim=0)  # [T]
 
-            _assign_group(0, known_target_count, known_radar_idx)
-            _assign_group(known_target_count, unknown_target_count, unknown_radar_idx)
-            
-            # Spawn each target near its assigned radar
-            for t in range(T):
-                assigned_radar_idx = radar_assignments[t].item()
-                radar = radar_pos[b, assigned_radar_idx, :]  # [2]
-                
-                # Random angle around the radar (within configured range)
-                lo = self.target_spawn_angle_lo
-                hi = self.target_spawn_angle_hi
-                span = (hi - lo) % (2.0 * math.pi)  # handle wrap-around
-                if span == 0.0:
-                    span = 2.0 * math.pi  # full circle when lo == hi
-                angle = lo + span * torch.rand(1, device=self.device).item()
-                
-                # Offset at fixed distance in random direction
-                offset = spawn_distance * torch.tensor([
-                    math.cos(angle),
-                    math.sin(angle)
-                ], device=self.device)
-                
-                candidate = radar + offset  # [2]
-                
-                # Clamp to world bounds
-                candidate = candidate.clamp(self.low, self.high)
-                
-                target_pos[b, t, :] = candidate
-        
+        # ---- Per-env random permutations within each group ----------------
+        # argsort(rand(B, count)) gives an independent permutation per row.
+        radar_assignments = torch.empty(B, T, dtype=torch.long, device=self.device)
+        if known_target_count > 0:
+            perm_k = torch.argsort(
+                torch.rand(B, known_target_count, device=self.device), dim=-1
+            )                                                              # [B, k]
+            radar_assignments[:, :known_target_count] = base[:known_target_count][perm_k]
+        if unknown_target_count > 0:
+            perm_u = torch.argsort(
+                torch.rand(B, unknown_target_count, device=self.device), dim=-1
+            )                                                              # [B, u]
+            radar_assignments[:, known_target_count:] = base[known_target_count:][perm_u]
+
+        # ---- Sample angles and offsets per (env, target) ------------------
+        lo = self.target_spawn_angle_lo
+        hi = self.target_spawn_angle_hi
+        span = (hi - lo) % (2.0 * math.pi)
+        if span == 0.0:
+            span = 2.0 * math.pi
+        angles = lo + span * torch.rand(B, T, device=self.device)          # [B, T]
+        offsets = spawn_distance * torch.stack(
+            (torch.cos(angles), torch.sin(angles)), dim=-1
+        )                                                                   # [B, T, 2]
+
+        # ---- Gather the assigned radar position for each (env, target) ----
+        gather_idx = radar_assignments.unsqueeze(-1).expand(B, T, 2)       # [B, T, 2]
+        assigned_radars = radar_pos.gather(1, gather_idx)                  # [B, T, 2]
+
+        target_pos = (assigned_radars + offsets).clamp(self.low, self.high)
         return target_pos
 
     # ------------------------------------------------------------------
@@ -680,18 +730,30 @@ class StrikeEA2DEnv(EnvBase):
             else:
                 self._jammer_prev_dist[reset_idx] = 0.0
 
-        self._update_geometry_cache()
-        self._update_comm_cache()
+        # ── Step 4: partial-reset output update ──────────────────────────
+        # The persistent buffers (_obs_buf, _state_buf, _fofe_*_buf) hold
+        # the most recent post-step outputs for ALL B envs. The non-reset
+        # envs are still valid in those buffers (their state didn't change),
+        # so we only have to rebuild rows for reset_idx.
+        #
+        # Edge case: the very first call (before any _step has run) finds
+        # the buffers None; we then do a one-time full-B build to allocate
+        # them, which matches the old behaviour.
+        if self._obs_buf is None:
+            self._ensure_persistent_buffers_()
+        elif n_reset > 0:
+            self._update_subset_outputs_(reset_idx)
+
         td = TensorDict({}, batch_size=[B], device=self.device)
-        td.set(self._obs_key, self._build_local_obs())
-        td.set("state",       self._build_global_state())
+        td.set(self._obs_key, self._obs_buf)
+        td.set("state",       self._state_buf)
         td.set("done",        torch.zeros(B, 1, dtype=torch.bool, device=self.device))
         td.set("terminated",  torch.zeros(B, 1, dtype=torch.bool, device=self.device))
-        # ---- FOFE: emit structured per-channel observations ----
+        # ---- FOFE: emit structured per-channel observations from buffers ----
         if self.use_fofe:
-            for k, v in self._build_fofe_obs().items():
+            for k, v in self._fofe_obs_buf.items():
                 td.set(("agents", k), v)
-            for k, v in self._build_fofe_critic_state().items():
+            for k, v in self._fofe_critic_buf.items():
                 td.set(k, v)
         return td
 
@@ -1199,14 +1261,24 @@ class StrikeEA2DEnv(EnvBase):
         next_td.set("done",       done.to(torch.bool))
         next_td.set("terminated", terminated.to(torch.bool))
         self._update_comm_cache()
-        next_td.set(self._obs_key, self._build_local_obs())
-        next_td.set("state",       self._build_global_state())
-        # ---- FOFE: emit structured per-channel observations ----
+        # Build obs/state/fofe ONCE and reuse for both the returned TD and
+        # the persistent buffers (Step 4 — reused by the next _reset).
+        _local_obs   = self._build_local_obs()
+        _global_state = self._build_global_state()
+        next_td.set(self._obs_key, _local_obs)
+        next_td.set("state",       _global_state)
+        _fofe_obs_dict: Optional[Dict[str, torch.Tensor]] = None
+        _fofe_critic_dict: Optional[Dict[str, torch.Tensor]] = None
         if self.use_fofe:
-            for k, v in self._build_fofe_obs().items():
+            _fofe_obs_dict    = self._build_fofe_obs()
+            _fofe_critic_dict = self._build_fofe_critic_state()
+            for k, v in _fofe_obs_dict.items():
                 next_td.set(("agents", k), v)
-            for k, v in self._build_fofe_critic_state().items():
+            for k, v in _fofe_critic_dict.items():
                 next_td.set(k, v)
+        # Cache fresh outputs in persistent buffers — _reset uses these as
+        # the "baseline" so it only has to rebuild rows for reset_idx.
+        self._cache_step_outputs_(_local_obs, _global_state, _fofe_obs_dict, _fofe_critic_dict)
 
         # Track completed episode stats in Python list (immune to auto-reset).
         # Vectorised: gather all per-env stats for done envs into ONE tensor,
@@ -1377,6 +1449,121 @@ class StrikeEA2DEnv(EnvBase):
         rel_angle = torch.atan2(torch.sin(rel_angle), torch.cos(rel_angle))  # wrap
 
         return dist, rel_angle
+
+    # ------------------------------------------------------------------
+    # Persistent output buffer helpers (Step 4 — partial-reset speed-up)
+    # ------------------------------------------------------------------
+
+    def _cache_step_outputs_(
+        self,
+        local_obs: torch.Tensor,
+        global_state: torch.Tensor,
+        fofe_obs: Optional[Dict[str, torch.Tensor]] = None,
+        fofe_critic: Optional[Dict[str, torch.Tensor]] = None,
+    ) -> None:
+        """Copy a fresh _step's outputs into persistent buffers.
+
+        Called from _step at the very end. The .clone() detaches each tensor
+        from the TD that _step returned, so subsequent in-place writes in
+        _reset don't corrupt the collector's view of the previous step.
+        """
+        self._obs_buf   = local_obs.detach().clone()
+        self._state_buf = global_state.detach().clone()
+        if fofe_obs is not None:
+            self._fofe_obs_buf = {k: v.detach().clone() for k, v in fofe_obs.items()}
+        if fofe_critic is not None:
+            self._fofe_critic_buf = {k: v.detach().clone() for k, v in fofe_critic.items()}
+
+    def _update_subset_outputs_(self, idx: torch.Tensor) -> None:
+        """Rebuild outputs for env indices in `idx` and update persistent buffers.
+
+        Uses a temp-slice trick: every per-env state tensor whose first dim
+        matches num_envs is temporarily swapped for its idx-sliced view, and
+        self.num_envs is set to len(idx). The standard builders (which read
+        these attributes) then operate naturally on the subset. After the
+        builders return, all swapped attributes are restored.
+
+        Why temp-slice instead of subset-aware builders: the build functions
+        are several hundred lines of tensor code spread across the base env
+        and (potentially) subclasses. Adding an idx parameter to each would
+        be invasive and fragile. The swap is local, single-method, and easy
+        to reason about.
+
+        Assumes self._obs_buf, self._state_buf, self._fofe_obs_buf,
+        self._fofe_critic_buf are already allocated at full [num_envs, ...]
+        shape (see _ensure_persistent_buffers_).
+        """
+        n_sub = int(idx.numel())
+        if n_sub == 0:
+            return
+
+        # Attributes to slice. Anything whose first dim is num_envs goes here.
+        # Geometry cache is included so the temp _update_geometry_cache call
+        # below computes subset geometry that the builders then read.
+        slice_attrs: Tuple[str, ...] = (
+            # Kinematic / role state
+            "agent_pos", "agent_heading", "agent_speed", "agent_heading_rate", "agent_alive",
+            "target_pos", "target_alive", "target_known",
+            "radar_pos", "radar_known", "radar_eff_range",
+            "step_count",
+            # HF subclass adds these — slice them if present, ignore otherwise.
+            "jammer_bearing", "beam_rate",
+            "radar_eff_range_per_agent",
+            "_jammer_in_cone", "_jammer_abs_angular_delta",
+            # Geometry & comm caches (recomputed inside the swap)
+            "_c_rel_ar",  "_c_dist_ar",  "_c_angle_ar",
+            "_c_rel_at",  "_c_dist_at",  "_c_angle_at",
+            "_c_rel_aa",  "_c_dist_aa",  "_c_angle_aa",
+            "_c_comm_reach",
+        )
+
+        saved: Dict[str, torch.Tensor] = {}
+        for attr in slice_attrs:
+            v = getattr(self, attr, None)
+            if isinstance(v, torch.Tensor) and v.dim() > 0 and v.shape[0] == self.num_envs:
+                saved[attr] = v
+                setattr(self, attr, v[idx])
+        saved_num_envs = self.num_envs
+        self.num_envs = n_sub
+
+        try:
+            self._update_geometry_cache()
+            self._update_comm_cache()
+            sub_obs   = self._build_local_obs()
+            sub_state = self._build_global_state()
+            sub_fofe_obs    = self._build_fofe_obs()           if self.use_fofe else None
+            sub_fofe_critic = self._build_fofe_critic_state()  if self.use_fofe else None
+        finally:
+            # Restore everything — order doesn't matter, each set is independent.
+            self.num_envs = saved_num_envs
+            for attr, original in saved.items():
+                setattr(self, attr, original)
+
+        # Write the freshly built subset rows into the persistent buffers.
+        # The buffers are full-B and the assignment uses advanced indexing.
+        self._obs_buf[idx]   = sub_obs
+        self._state_buf[idx] = sub_state
+        if self.use_fofe:
+            for k, v in sub_fofe_obs.items():
+                self._fofe_obs_buf[k][idx] = v
+            for k, v in sub_fofe_critic.items():
+                self._fofe_critic_buf[k][idx] = v
+
+    def _ensure_persistent_buffers_(self) -> None:
+        """Allocate _obs_buf etc. on the first reset by doing a one-time full-B
+        build. Subsequent resets only update the slice that needs refreshing.
+        """
+        self._update_geometry_cache()
+        self._update_comm_cache()
+        full_obs   = self._build_local_obs()
+        full_state = self._build_global_state()
+        self._obs_buf   = full_obs.detach().clone()
+        self._state_buf = full_state.detach().clone()
+        if self.use_fofe:
+            for k, v in self._build_fofe_obs().items():
+                self._fofe_obs_buf[k] = v.detach().clone()
+            for k, v in self._build_fofe_critic_state().items():
+                self._fofe_critic_buf[k] = v.detach().clone()
 
     def _update_geometry_cache(self) -> None:
         """Compute all pairwise geometry tensors once after positions are updated.
