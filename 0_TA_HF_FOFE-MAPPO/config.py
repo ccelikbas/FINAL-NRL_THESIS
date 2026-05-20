@@ -192,7 +192,7 @@ class EnvConfig:
 class PPOConfig:
     """Shared PPO hyperparameters for both striker and jammer MAPPO."""
     num_envs: int = 1024
-    n_iters: int = 20
+    n_iters: int = 1
     frames_per_batch: Optional[int] = None
     num_epochs: int = 10
     minibatch_size: int = 16384
@@ -287,7 +287,7 @@ class HFRadarConfig:
     """
     # Radar SNR parameters
     radar_tx_power: float = 1e6                 # P_t [W]
-    radar_tx_gain: float = 40.0                 # G_t [dB]
+    radar_tx_gain: float = 38.0                 # G_t [dB]
     radar_rx_gain: Optional[float] = None       # G_r [dB], defaults to G_t
     wavelength: float = 0.03                    # lambda [m]
     target_rcs: float = 1.0                     # sigma [m^2]
