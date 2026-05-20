@@ -591,6 +591,12 @@ class StrikeEA2DEnv(EnvBase):
     def _reset(self, tensordict: Optional[TensorDict] = None, **kwargs) -> TensorDict:
         B, A, T, R = self.num_envs, self.n_agents, self.n_targets, self.n_radars
 
+        # Optional sub-bucket timing — populated only when the HF subclass
+        # (which owns _prof_tic/_prof_lap) is active. getattr falls back to
+        # no-op lambdas so the base env still works standalone.
+        _prof_tic = getattr(self, "_prof_tic", lambda: None)
+        _prof_lap = getattr(self, "_prof_lap", lambda name, t: None)
+
         reset_mask = self._extract_reset_mask(tensordict)
         reset_idx = reset_mask.nonzero(as_tuple=False).squeeze(-1)
         n_reset = int(reset_idx.numel())
@@ -619,6 +625,7 @@ class StrikeEA2DEnv(EnvBase):
             self.agent_alive[reset_idx] = True
 
             # --- Radars: top half of map, not too close to borders ---
+            _t_radar = _prof_tic()
             radar_pos_reset = torch.zeros(n_reset, R, 2, device=self.device)
             if self._layouts is not None:
                 # Use pre-generated deterministic layouts (cycle through them)
@@ -635,10 +642,13 @@ class StrikeEA2DEnv(EnvBase):
                         R, x_lo, x_hi, y_lo, y_hi, min_sep, self._rng, device=self.device,
                     ).to(self.device)
             self.radar_pos[reset_idx] = radar_pos_reset
+            _prof_lap("env_reset_radar_spawn", _t_radar)
 
             # Spawn targets relative to radars (strategic zone logic)
+            _t_target = _prof_tic()
             target_pos_reset = self._spawn_targets_in_valid_zones(n_reset, T, R, radar_pos_reset)
             self.target_pos[reset_idx] = target_pos_reset
+            _prof_lap("env_reset_target_spawn", _t_target)
             self.target_alive[reset_idx] = True
             target_known_reset = torch.zeros(n_reset, T, dtype=torch.bool, device=self.device)
             if self.n_known_targets > 0:

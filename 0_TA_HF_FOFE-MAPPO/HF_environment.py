@@ -261,12 +261,17 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
     def _reset(self, tensordict=None, **kwargs):
         # Zero beam state for the envs being reset BEFORE building obs
         # so the first observation post-reset reflects the cleared beam.
+        # Times the whole reset under the 'env_reset' profile bucket so the
+        # FINE profile can show the gap between rollout total and env_sum.
+        _t_total = self._prof_tic()
         reset_mask = self._extract_reset_mask(tensordict)
         reset_idx = reset_mask.nonzero(as_tuple=False).squeeze(-1)
         if reset_idx.numel() > 0 and self.n_jammers > 0:
             self.jammer_bearing[reset_idx] = 0.0
             self.beam_rate[reset_idx] = 0.0
-        return super()._reset(tensordict, **kwargs)
+        result = super()._reset(tensordict, **kwargs)
+        self._prof_lap("env_reset", _t_total)
+        return result
 
     # ------------------------------------------------------------------
     # Fine-grained profiling helpers (used only when set_profile_active(True))

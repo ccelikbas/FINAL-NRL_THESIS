@@ -100,9 +100,9 @@ class EnvConfig:
     # Team composition
     n_strikers: int = 1
     n_jammers: int = 1
-    n_known_targets: int = 1
+    n_known_targets: int = 2
     n_unknown_targets: int = 0
-    n_known_radars: int = 1
+    n_known_radars: int = 2
     n_unknown_radars: int = 0
     n_targets: int = 0
     n_radars: int = 0
@@ -111,7 +111,13 @@ class EnvConfig:
     world_bounds: Tuple[float, float] = (0.0, 1.0)
     dt: float = 1.0
     max_steps: int = 150
-    n_env_layouts: int = 0
+    # Pre-generated radar layouts. n_env_layouts > 0 builds a pool of valid
+    # radar positions ONCE at env init (using the slow rejection sampler)
+    # and resets cycle through them — avoids running _sample_spaced_radars
+    # per-env-per-episode-reset, which is the dominant reset-time cost when
+    # multiple radars + a tight min_sep force many rejection retries.
+    # Set to 0 for the old random-per-reset behaviour.
+    n_env_layouts: int = 256
     radar_min_sep: float = 0.5
     target_spawn_angle_range: Tuple[float, float] = (0, 360)
 
@@ -186,7 +192,7 @@ class EnvConfig:
 class PPOConfig:
     """Shared PPO hyperparameters for both striker and jammer MAPPO."""
     num_envs: int = 512
-    n_iters: int = 300
+    n_iters: int = 20
     frames_per_batch: Optional[int] = None
     num_epochs: int = 10
     minibatch_size: int = 8192
