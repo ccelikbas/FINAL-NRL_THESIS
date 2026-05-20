@@ -374,15 +374,19 @@ class StrikeEA2DEnv(EnvBase):
         )
 
     def _pregenerate_layouts(self):
-        """Pre-generate fixed radar positions for n_env_layouts distinct scenarios.
+        """Pre-generate a pool of valid radar layouts for domain randomisation.
 
-        Radars are placed within the configured spawn zone with minimum spacing.
-        Each layout uses a deterministic seed for reproducibility.
+        Builds n_env_layouts distinct radar placements (each respecting
+        radar_min_sep) with deterministic per-layout seeds, then stacks the
+        whole pool into a single [L, R, 2] tensor on self.device. _reset
+        draws random layout indices from this tensor per env per reset, so
+        every env sees a different layout each episode while we still pay
+        the slow rejection-sampling cost only once at construction time.
         """
-        layouts = []
         x_lo, x_hi = 0.2, 0.8
         y_lo, y_hi = 0.4, 0.8
         min_sep = self.radar_min_sep
+        layouts = []
         for seed_idx in range(self.n_env_layouts):
             rng = torch.Generator()
             rng.manual_seed(seed_idx + 1000)  # Offset to avoid collision with main RNG
@@ -390,7 +394,9 @@ class StrikeEA2DEnv(EnvBase):
                 self.n_radars, x_lo, x_hi, y_lo, y_hi, min_sep, rng,
             )
             layouts.append(radar_pos)
-        return layouts
+        # Stack onto self.device once so _reset can fetch positions for an
+        # arbitrary batch of envs with a single index op.
+        return torch.stack(layouts, dim=0).to(self.device)
 
     def _compute_obs_dim(self) -> int:
         # Fixed-size ego-centric relative observations (independent of team sizes):
@@ -675,18 +681,25 @@ class StrikeEA2DEnv(EnvBase):
             self.agent_alive[reset_idx] = True
 
             # --- Radars: top half of map, not too close to borders ---
+            # Domain randomisation: every env being reset gets an independently
+            # sampled radar configuration. With a pre-generated layout pool
+            # (n_env_layouts > 0) we draw random indices into the pool — this
+            # used to be `env_i % L`, which deterministically locked each env
+            # to a single layout for its entire lifetime (so vis with num_envs=1
+            # always saw layout 0). Without a pool we fall back to per-env
+            # rejection sampling (slow but already randomised).
             _t_radar = _prof_tic()
-            radar_pos_reset = torch.zeros(n_reset, R, 2, device=self.device)
             if self._layouts is not None:
-                # Use pre-generated deterministic layouts (cycle through them)
-                for i, env_i in enumerate(reset_idx.tolist()):
-                    layout_idx = env_i % len(self._layouts)
-                    radar_pos_reset[i] = self._layouts[layout_idx].to(self.device)
+                L = self._layouts.shape[0]
+                layout_idx = torch.randint(
+                    0, L, (n_reset,), generator=self._rng, device=self.device,
+                )
+                radar_pos_reset = self._layouts[layout_idx]                    # [n_reset, R, 2]
             else:
-                # Random radar positions with minimum spacing constraint
                 x_lo, x_hi = 0.2, 0.8
                 y_lo, y_hi = 0.6, 0.8
                 min_sep = self.radar_min_sep
+                radar_pos_reset = torch.zeros(n_reset, R, 2, device=self.device)
                 for i in range(n_reset):
                     radar_pos_reset[i] = self._sample_spaced_radars(
                         R, x_lo, x_hi, y_lo, y_hi, min_sep, self._rng, device=self.device,

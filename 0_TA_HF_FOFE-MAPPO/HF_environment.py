@@ -198,7 +198,7 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         #                jammer_bearing ← wrap(jammer_bearing + beam_rate)
         self._n_motion_choices = int(self.n_choices)               # 7
         self._beam_act_table = torch.tensor(
-            [-1.0, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 1.0],
+            [-0.5, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.5],
             device=self.device,
         )
         self._n_beam_choices = int(self._beam_act_table.numel())   # 9
