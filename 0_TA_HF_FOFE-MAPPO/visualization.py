@@ -149,13 +149,15 @@ def plot_training(
     ax.legend(fontsize=7)
     ax.grid(True)
 
-    # --- Row 1, Col 1: Eval Survival & Completion ---
+    # --- Row 1, Col 1: Eval Survival, Completion & Targets Destroyed ---
     ax = axes[1, 1]
     if "eval_survival_rate" in logs:
         _plot_valid(ax, logs["eval_survival_rate"], "eval_survival_ratio")
     if "eval_task_completion_rate" in logs:
         _plot_valid(ax, logs["eval_task_completion_rate"], "eval_completion_ratio")
-    ax.set_title("Eval Survival & Completion")
+    if "eval_targets_destroyed_rate" in logs:
+        _plot_valid(ax, logs["eval_targets_destroyed_rate"], "eval_targets_destroyed_ratio")
+    ax.set_title("Eval Survival, Completion & Targets Destroyed")
     ax.set_xlabel("Iteration")
     ax.legend()
     ax.grid(True)
@@ -853,11 +855,12 @@ def plot_comparison(
     ax.legend(fontsize=8)
     ax.grid(True)
 
-    # ── Row 1, Col 1: Eval Survival & Completion ─────────────────
+    # ── Row 1, Col 1: Eval Survival, Completion & Targets Destroyed ──
     ax = axes[1, 1]
-    _dual(ax, "eval_survival_rate",        "survival_rate",    "blue",   legacy_logs, fofe_logs)
-    _dual(ax, "eval_task_completion_rate",  "completion_rate",  "orange", legacy_logs, fofe_logs)
-    ax.set_title("Eval Survival & Completion")
+    _dual(ax, "eval_survival_rate",          "survival_rate",          "blue",   legacy_logs, fofe_logs)
+    _dual(ax, "eval_task_completion_rate",   "completion_rate",        "orange", legacy_logs, fofe_logs)
+    _dual(ax, "eval_targets_destroyed_rate", "targets_destroyed_rate", "green",  legacy_logs, fofe_logs)
+    ax.set_title("Eval Survival, Completion & Targets Destroyed")
     ax.set_xlabel("Iteration")
     ax.legend(fontsize=7, ncol=2)
     ax.grid(True)
