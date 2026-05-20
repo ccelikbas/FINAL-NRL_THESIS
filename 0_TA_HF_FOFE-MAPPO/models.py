@@ -221,10 +221,14 @@ class FOFEPolicyNet(nn.Module):
     """FOFE-based decentralized actor for one role.
 
     Processes 4 observation channels:
-      1. Self-obs MLP    (fixed-size: 6 features)
-      2. FOFE agents     (variable-size set: 4 features per entity)
-      3. FOFE targets    (variable-size set: 3 features per entity)
-      4. FOFE radars     (variable-size set: 3 features per entity)
+      1. Self-obs MLP    (fixed-size: d_self features; base=6, HF=+2 beam state)
+      2. FOFE agents     (variable-size set: 5 features per entity
+                          — dx_body, dy_body, dist, heading, role)
+      3. FOFE targets    (variable-size set: 4 features per entity
+                          — dx_body, dy_body, dist, alive)
+      4. FOFE radars     (variable-size set: 4+E features per entity
+                          — dx_body, dy_body, dist, jammed, *radar_extra;
+                          HF env appends a signed beam→radar angle)
     → concatenate → fusion MLP → action head
 
     All agents of the same role share these weights (parameter sharing).
@@ -232,8 +236,8 @@ class FOFEPolicyNet(nn.Module):
 
     def __init__(self, fofe_cfg: FOFEConfig, n_agents: int,
                  act_dim: int, n_choices: int,
-                 d_self: int = 6, d_agents: int = 4,
-                 d_targets: int = 3, d_radars: int = 3):
+                 d_self: int = 6, d_agents: int = 5,
+                 d_targets: int = 4, d_radars: int = 4):
         super().__init__()
         self.act_dim = act_dim
         self.n_choices = n_choices
@@ -313,9 +317,9 @@ class FOFEValueNet(nn.Module):
     """FOFE-based centralized critic for one role.
 
     Receives global state decomposed into entity sets (all visible):
-      - agent set   [B, A, 7]   (all agents — pos,speed,heading,omega,role,alive)
+      - agent set   [B, A, 7]   (all agents — pos, speed, heading, omega, role, alive)
       - target set  [B, T, 3]   (all targets — pos, alive)
-      - radar set   [B, R, 4]   (all radars — pos, active, eff_range)
+      - radar set   [B, R, 3]   (all radars — pos, jammed)
       - time feat   [B, 1]      (scalar)
     Each set passes through its own FOFE block, results are concatenated
     with time feature, fused, and projected to per-agent values.
@@ -328,7 +332,7 @@ class FOFEValueNet(nn.Module):
     """
 
     def __init__(self, fofe_cfg: FOFEConfig, n_role_agents: int,
-                 d_agents: int = 7, d_targets: int = 3, d_radars: int = 4):
+                 d_agents: int = 7, d_targets: int = 3, d_radars: int = 3):
         super().__init__()
         self.n_role_agents = n_role_agents
 
@@ -635,13 +639,26 @@ def make_combined_policy(env: StrikeEA2DEnv, hidden=256, depth=3,
     use_fofe = fofe_cfg is not None and fofe_cfg.use_fofe
 
     d_self = int(getattr(env, "d_self", 6))
+    # Per-channel actor feature dims (must match env._build_fofe_obs output).
+    # See StrikeEA2DEnv._build_fofe_obs for the canonical layout.
+    d_agents_actor  = 5
+    d_targets_actor = 4
+    d_radars_actor  = 4 + int(getattr(env, "_radar_extra_dim", lambda: 0)())
 
     if use_fofe:
         striker_net = FOFEPolicyNet(
-            fofe_cfg, env.n_strikers, env.act_dim, env.n_choices, d_self=d_self,
+            fofe_cfg, env.n_strikers, env.act_dim, env.n_choices,
+            d_self=d_self,
+            d_agents=d_agents_actor,
+            d_targets=d_targets_actor,
+            d_radars=d_radars_actor,
         ).to(env.device)
         jammer_net = FOFEPolicyNet(
-            fofe_cfg, env.n_jammers, env.act_dim, env.n_choices, d_self=d_self,
+            fofe_cfg, env.n_jammers, env.act_dim, env.n_choices,
+            d_self=d_self,
+            d_agents=d_agents_actor,
+            d_targets=d_targets_actor,
+            d_radars=d_radars_actor,
         ).to(env.device)
     else:
         striker_net = RolePolicyNet(env.obs_dim, env.act_dim, env.n_choices, env.n_strikers, hidden, depth).to(env.device)
@@ -671,9 +688,9 @@ def make_combined_critic(env: StrikeEA2DEnv, hidden=256, depth=3,
         # Critic entity dims match _build_fofe_critic_state output:
         #   agents: 7 (x,y,v,ψ,ω,role,alive)
         #   targets: 3 (x,y,alive)
-        #   radars: 4 (x,y,active,eff_range)
-        striker_critic = FOFEValueNet(fofe_cfg, env.n_strikers, d_agents=7, d_targets=3, d_radars=4).to(env.device)
-        jammer_critic = FOFEValueNet(fofe_cfg, env.n_jammers, d_agents=7, d_targets=3, d_radars=4).to(env.device)
+        #   radars:  3 (x,y,jammed)
+        striker_critic = FOFEValueNet(fofe_cfg, env.n_strikers, d_agents=7, d_targets=3, d_radars=3).to(env.device)
+        jammer_critic = FOFEValueNet(fofe_cfg, env.n_jammers, d_agents=7, d_targets=3, d_radars=3).to(env.device)
     else:
         striker_critic = RoleValueNet(env.state_dim, env.n_strikers, hidden, depth).to(env.device)
         jammer_critic = RoleValueNet(env.state_dim, env.n_jammers, hidden, depth).to(env.device)

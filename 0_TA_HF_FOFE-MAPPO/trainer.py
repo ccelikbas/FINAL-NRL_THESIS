@@ -422,13 +422,13 @@ def _split_fofe_by_role(fofe_dict: Dict[str, torch.Tensor],
 
     Actor FOFE obs have shape [*, A, ...] where dim for agent is at position
     determined by the key:
-      obs_self:         [*, A, 6]          → split on dim -2
-      obs_agents_feat:  [*, A, E_a, 4]    → split on dim -3
-      obs_agents_mask:  [*, A, E_a]       → split on dim -2
-      obs_targets_feat: [*, A, E_t, 3]    → split on dim -3
-      obs_targets_mask: [*, A, E_t]       → split on dim -2
-      obs_radars_feat:  [*, A, E_r, 3]    → split on dim -3
-      obs_radars_mask:  [*, A, E_r]       → split on dim -2
+      obs_self:         [*, A, d_self]       → split on dim -2
+      obs_agents_feat:  [*, A, E_a, 5]       → split on dim -3
+      obs_agents_mask:  [*, A, E_a]          → split on dim -2
+      obs_targets_feat: [*, A, E_t, 4]       → split on dim -3
+      obs_targets_mask: [*, A, E_t]          → split on dim -2
+      obs_radars_feat:  [*, A, E_r, 4 + E]   → split on dim -3
+      obs_radars_mask:  [*, A, E_r]          → split on dim -2
 
     We split using key-based role-axis positions (not size-based heuristics),
     which avoids ambiguity when unrelated dimensions happen to equal ns+nj.

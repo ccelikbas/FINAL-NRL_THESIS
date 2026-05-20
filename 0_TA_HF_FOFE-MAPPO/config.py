@@ -100,9 +100,9 @@ class EnvConfig:
     # Team composition
     n_strikers: int = 1
     n_jammers: int = 1
-    n_known_targets: int = 2
+    n_known_targets: int = 1
     n_unknown_targets: int = 0
-    n_known_radars: int = 2
+    n_known_radars: int = 1
     n_unknown_radars: int = 0
     n_targets: int = 0
     n_radars: int = 0
@@ -192,7 +192,7 @@ class EnvConfig:
 class PPOConfig:
     """Shared PPO hyperparameters for both striker and jammer MAPPO."""
     num_envs: int = 1024
-    n_iters: int = 1
+    n_iters: int = 300
     frames_per_batch: Optional[int] = None
     num_epochs: int = 10
     minibatch_size: int = 16384
@@ -209,7 +209,7 @@ class PPOConfig:
     max_iter_time_s: Optional[float] = 250.0   # safety timeout per iteration (None = disabled)
 
     seed: int = 0
-    log_every: int = 5
+    log_every: int = 10
     device: torch.device = field(default_factory=lambda: torch.device("cuda" if torch.cuda.is_available() else "cpu"))
 
     # ── Hardware optimization flags ─────────────────────────────────

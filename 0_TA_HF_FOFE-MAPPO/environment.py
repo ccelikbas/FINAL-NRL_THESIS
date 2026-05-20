@@ -399,13 +399,20 @@ class StrikeEA2DEnv(EnvBase):
         return torch.stack(layouts, dim=0).to(self.device)
 
     def _compute_obs_dim(self) -> int:
-        # Fixed-size ego-centric relative observations (independent of team sizes):
-        #   own state:     [x, y, speed, heading, heading_rate, t_norm, *extra]    = 6 + d_extra
-        #   other agents:  top-K slots [dist, rel_angle, heading, role]             = K_a * 4
-        #   radars:        top-K slots [dist, rel_angle, jammed]                    = K_r * 3
-        #   targets:       top-K slots [dist, rel_angle, alive]                     = K_t * 3
-        # Unseen or missing entities are zero-padded in their slots.
-        return self.d_self + self.n_other_agent_obs_slots * 4 + self.n_radar_obs_slots * 3 + self.n_target_obs_slots * 3
+        # Fixed-size ego-centric body-frame observations (independent of team sizes):
+        #   own state:     [x, y, speed, heading, heading_rate, t_norm, *extra]     = 6 + d_extra
+        #   other agents:  top-K slots [dx, dy, dist, heading, role]                 = K_a * 5
+        #   radars:        top-K slots [dx, dy, dist, jammed, *radar_extra]          = K_r * (4 + radar_extra)
+        #   targets:       top-K slots [dx, dy, dist, alive]                          = K_t * 4
+        # (dx, dy) are in the observing agent's body frame; dist is the Euclidean
+        # distance for convenience (redundant with sqrt(dx^2+dy^2) but cheap and
+        # explicit). Unseen or missing entities are zero-padded.
+        return (
+            self.d_self
+            + self.n_other_agent_obs_slots * 5
+            + self.n_radar_obs_slots * (4 + int(self._radar_extra_dim()))
+            + self.n_target_obs_slots * 4
+        )
 
     # ------------------------------------------------------------------
     # Self-observation extension hooks
@@ -426,14 +433,40 @@ class StrikeEA2DEnv(EnvBase):
         """
         return torch.zeros(B, A, 0, device=self.device, dtype=torch.float32)
 
+    # ------------------------------------------------------------------
+    # Radar-observation extension hooks
+    # ------------------------------------------------------------------
+    # Subclasses can append role-specific per-radar features to the
+    # actor's radar slot (e.g. HF env adds the signed beam-to-radar
+    # angle for jammers) and can override the "jammed" flag semantics
+    # used by both actor obs and critic state (e.g. HF env uses the
+    # beam-in-cone test instead of effective-range degradation).
+
+    def _radar_extra_dim(self) -> int:
+        """Extra per-(agent, radar) floats appended to each radar slot."""
+        return 0
+
+    def _build_radar_extra(self, B: int, A: int, R: int) -> torch.Tensor:
+        """Return the per-(agent, radar) feature extension [B, A, R, d_extra]."""
+        return torch.zeros(B, A, R, 0, device=self.device, dtype=torch.float32)
+
+    def _radar_jammed_flag(self) -> torch.Tensor:
+        """Return [B, R] float in {0, 1}: 1 = radar currently jammed.
+
+        Base semantics: any jammer has degraded the radar's effective
+        detection range. HF env overrides to "any alive jammer's beam
+        cone covers the radar".
+        """
+        return (self.radar_eff_range < self.radar_range).float()
+
     def _compute_state_dim(self) -> int:
         A, T, R = self.n_agents, self.n_targets, self.n_radars
         # Global absolute state for centralised critic:
         #   Per agent:  (x, y, v, ψ, ω, role, alive)     = 7 × A
         #   Per target: (x, y, alive)                      = 3 × T
-        #   Per radar:  (x, y, active, detection_radius)   = 4 × R
+        #   Per radar:  (x, y, jammed)                     = 3 × R
         #   Global:     (t_norm)                           = 1
-        return 7 * A + 3 * T + 4 * R + 1
+        return 7 * A + 3 * T + 3 * R + 1
 
     def _spawn_targets_in_valid_zones(self, B: int, T: int, R: int, radar_pos: torch.Tensor) -> torch.Tensor:
         """
@@ -561,20 +594,21 @@ class StrikeEA2DEnv(EnvBase):
         root_dict = {}
 
         if self.use_fofe:
+            d_radar_slot = 4 + int(self._radar_extra_dim())
             # FOFE actor per-channel observations (nested under "agents")
             agents_dict["obs_self"]          = Unbounded(shape=B + torch.Size([A, self.d_self]),    dtype=torch.float32, device=self.device)
-            agents_dict["obs_agents_feat"]   = Unbounded(shape=B + torch.Size([A, A, 4]), dtype=torch.float32, device=self.device)
+            agents_dict["obs_agents_feat"]   = Unbounded(shape=B + torch.Size([A, A, 5]), dtype=torch.float32, device=self.device)
             agents_dict["obs_agents_mask"]   = Unbounded(shape=B + torch.Size([A, A]),    dtype=torch.bool,    device=self.device)
-            agents_dict["obs_targets_feat"]  = Unbounded(shape=B + torch.Size([A, T, 3]), dtype=torch.float32, device=self.device)
+            agents_dict["obs_targets_feat"]  = Unbounded(shape=B + torch.Size([A, T, 4]), dtype=torch.float32, device=self.device)
             agents_dict["obs_targets_mask"]  = Unbounded(shape=B + torch.Size([A, T]),    dtype=torch.bool,    device=self.device)
-            agents_dict["obs_radars_feat"]   = Unbounded(shape=B + torch.Size([A, R, 3]), dtype=torch.float32, device=self.device)
+            agents_dict["obs_radars_feat"]   = Unbounded(shape=B + torch.Size([A, R, d_radar_slot]), dtype=torch.float32, device=self.device)
             agents_dict["obs_radars_mask"]   = Unbounded(shape=B + torch.Size([A, R]),    dtype=torch.bool,    device=self.device)
             # FOFE critic global-state channels (root-level keys)
             root_dict["crt_agents_feat"]   = Unbounded(shape=B + torch.Size([A, 7]), dtype=torch.float32, device=self.device)
             root_dict["crt_agents_mask"]   = Unbounded(shape=B + torch.Size([A]),    dtype=torch.bool,    device=self.device)
             root_dict["crt_targets_feat"]  = Unbounded(shape=B + torch.Size([T, 3]), dtype=torch.float32, device=self.device)
             root_dict["crt_targets_mask"]  = Unbounded(shape=B + torch.Size([T]),    dtype=torch.bool,    device=self.device)
-            root_dict["crt_radars_feat"]   = Unbounded(shape=B + torch.Size([R, 4]), dtype=torch.float32, device=self.device)
+            root_dict["crt_radars_feat"]   = Unbounded(shape=B + torch.Size([R, 3]), dtype=torch.float32, device=self.device)
             root_dict["crt_radars_mask"]   = Unbounded(shape=B + torch.Size([R]),    dtype=torch.bool,    device=self.device)
             root_dict["crt_time_feat"]     = Unbounded(shape=B + torch.Size([1]),    dtype=torch.float32, device=self.device)
 
@@ -1366,10 +1400,10 @@ class StrikeEA2DEnv(EnvBase):
         Layout (flat vector):
           Per agent i:  (x, y, v, ψ, ω, role, alive)      × A   (7A)
           Per target k: (x, y, alive)                       × T   (3T)
-          Per radar r:  (x, y, active, detection_radius)    × R   (4R)
-                    Global:       (t_norm)                                  (1)
+          Per radar r:  (x, y, jammed)                      × R   (3R)
+          Global:       (t_norm)                                  (1)
 
-                Total dim = 7A + 3T + 4R + 1
+        Total dim = 7A + 3T + 3R + 1
         """
         B    = self.num_envs
         A, T, R = self.n_agents, self.n_targets, self.n_radars
@@ -1393,12 +1427,11 @@ class StrikeEA2DEnv(EnvBase):
         tgt_feat     = torch.cat([tgt_pos_norm, tgt_alive], dim=-1)               # [B,T,3]
         tgt_flat     = tgt_feat.reshape(B, -1)                                     # [B, 3T]
 
-        # --- Radar features: (x, y, active, detection_radius) per radar ---
+        # --- Radar features: (x, y, jammed) per radar ---
         rdr_pos_norm  = (self.radar_pos - self.low) / world_range                  # [B,R,2]
-        rdr_active    = (self.radar_eff_range >= self.radar_range).float().unsqueeze(-1)  # [B,R,1] 1=active
-        rdr_range_n   = (self.radar_eff_range / self.radar_range).unsqueeze(-1)    # [B,R,1] in [0,1]
-        rdr_feat      = torch.cat([rdr_pos_norm, rdr_active, rdr_range_n], dim=-1) # [B,R,4]
-        rdr_flat      = rdr_feat.reshape(B, -1)                                    # [B, 4R]
+        rdr_jammed    = self._radar_jammed_flag().float().unsqueeze(-1)           # [B,R,1] 1=jammed
+        rdr_feat      = torch.cat([rdr_pos_norm, rdr_jammed], dim=-1)              # [B,R,3]
+        rdr_flat      = rdr_feat.reshape(B, -1)                                    # [B, 3R]
 
         # --- Global normalised time feature: t / max_steps ---
         time_norm = (self.step_count.float() / float(self.max_steps)).clamp(0.0, 1.0)  # [B,1]
@@ -1627,16 +1660,22 @@ class StrikeEA2DEnv(EnvBase):
         self._c_comm_reach = comm_reach
 
     def _build_local_obs(self) -> torch.Tensor:
-        """Ego-centric relative observation per agent with fixed slot counts.
+        """Ego-centric body-frame observation per agent with fixed slot counts.
 
         Layout (per agent):
-          own:     [x, y, speed, heading, heading_rate, t_norm]                 (6)
-          agents:  3 nearest visible other agents [dist, rel_angle, heading, role] (3×4)
-          radars:  2 nearest visible radars [dist, rel_angle, jammed]              (2×3)
-          targets: 2 nearest visible alive targets [dist, rel_angle, alive]         (2×3)
+          own:     [x, y, speed, heading, heading_rate, t_norm, *self_extra]      (d_self)
+          agents:  3 nearest visible others [dx, dy, dist, heading, role]          (3×5)
+          radars:  2 nearest visible radars [dx, dy, dist, jammed, *radar_extra]  (2×(4+E))
+          targets: 2 nearest visible alive targets [dx, dy, dist, alive]            (2×4)
 
-        Visibility is partial observability via R_obs. If an entity is outside
-        observation range or a slot is unused, that slot is all zeros.
+        All (dx, dy) are expressed in the OBSERVING agent's body frame
+        (rotated by -heading). All position-like scalars are normalised
+        by the world diagonal.
+
+        Visibility is partial observability via R_obs. Known entities are
+        always visible; unknown entities are visible if within R_obs of self
+        OR of a teammate reachable via the multi-hop R_comm graph. Unused
+        slots are zero-padded.
         """
         B, A, T, R = self.num_envs, self.n_agents, self.n_targets, self.n_radars
         max_dist = math.hypot(self.high - self.low, self.high - self.low)  # for normalisation
@@ -1693,34 +1732,51 @@ class StrikeEA2DEnv(EnvBase):
         role[:self.n_strikers] = 1.0
         role = role[None, :].expand(B, A)  # [B, A]
 
-        # --- Other agents (relative distance + relative angle + heading + role) ---
+        # Pre-compute the body-frame rotation (cos h, sin h) for each agent
+        # so we can rotate world-frame relative vectors into the observing
+        # agent's body frame with a single broadcasted multiply.
+        cos_h = torch.cos(self.agent_heading)  # [B, A]
+        sin_h = torch.sin(self.agent_heading)  # [B, A]
+
+        # --- Other agents (body-frame dx, dy, dist, heading, role) ---
         eye = torch.eye(A, device=self.device, dtype=torch.bool).unsqueeze(0)  # [1,A,A]
         dist_aa  = torch.where(eye, torch.tensor(float('inf'), device=self.device), self._c_dist_aa)
-        angle_aa = torch.where(eye, torch.zeros(1, device=self.device), self._c_angle_aa)
+
+        # _c_rel_aa[b, i, j] = pos[j] - pos[i] in world frame (other - self).
+        rel_aa_w = self._c_rel_aa                                              # [B, A, A, 2]
+        dx_aa_b = cos_h[:, :, None] * rel_aa_w[..., 0] + sin_h[:, :, None] * rel_aa_w[..., 1]
+        dy_aa_b = -sin_h[:, :, None] * rel_aa_w[..., 0] + cos_h[:, :, None] * rel_aa_w[..., 1]
 
         # Visibility mask: within R_obs AND alive
         visible = (dist_aa <= self.R_obs) & self.agent_alive[:, None, :]  # [B,A,A]
 
         # Normalised features
+        dx_aa_n       = dx_aa_b / max_dist                                          # [B,A,A]
+        dy_aa_n       = dy_aa_b / max_dist                                          # [B,A,A]
         dist_aa_norm  = dist_aa / max_dist                                          # [B,A,A]
-        angle_aa_norm = angle_aa / math.pi                                          # [B,A,A] in [-1,1]
-        heading_other = self.agent_heading[:, None, :].expand(B, A, A) / math.pi    # [B,A,A] heading of observed agent
-        role_other    = role[:, None, :].expand(B, A, A)                            # [B,A,A] role of observed agent
+        heading_other = self.agent_heading[:, None, :].expand(B, A, A) / math.pi    # [B,A,A]
+        role_other    = role[:, None, :].expand(B, A, A)                            # [B,A,A]
 
-        other_feat = torch.stack([dist_aa_norm, angle_aa_norm, heading_other, role_other], dim=-1)  # [B,A,A,4]
+        other_feat = torch.stack(
+            [dx_aa_n, dy_aa_n, dist_aa_norm, heading_other, role_other], dim=-1,
+        )  # [B,A,A,5]
         other_slots = _select_nearest_slots(
             dist=dist_aa,
             feat=other_feat,
             visible=visible,
             k=self.n_other_agent_obs_slots,
-        )  # [B,A,3,4]
-        other_obs = other_slots.reshape(B, A, -1)  # [B,A,3*4]
+        )  # [B,A,3,5]
+        other_obs = other_slots.reshape(B, A, -1)  # [B,A,3*5]
 
-        # --- Radars (relative distance + relative angle + jammed flag) ---
+        # --- Radars (body-frame dx, dy, dist, jammed, *radar_extra) ---
         dist_ar       = self._c_dist_ar                                      # [B,A,R]
-        dist_ar_norm  = dist_ar / max_dist
-        angle_ar_norm = self._c_angle_ar / math.pi
-        jammed = (self.radar_eff_range < self.radar_range).float()          # [B,R] 1=jammed
+        rel_ar_w      = self._c_rel_ar                                       # [B,A,R,2] (radar - agent)
+        dx_ar_b = cos_h[:, :, None] * rel_ar_w[..., 0] + sin_h[:, :, None] * rel_ar_w[..., 1]
+        dy_ar_b = -sin_h[:, :, None] * rel_ar_w[..., 0] + cos_h[:, :, None] * rel_ar_w[..., 1]
+        dx_ar_n = dx_ar_b / max_dist
+        dy_ar_n = dy_ar_b / max_dist
+        dist_ar_norm = dist_ar / max_dist
+        jammed = self._radar_jammed_flag().float()                          # [B,R] 1=jammed
         jammed_exp = jammed[:, None, :].expand(B, A, R)                     # [B,A,R]
 
         # Communication reachability — pre-computed by _update_comm_cache
@@ -1744,19 +1800,31 @@ class StrikeEA2DEnv(EnvBase):
             comm_reach.float(), local_unknown_radar_obs.float()
         ) > 0
         radar_visible = radar_known_mask | shared_unknown_radar_obs          # [B,A,R]
-        radar_feat = torch.stack([dist_ar_norm, angle_ar_norm, jammed_exp], dim=-1)  # [B,A,R,3]
+        radar_base = torch.stack(
+            [dx_ar_n, dy_ar_n, dist_ar_norm, jammed_exp], dim=-1,
+        )  # [B,A,R,4]
+        # Role-specific per-(agent, radar) extras (e.g. HF jammer beam-to-radar angle)
+        radar_extra = self._build_radar_extra(B, A, R)                       # [B,A,R,E]
+        if radar_extra.shape[-1] > 0:
+            radar_feat = torch.cat([radar_base, radar_extra], dim=-1)        # [B,A,R,4+E]
+        else:
+            radar_feat = radar_base
         radar_slots = _select_nearest_slots(
             dist=dist_ar,
             feat=radar_feat,
             visible=radar_visible,
             k=self.n_radar_obs_slots,
-        )  # [B,A,2,3]
-        radar_obs = radar_slots.reshape(B, A, -1)                           # [B,A,2*3]
+        )  # [B,A,K_r,4+E]
+        radar_obs = radar_slots.reshape(B, A, -1)                           # [B,A,K_r*(4+E)]
 
-        # --- Targets (relative distance + relative angle + alive flag) ---
+        # --- Targets (body-frame dx, dy, dist, alive) ---
         dist_at       = self._c_dist_at                                      # [B,A,T]
+        rel_at_w      = self._c_rel_at                                       # [B,A,T,2] (target - agent)
+        dx_at_b = cos_h[:, :, None] * rel_at_w[..., 0] + sin_h[:, :, None] * rel_at_w[..., 1]
+        dy_at_b = -sin_h[:, :, None] * rel_at_w[..., 0] + cos_h[:, :, None] * rel_at_w[..., 1]
+        dx_at_n = dx_at_b / max_dist
+        dy_at_n = dy_at_b / max_dist
         dist_at_norm  = dist_at / max_dist
-        angle_at_norm = self._c_angle_at / math.pi
         alive_t = self.target_alive[:, None, :].expand(B, A, T).float()     # [B,A,T]
 
         # ------------------------------------------------------------------
@@ -1776,14 +1844,16 @@ class StrikeEA2DEnv(EnvBase):
             comm_reach.float(), local_unknown_target_obs.float()
         ) > 0
         target_visible = target_known_mask | shared_unknown_target_obs        # [B,A,T]
-        target_feat = torch.stack([dist_at_norm, angle_at_norm, alive_t], dim=-1)  # [B,A,T,3]
+        target_feat = torch.stack(
+            [dx_at_n, dy_at_n, dist_at_norm, alive_t], dim=-1,
+        )  # [B,A,T,4]
         target_slots = _select_nearest_slots(
             dist=dist_at,
             feat=target_feat,
             visible=target_visible & self.target_alive[:, None, :],
             k=self.n_target_obs_slots,
-        )  # [B,A,2,3]
-        target_obs = target_slots.reshape(B, A, -1)                          # [B,A,2*3]
+        )  # [B,A,K_t,4]
+        target_obs = target_slots.reshape(B, A, -1)                          # [B,A,K_t*4]
 
         # --- Concatenate ---
         obs = torch.cat([own, other_obs, radar_obs, target_obs], dim=-1)  # [B,A,obs_dim]
@@ -1806,19 +1876,22 @@ class StrikeEA2DEnv(EnvBase):
             OR within R_obs of a teammate reachable via multi-hop R_comm.
 
         Returns dict with keys matching FOFE_ACTOR_KEYS:
-            obs_self          [B, A, 6]      ego kinematic state
-            obs_agents_feat   [B, A, A, 4]   per-other-agent features (self-row masked)
-            obs_agents_mask   [B, A, A]      True = visible & alive & not self
-            obs_targets_feat  [B, A, T, 3]   per-target features
-            obs_targets_mask  [B, A, T]      True = visible & alive
-            obs_radars_feat   [B, A, R, 3]   per-radar features
-            obs_radars_mask   [B, A, R]      True = visible
+            obs_self          [B, A, d_self]        ego kinematic state
+            obs_agents_feat   [B, A, A, 5]          per-other-agent features (self-row masked)
+                                                    layout: dx_body, dy_body, dist, heading, role
+            obs_agents_mask   [B, A, A]             True = visible & alive & not self
+            obs_targets_feat  [B, A, T, 4]          per-target features
+                                                    layout: dx_body, dy_body, dist, alive
+            obs_targets_mask  [B, A, T]             True = visible & alive
+            obs_radars_feat   [B, A, R, 4 + E]      per-radar features
+                                                    layout: dx_body, dy_body, dist, jammed, *radar_extra
+            obs_radars_mask   [B, A, R]             True = visible
         """
         B, A, T, R = self.num_envs, self.n_agents, self.n_targets, self.n_radars
         max_dist = math.hypot(self.high - self.low, self.high - self.low)
         world_range = self.high - self.low
 
-        # ---- Self-observation: [B, A, 6] ----
+        # ---- Self-observation: [B, A, d_self] ----
         pos_norm = (self.agent_pos - self.low) / world_range
         speed_norm = (self.agent_speed / self.v_max).unsqueeze(-1)
         heading_norm = (self.agent_heading / math.pi).unsqueeze(-1)
@@ -1837,24 +1910,34 @@ class StrikeEA2DEnv(EnvBase):
         eye       = torch.eye(A, dtype=torch.bool, device=self.device).unsqueeze(0).expand(B, -1, -1)
         comm_reach = self._c_comm_reach
 
-        # ---- Agents channel: [B, A, A, 4] + mask [B, A, A] ----
+        # Body-frame rotation: rotate world rel vectors by -heading so each
+        # observer sees other entities in its own forward/lateral axes.
+        cos_h = torch.cos(self.agent_heading)  # [B, A]
+        sin_h = torch.sin(self.agent_heading)  # [B, A]
+
+        # ---- Agents channel: [B, A, A, 5] + mask [B, A, A] ----
         dist_aa  = torch.where(eye, torch.tensor(10.0, device=self.device), self._c_dist_aa)
-        angle_aa = torch.where(eye, torch.zeros(1, device=self.device), self._c_angle_aa)
+        rel_aa_w = self._c_rel_aa                                              # [B, A, A, 2]
+        dx_aa_b = cos_h[:, :, None] * rel_aa_w[..., 0] + sin_h[:, :, None] * rel_aa_w[..., 1]
+        dy_aa_b = -sin_h[:, :, None] * rel_aa_w[..., 0] + cos_h[:, :, None] * rel_aa_w[..., 1]
         agents_visible = (dist_aa <= self.R_obs) & self.agent_alive[:, None, :] & ~eye
 
         agents_feat = torch.stack([
+            dx_aa_b / max_dist,
+            dy_aa_b / max_dist,
             dist_aa / max_dist,
-            angle_aa / math.pi,
             self.agent_heading[:, None, :].expand(B, A, A) / math.pi,
             role[:, None, :].expand(B, A, A),
-        ], dim=-1)  # [B, A, A, 4]
+        ], dim=-1)  # [B, A, A, 5]
         agents_feat = agents_feat * agents_visible.unsqueeze(-1).float()
         agents_feat = torch.nan_to_num(agents_feat, nan=0.0)
 
-        # ---- Radars channel: [B, A, R, 3] + mask [B, A, R] ----
+        # ---- Radars channel: [B, A, R, 4 + E] + mask [B, A, R] ----
         dist_ar  = self._c_dist_ar
-        angle_ar = self._c_angle_ar
-        jammed = (self.radar_eff_range < self.radar_range).float()[:, None, :].expand(B, A, R)
+        rel_ar_w = self._c_rel_ar                                              # [B, A, R, 2]
+        dx_ar_b = cos_h[:, :, None] * rel_ar_w[..., 0] + sin_h[:, :, None] * rel_ar_w[..., 1]
+        dy_ar_b = -sin_h[:, :, None] * rel_ar_w[..., 0] + cos_h[:, :, None] * rel_ar_w[..., 1]
+        jammed = self._radar_jammed_flag().float()[:, None, :].expand(B, A, R)
 
         # Known/unknown visibility with communication sharing
         radar_known_mask = self.radar_known[:, None, :].expand(B, A, R)
@@ -1863,13 +1946,22 @@ class StrikeEA2DEnv(EnvBase):
         shared_unknown_radar = torch.matmul(comm_reach.float(), local_unknown_radar.float()) > 0
         radars_visible = radar_known_mask | shared_unknown_radar
 
-        radars_feat = torch.stack([dist_ar / max_dist, angle_ar / math.pi, jammed], dim=-1)
+        radars_base = torch.stack(
+            [dx_ar_b / max_dist, dy_ar_b / max_dist, dist_ar / max_dist, jammed], dim=-1,
+        )  # [B, A, R, 4]
+        radar_extra = self._build_radar_extra(B, A, R)                         # [B, A, R, E]
+        if radar_extra.shape[-1] > 0:
+            radars_feat = torch.cat([radars_base, radar_extra], dim=-1)
+        else:
+            radars_feat = radars_base
         radars_feat = radars_feat * radars_visible.unsqueeze(-1).float()
         radars_feat = torch.nan_to_num(radars_feat, nan=0.0)
 
-        # ---- Targets channel: [B, A, T, 3] + mask [B, A, T] ----
+        # ---- Targets channel: [B, A, T, 4] + mask [B, A, T] ----
         dist_at  = self._c_dist_at
-        angle_at = self._c_angle_at
+        rel_at_w = self._c_rel_at                                              # [B, A, T, 2]
+        dx_at_b = cos_h[:, :, None] * rel_at_w[..., 0] + sin_h[:, :, None] * rel_at_w[..., 1]
+        dy_at_b = -sin_h[:, :, None] * rel_at_w[..., 0] + cos_h[:, :, None] * rel_at_w[..., 1]
         alive_t = self.target_alive[:, None, :].expand(B, A, T).float()
 
         target_known_mask = self.target_known[:, None, :].expand(B, A, T)
@@ -1878,7 +1970,9 @@ class StrikeEA2DEnv(EnvBase):
         shared_unknown_target = torch.matmul(comm_reach.float(), local_unknown_target.float()) > 0
         targets_visible = (target_known_mask | shared_unknown_target) & self.target_alive[:, None, :]
 
-        targets_feat = torch.stack([dist_at / max_dist, angle_at / math.pi, alive_t], dim=-1)
+        targets_feat = torch.stack(
+            [dx_at_b / max_dist, dy_at_b / max_dist, dist_at / max_dist, alive_t], dim=-1,
+        )  # [B, A, T, 4]
         targets_feat = targets_feat * targets_visible.unsqueeze(-1).float()
         targets_feat = torch.nan_to_num(targets_feat, nan=0.0)
 
@@ -1897,9 +1991,9 @@ class StrikeEA2DEnv(EnvBase):
 
         The critic sees the GLOBAL state (all entities, no partial
         observability), decomposed into entity sets:
-            agents  [B, A, 7]   x,y,v,ψ,ω,role,alive
-            targets [B, T, 3]   x,y,alive
-            radars  [B, R, 4]   x,y,active,eff_range
+            agents  [B, A, 7]   x, y, v, ψ, ω, role, alive
+            targets [B, T, 3]   x, y, alive
+            radars  [B, R, 3]   x, y, jammed
             time    [B, 1]      t_norm
 
         All masks are True (full visibility for centralised critic).
@@ -1925,11 +2019,10 @@ class StrikeEA2DEnv(EnvBase):
         tgt_alive = self.target_alive.float().unsqueeze(-1)
         target_feat = torch.cat([tgt_pos_norm, tgt_alive], dim=-1)
 
-        # ---- Radar features [B, R, 4] ----
+        # ---- Radar features [B, R, 3] ----
         rdr_pos_norm = (self.radar_pos - self.low) / world_range
-        rdr_active = (self.radar_eff_range >= self.radar_range).float().unsqueeze(-1)
-        rdr_range_n = (self.radar_eff_range / self.radar_range).unsqueeze(-1)
-        radar_feat = torch.cat([rdr_pos_norm, rdr_active, rdr_range_n], dim=-1)
+        rdr_jammed = self._radar_jammed_flag().float().unsqueeze(-1)
+        radar_feat = torch.cat([rdr_pos_norm, rdr_jammed], dim=-1)
 
         # ---- Time feature [B, 1] ----
         time_feat = (self.step_count.float() / float(self.max_steps)).clamp(0, 1)

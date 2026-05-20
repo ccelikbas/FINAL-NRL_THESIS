@@ -255,6 +255,71 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         return extra
 
     # ------------------------------------------------------------------
+    # Radar-obs extension: per-(agent, radar) beam-to-radar angle (signed)
+    # and a beam-on-radar jammed flag instead of effective-range degradation.
+    # ------------------------------------------------------------------
+
+    def _radar_extra_dim(self) -> int:
+        # One extra float per (agent, radar): signed beam→radar angle / pi,
+        # in [-1, 1]. Zero for striker rows (no beam).
+        return 1
+
+    def _build_radar_extra(self, B: int, A: int, R: int) -> torch.Tensor:
+        """[B, A, R, 1] — signed (beam_pointing − radar_bearing) wrapped to
+        [-pi, pi] and normalised to [-1, 1]. Strikers and dead jammers
+        contribute zero. For multiple jammers we expose the value for the
+        SMALLEST |angle| (the jammer whose beam is most on-axis with this
+        radar), which is the actor's main steering target.
+        """
+        extra = torch.zeros(B, A, R, 1, device=self.device, dtype=torch.float32)
+        if self.n_jammers == 0 or R == 0:
+            return extra
+
+        # Recompute the signed delta inline so this works during _reset too
+        # (when _compute_hf_radar_eff_range may not have refreshed the cache
+        # for the reset slice).
+        jammer_pointing = self.agent_heading[:, self.n_strikers:] + self.jammer_bearing  # [B, J]
+        rel_jr = self.radar_pos[:, None, :, :] - self.agent_pos[:, self.n_strikers:, None, :]  # [B, J, R, 2]
+        angle_j_to_r = torch.atan2(rel_jr[..., 1], rel_jr[..., 0])                        # [B, J, R]
+        delta = angle_j_to_r - jammer_pointing[:, :, None]
+        delta = torch.atan2(torch.sin(delta), torch.cos(delta))                            # [-pi, pi]
+
+        # Mask dead jammers with +inf |delta| so they lose the argmin race.
+        jammer_alive = self.agent_alive[:, self.n_strikers:]                              # [B, J]
+        abs_delta = delta.abs().masked_fill(~jammer_alive[:, :, None], float("inf"))      # [B, J, R]
+        best_jammer = abs_delta.argmin(dim=1, keepdim=True)                               # [B, 1, R]
+        best_delta = delta.gather(1, best_jammer).squeeze(1)                              # [B, R]
+
+        # Zero-fill radars whose every jammer is dead (no information to expose).
+        any_alive = jammer_alive.any(dim=1, keepdim=True).expand_as(best_delta)
+        best_delta = torch.where(any_alive, best_delta, torch.zeros_like(best_delta))
+
+        # Broadcast to per-agent and zero strikers.
+        extra[:, self.n_strikers:, :, 0] = best_delta[:, None, :].expand(B, self.n_jammers, R) / math.pi
+        return extra
+
+    def _radar_jammed_flag(self) -> torch.Tensor:
+        """[B, R] float in {0, 1}: True when at least one alive jammer's
+        beam main lobe currently covers the radar. Recomputed inline so it
+        is correct on reset slices too.
+        """
+        B = self.num_envs
+        R = self.n_radars
+        if self.n_jammers == 0 or R == 0:
+            return torch.zeros(B, R, device=self.device)
+
+        jammer_pointing = self.agent_heading[:, self.n_strikers:] + self.jammer_bearing  # [B, J]
+        rel_jr = self.radar_pos[:, None, :, :] - self.agent_pos[:, self.n_strikers:, None, :]  # [B, J, R, 2]
+        angle_j_to_r = torch.atan2(rel_jr[..., 1], rel_jr[..., 0])                        # [B, J, R]
+        delta = angle_j_to_r - jammer_pointing[:, :, None]
+        delta = torch.atan2(torch.sin(delta), torch.cos(delta))                            # [-pi, pi]
+
+        in_cone = delta.abs() <= self._jammer_main_lobe_half                               # [B, J, R]
+        jammer_alive = self.agent_alive[:, self.n_strikers:]                              # [B, J]
+        in_cone = in_cone & jammer_alive[:, :, None]
+        return in_cone.any(dim=1).float()                                                 # [B, R]
+
+    # ------------------------------------------------------------------
     # Reset hook — zero the beam state on episode reset
     # ------------------------------------------------------------------
 
