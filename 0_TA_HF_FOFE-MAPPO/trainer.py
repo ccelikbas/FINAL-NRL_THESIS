@@ -10,12 +10,216 @@ from __future__ import annotations
 
 import contextlib
 import math
+import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
+
+
+# ----------------------------------------------------------------------
+# Hardware monitor — samples GPU + CPU stats in a background thread for
+# the first N profile iterations so we can sanity-check utilisation.
+#
+# Three data sources, all optional:
+#   - pynvml: GPU utilisation %, memory MB, power W, temp °C (NVIDIA only)
+#   - psutil: CPU utilisation %, system RAM GB, process RAM GB
+#   - torch.cuda: allocator stats (always available when CUDA is on)
+#
+# If a source isn't installed we just skip it. Background sampler runs at
+# ~10 Hz which is plenty for an iteration that takes seconds.
+# ----------------------------------------------------------------------
+
+class _HardwareMonitor:
+    def __init__(self, sample_hz: float = 10.0):
+        self._dt = 1.0 / max(1.0, float(sample_hz))
+        self._thread: Optional[threading.Thread] = None
+        self._running = False
+
+        # Reset samples
+        self._gpu_util: List[float] = []
+        self._gpu_mem_mb: List[float] = []
+        self._gpu_pwr_w: List[float] = []
+        self._gpu_temp_c: List[float] = []
+        self._cpu_util: List[float] = []
+        self._sys_mem_gb: List[float] = []
+        self._proc_mem_gb: List[float] = []
+
+        # Try pynvml
+        self._pynvml = None
+        self._nv_handle = None
+        self._nv_supports_power = False
+        try:
+            import pynvml
+            pynvml.nvmlInit()
+            self._nv_handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+            self._pynvml = pynvml
+            # Probe power query support once
+            try:
+                pynvml.nvmlDeviceGetPowerUsage(self._nv_handle)
+                self._nv_supports_power = True
+            except Exception:
+                self._nv_supports_power = False
+        except Exception:
+            self._pynvml = None
+
+        # Try psutil
+        self._psutil = None
+        self._proc = None
+        try:
+            import psutil
+            self._psutil = psutil
+            self._proc = psutil.Process()
+            # Prime so the next reading isn't 0.0
+            psutil.cpu_percent(interval=None)
+            self._proc.cpu_percent(interval=None)
+        except Exception:
+            self._psutil = None
+
+    @property
+    def gpu_available(self) -> bool:
+        return self._pynvml is not None
+
+    @property
+    def cpu_available(self) -> bool:
+        return self._psutil is not None
+
+    def device_header(self) -> str:
+        """One-line description of detected hardware. Safe to call once at startup."""
+        parts: List[str] = []
+        if self._pynvml is not None:
+            try:
+                name = self._pynvml.nvmlDeviceGetName(self._nv_handle)
+                if isinstance(name, bytes):
+                    name = name.decode("utf-8", errors="replace")
+                mem = self._pynvml.nvmlDeviceGetMemoryInfo(self._nv_handle)
+                total_gb = mem.total / (1024 ** 3)
+                parts.append(f"GPU: {name} ({total_gb:.1f} GB)")
+            except Exception:
+                parts.append("GPU: (pynvml probe failed)")
+        elif torch.cuda.is_available():
+            try:
+                name = torch.cuda.get_device_name(0)
+                total_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+                parts.append(f"GPU: {name} ({total_gb:.1f} GB) [pynvml unavailable — limited stats]")
+            except Exception:
+                parts.append("GPU: (torch probe failed)")
+        else:
+            parts.append("GPU: none (CPU-only)")
+
+        if self._psutil is not None:
+            try:
+                logical = self._psutil.cpu_count(logical=True)
+                physical = self._psutil.cpu_count(logical=False)
+                vm = self._psutil.virtual_memory()
+                total_gb = vm.total / (1024 ** 3)
+                parts.append(f"CPU: {physical} cores / {logical} threads, {total_gb:.1f} GB RAM")
+            except Exception:
+                parts.append("CPU: (psutil probe failed)")
+        else:
+            parts.append("CPU: (psutil unavailable)")
+        return " | ".join(parts)
+
+    def start(self) -> None:
+        # Reset sample buffers each start
+        self._gpu_util.clear()
+        self._gpu_mem_mb.clear()
+        self._gpu_pwr_w.clear()
+        self._gpu_temp_c.clear()
+        self._cpu_util.clear()
+        self._sys_mem_gb.clear()
+        self._proc_mem_gb.clear()
+
+        if self._pynvml is None and self._psutil is None:
+            return  # Nothing to sample
+        self._running = True
+        self._thread = threading.Thread(target=self._sample_loop, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        if not self._running:
+            return
+        self._running = False
+        if self._thread is not None:
+            self._thread.join(timeout=1.0)
+        self._thread = None
+
+    def _sample_loop(self) -> None:
+        while self._running:
+            if self._pynvml is not None:
+                try:
+                    util = self._pynvml.nvmlDeviceGetUtilizationRates(self._nv_handle)
+                    self._gpu_util.append(float(util.gpu))
+                    mem = self._pynvml.nvmlDeviceGetMemoryInfo(self._nv_handle)
+                    self._gpu_mem_mb.append(mem.used / (1024 ** 2))
+                except Exception:
+                    pass
+                if self._nv_supports_power:
+                    try:
+                        mw = self._pynvml.nvmlDeviceGetPowerUsage(self._nv_handle)
+                        self._gpu_pwr_w.append(mw / 1000.0)
+                    except Exception:
+                        pass
+                try:
+                    # NVML_TEMPERATURE_GPU = 0
+                    t_c = self._pynvml.nvmlDeviceGetTemperature(self._nv_handle, 0)
+                    self._gpu_temp_c.append(float(t_c))
+                except Exception:
+                    pass
+            if self._psutil is not None:
+                try:
+                    self._cpu_util.append(float(self._psutil.cpu_percent(interval=None)))
+                    vm = self._psutil.virtual_memory()
+                    self._sys_mem_gb.append(vm.used / (1024 ** 3))
+                    if self._proc is not None:
+                        rss = self._proc.memory_info().rss / (1024 ** 3)
+                        self._proc_mem_gb.append(rss)
+                except Exception:
+                    pass
+            time.sleep(self._dt)
+
+    def summary(self) -> str:
+        def _agg(arr: List[float], label: str, unit: str, fmt: str = "{:.1f}") -> Optional[str]:
+            if not arr:
+                return None
+            mean_v = sum(arr) / len(arr)
+            peak_v = max(arr)
+            return f"{label} mean={fmt.format(mean_v)}{unit} peak={fmt.format(peak_v)}{unit}"
+
+        parts: List[str] = []
+        if self._pynvml is not None:
+            for p in (
+                _agg(self._gpu_util, "GPU_util", "%"),
+                _agg(self._gpu_mem_mb, "GPU_mem", "MB", "{:.0f}"),
+                _agg(self._gpu_pwr_w, "GPU_pwr", "W"),
+                _agg(self._gpu_temp_c, "GPU_T", "°C", "{:.0f}"),
+            ):
+                if p is not None:
+                    parts.append(p)
+        if self._psutil is not None:
+            for p in (
+                _agg(self._cpu_util, "CPU_util", "%"),
+                _agg(self._sys_mem_gb, "SysRAM", "GB", "{:.1f}"),
+                _agg(self._proc_mem_gb, "ProcRAM", "GB", "{:.1f}"),
+            ):
+                if p is not None:
+                    parts.append(p)
+        # Always-available torch.cuda memory (peak since last reset)
+        if torch.cuda.is_available():
+            try:
+                alloc_mb = torch.cuda.memory_allocated() / (1024 ** 2)
+                peak_mb = torch.cuda.max_memory_allocated() / (1024 ** 2)
+                reserved_mb = torch.cuda.memory_reserved() / (1024 ** 2)
+                parts.append(
+                    f"torch_alloc={alloc_mb:.0f}MB peak={peak_mb:.0f}MB reserved={reserved_mb:.0f}MB"
+                )
+            except Exception:
+                pass
+        if not parts:
+            return "(no monitor backends available — pip install pynvml psutil)"
+        return " | ".join(parts)
 from tensordict import TensorDict
 from torchrl.envs import TransformedEnv
 from torchrl.envs.transforms import RewardSum
@@ -693,6 +897,18 @@ def train_mappo(
     if _env_profile_supported and _PROFILE_ITERS > 0:
         base_env.set_profile_active(True)
 
+    # ── Hardware monitor (first _PROFILE_ITERS iterations) ────────────
+    # Background-thread samples GPU util/mem/power/temp and CPU util/RAM
+    # at ~10 Hz so we can spot under-utilisation. Starts before iter 0
+    # begins collecting, restarts at the end of each profiled iter.
+    _hw_monitor: Optional[_HardwareMonitor] = None
+    if _PROFILE_ITERS > 0:
+        _hw_monitor = _HardwareMonitor()
+        print(f"  [HW probe] {_hw_monitor.device_header()}")
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats()
+        _hw_monitor.start()
+
     for it, td in enumerate(collector):
         # Sync GPU so the clock is read after all pending ops have finished,
         # then record when the batch was delivered by the collector.
@@ -1186,6 +1402,20 @@ def train_mappo(
                 + (f" | eval={_t_eval_s_val:.2f}s" if do_eval else "")
                 + (" [TIMED OUT]" if _timed_out else "")
             )
+
+        # ── Hardware monitor snapshot ─────────────────────────────────
+        # Stop the background sampler, print mean/peak for this iter,
+        # then restart it if more profile iters remain. Tied to the same
+        # _PROFILE_ITERS window as the fine-grained timing buckets.
+        if _hw_monitor is not None and (_ITER_OFFSET + it) < _PROFILE_ITERS:
+            _hw_monitor.stop()
+            print(f"  [HW iter {global_iter_1based}] {_hw_monitor.summary()}")
+            if torch.cuda.is_available():
+                torch.cuda.reset_peak_memory_stats()
+            if (_ITER_OFFSET + it + 1) < _PROFILE_ITERS:
+                _hw_monitor.start()
+            else:
+                _hw_monitor = None  # window done — release the thread
 
         # ── Fine-grained breakdown (only for first _PROFILE_ITERS iters) ──
         if _fine:
