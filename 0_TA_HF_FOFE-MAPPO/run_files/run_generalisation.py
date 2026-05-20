@@ -62,7 +62,10 @@ except Exception:  # pragma: no cover - optional plotting dependency
 
 from .config import EnvConfig, ExperimentConfig, FOFEConfig, NetworkConfig, PPOConfig
 from .models import make_combined_policy
+from .nlr_style import apply_nlr_style, NLR_PRIMARY, NLR_SECONDARY
 from .trainer import build_env, evaluate_current_policy
+
+apply_nlr_style()
 
 
 def _ensure_checkpoint_import_aliases() -> None:
@@ -299,13 +302,13 @@ def _plot_completion_and_survival(rows: List[Dict[str, Any]], n_eval_episodes: i
 
     fig, axes = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
 
-    axes[0].bar(labels, completion, color="tab:blue", alpha=0.9)
+    axes[0].bar(labels, completion, color=NLR_PRIMARY, alpha=0.9)
     axes[0].set_ylim(0.0, 1.0)
     axes[0].set_ylabel("Rate")
     axes[0].set_title(f"Completion Rate by Config (n={n_eval_episodes})")
     axes[0].grid(axis="y", alpha=0.3)
 
-    axes[1].bar(labels, survival, color="tab:green", alpha=0.9)
+    axes[1].bar(labels, survival, color=NLR_SECONDARY, alpha=0.9)
     axes[1].set_ylim(0.0, 1.0)
     axes[1].set_ylabel("Rate")
     axes[1].set_title(f"Survival Rate by Config (n={n_eval_episodes})")

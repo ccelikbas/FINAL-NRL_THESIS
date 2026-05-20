@@ -13,6 +13,19 @@ from matplotlib.patches import Circle, Polygon
 
 from .config import EnvConfig
 from .environment import StrikeEA2DEnv
+from .nlr_style import (
+    apply_nlr_style,
+    NLR_PRIMARY,
+    NLR_SECONDARY,
+    NLR_ACCENT,
+    NLR_GRAY,
+    NLR_DARKGRAY,
+    NLR_LIGHTBLUE_50,
+    NLR_LIGHTBLUE_20,
+    NLR_TERRA_50,
+)
+
+apply_nlr_style()
 
 try:
     from torchrl.envs.utils import ExplorationType, set_exploration_type
@@ -96,13 +109,13 @@ def plot_training(
     # --- Row 0, Col 1: Combined striker+jammer losses ---
     ax = axes[0, 1]
     if "striker_loss_policy" in logs:
-        _plot_valid(ax, logs["striker_loss_policy"], "striker_policy_loss", color="tab:blue")
+        _plot_valid(ax, logs["striker_loss_policy"], "striker_policy_loss", color=NLR_PRIMARY)
     if "striker_loss_value" in logs:
-        _plot_valid(ax, logs["striker_loss_value"], "striker_value_loss", color="tab:orange")
+        _plot_valid(ax, logs["striker_loss_value"], "striker_value_loss", color=NLR_ACCENT)
     if "jammer_loss_policy" in logs:
-        _plot_valid(ax, logs["jammer_loss_policy"], "jammer_policy_loss", color="tab:green")
+        _plot_valid(ax, logs["jammer_loss_policy"], "jammer_policy_loss", color=NLR_SECONDARY)
     if "jammer_loss_value" in logs:
-        _plot_valid(ax, logs["jammer_loss_value"], "jammer_value_loss", color="tab:red")
+        _plot_valid(ax, logs["jammer_loss_value"], "jammer_value_loss", color=NLR_TERRA_50)
     ax.set_title("Policy & Value Loss (Striker + Jammer)")
     ax.set_xlabel("Iteration")
     ax.legend()
@@ -111,21 +124,21 @@ def plot_training(
     # --- Row 0, Col 2: Combined striker+jammer diagnostics ---
     ax = axes[0, 2]
     if "striker_entropy" in logs:
-        _plot_valid(ax, logs["striker_entropy"], "striker_entropy", color="tab:green")
+        _plot_valid(ax, logs["striker_entropy"], "striker_entropy", color=NLR_PRIMARY)
     if "jammer_entropy" in logs:
-        _plot_valid(ax, logs["jammer_entropy"], "jammer_entropy", color="tab:olive")
+        _plot_valid(ax, logs["jammer_entropy"], "jammer_entropy", color=NLR_LIGHTBLUE_50)
     if "striker_approx_kl" in logs:
-        _plot_valid(ax, logs["striker_approx_kl"], "striker_kl_approx", color="tab:red")
+        _plot_valid(ax, logs["striker_approx_kl"], "striker_kl_approx", color=NLR_ACCENT)
     if "jammer_approx_kl" in logs:
-        _plot_valid(ax, logs["jammer_approx_kl"], "jammer_kl_approx", color="tab:pink")
+        _plot_valid(ax, logs["jammer_approx_kl"], "jammer_kl_approx", color=NLR_TERRA_50)
     if "striker_clip_ratio" in logs:
-        _plot_valid(ax, logs["striker_clip_ratio"], "striker_clip_ratio", color="tab:purple")
+        _plot_valid(ax, logs["striker_clip_ratio"], "striker_clip_ratio", color=NLR_SECONDARY)
     if "jammer_clip_ratio" in logs:
-        _plot_valid(ax, logs["jammer_clip_ratio"], "jammer_clip_ratio", color="tab:brown")
+        _plot_valid(ax, logs["jammer_clip_ratio"], "jammer_clip_ratio", color=NLR_LIGHTBLUE_20)
     if "striker_explained_variance" in logs:
-        _plot_valid(ax, logs["striker_explained_variance"], "striker_explained_var", color="tab:cyan")
+        _plot_valid(ax, logs["striker_explained_variance"], "striker_explained_var", color=NLR_DARKGRAY)
     if "jammer_explained_variance" in logs:
-        _plot_valid(ax, logs["jammer_explained_variance"], "jammer_explained_var", color="tab:gray")
+        _plot_valid(ax, logs["jammer_explained_variance"], "jammer_explained_var", color=NLR_GRAY)
     ax.set_title("Entropy / KL / Clip / EV (Striker + Jammer)")
     ax.set_xlabel("Iteration")
     ax.legend(fontsize=7)
@@ -134,15 +147,15 @@ def plot_training(
     # --- Row 1, Col 0: Time per Iteration ---
     ax = axes[1, 0]
     if "iter_time_s" in logs:
-        _plot_valid(ax, logs["iter_time_s"], "total (incl. eval)", color="tab:blue")
+        _plot_valid(ax, logs["iter_time_s"], "total (incl. eval)", color=NLR_PRIMARY)
     if "iter_time_excl_eval_s" in logs:
         y_excl = np.asarray(logs["iter_time_excl_eval_s"], dtype=float)
         if y_excl.size > 0 and np.any(np.isfinite(y_excl)):
-            _plot_valid(ax, logs["iter_time_excl_eval_s"], "training only", color="tab:orange")
+            _plot_valid(ax, logs["iter_time_excl_eval_s"], "training only", color=NLR_ACCENT)
     if "eval_time_s" in logs:
         y_eval = np.asarray(logs["eval_time_s"], dtype=float)
         if y_eval.size > 0 and np.nanmax(np.where(np.isfinite(y_eval), y_eval, 0.0)) > 1e-6:
-            _plot_valid(ax, logs["eval_time_s"], "eval only", color="tab:green", linestyle="--")
+            _plot_valid(ax, logs["eval_time_s"], "eval only", color=NLR_SECONDARY, linestyle="--")
     ax.set_title("Time per Iteration (s)")
     ax.set_xlabel("Iteration")
     ax.set_ylabel("seconds")
@@ -232,9 +245,9 @@ def _plot_fofe_diagnostics(
 
     # ── Row 0, Col 0: Channel Dominance (Striker) ────────────────
     ax = axes[0, 0]
-    _plot_valid(ax, _safe("fofe_striker_dominance_agents"),  "agents",  color="tab:blue")
-    _plot_valid(ax, _safe("fofe_striker_dominance_targets"), "targets", color="tab:orange")
-    _plot_valid(ax, _safe("fofe_striker_dominance_radars"),  "radars",  color="tab:green")
+    _plot_valid(ax, _safe("fofe_striker_dominance_agents"),  "agents",  color=NLR_PRIMARY)
+    _plot_valid(ax, _safe("fofe_striker_dominance_targets"), "targets", color=NLR_ACCENT)
+    _plot_valid(ax, _safe("fofe_striker_dominance_radars"),  "radars",  color=NLR_SECONDARY)
     ax.set_title("Channel Dominance (Striker)")
     ax.set_xlabel("Iteration")
     ax.set_ylabel("Norm share")
@@ -244,9 +257,9 @@ def _plot_fofe_diagnostics(
 
     # ── Row 0, Col 1: Channel Dominance (Jammer) ─────────────────
     ax = axes[0, 1]
-    _plot_valid(ax, _safe("fofe_jammer_dominance_agents"),  "agents",  color="tab:blue")
-    _plot_valid(ax, _safe("fofe_jammer_dominance_targets"), "targets", color="tab:orange")
-    _plot_valid(ax, _safe("fofe_jammer_dominance_radars"),  "radars",  color="tab:green")
+    _plot_valid(ax, _safe("fofe_jammer_dominance_agents"),  "agents",  color=NLR_PRIMARY)
+    _plot_valid(ax, _safe("fofe_jammer_dominance_targets"), "targets", color=NLR_ACCENT)
+    _plot_valid(ax, _safe("fofe_jammer_dominance_radars"),  "radars",  color=NLR_SECONDARY)
     ax.set_title("Channel Dominance (Jammer)")
     ax.set_xlabel("Iteration")
     ax.set_ylabel("Norm share")
@@ -257,7 +270,7 @@ def _plot_fofe_diagnostics(
     # ── Row 0, Col 2: Collapse Fraction ──────────────────────────
     ax = axes[0, 2]
     for role, ls in [("striker", "-"), ("jammer", "--")]:
-        for ch, col in [("agents", "tab:blue"), ("targets", "tab:orange"), ("radars", "tab:green")]:
+        for ch, col in [("agents", NLR_PRIMARY), ("targets", NLR_ACCENT), ("radars", NLR_SECONDARY)]:
             _plot_valid(ax, _safe(f"fofe_{role}_collapse_{ch}"),
                         f"{role[0].upper()}_{ch}", color=col, linestyle=ls)
     ax.set_title("Collapse Fraction (norm < eps)")
@@ -270,7 +283,7 @@ def _plot_fofe_diagnostics(
     # ── Row 1, Col 0: Visible Entity Counts ──────────────────────
     ax = axes[1, 0]
     for role, ls in [("striker", "-"), ("jammer", "--")]:
-        for ch, col in [("agents", "tab:blue"), ("targets", "tab:orange"), ("radars", "tab:green")]:
+        for ch, col in [("agents", NLR_PRIMARY), ("targets", NLR_ACCENT), ("radars", NLR_SECONDARY)]:
             _plot_valid(ax, _safe(f"fofe_{role}_visible_{ch}_mean"),
                         f"{role[0].upper()}_{ch}", color=col, linestyle=ls)
     ax.set_title("Visible Entity Counts (mean)")
@@ -282,7 +295,7 @@ def _plot_fofe_diagnostics(
     # ── Row 1, Col 1: All-Masked Fraction ────────────────────────
     ax = axes[1, 1]
     for role, ls in [("striker", "-"), ("jammer", "--")]:
-        for ch, col in [("agents", "tab:blue"), ("targets", "tab:orange"), ("radars", "tab:green")]:
+        for ch, col in [("agents", NLR_PRIMARY), ("targets", NLR_ACCENT), ("radars", NLR_SECONDARY)]:
             _plot_valid(ax, _safe(f"fofe_{role}_all_masked_{ch}"),
                         f"{role[0].upper()}_{ch}", color=col, linestyle=ls)
     ax.set_title("All-Masked Fraction")
@@ -294,10 +307,10 @@ def _plot_fofe_diagnostics(
 
     # ── Row 1, Col 2: SEE Gradient Norms ─────────────────────────
     ax = axes[1, 2]
-    _plot_valid(ax, _safe("fofe_striker_actor_see_grad_norm"),  "S_actor",  color="tab:blue")
-    _plot_valid(ax, _safe("fofe_striker_critic_see_grad_norm"), "S_critic", color="tab:orange")
-    _plot_valid(ax, _safe("fofe_jammer_actor_see_grad_norm"),  "J_actor",  color="tab:green")
-    _plot_valid(ax, _safe("fofe_jammer_critic_see_grad_norm"), "J_critic", color="tab:red")
+    _plot_valid(ax, _safe("fofe_striker_actor_see_grad_norm"),  "S_actor",  color=NLR_PRIMARY)
+    _plot_valid(ax, _safe("fofe_striker_critic_see_grad_norm"), "S_critic", color=NLR_ACCENT)
+    _plot_valid(ax, _safe("fofe_jammer_actor_see_grad_norm"),  "J_actor",  color=NLR_SECONDARY)
+    _plot_valid(ax, _safe("fofe_jammer_critic_see_grad_norm"), "J_critic", color=NLR_TERRA_50)
     ax.set_title("SEE Gradient Norms (post-clip)")
     ax.set_xlabel("Iteration")
     ax.set_ylabel("L2 norm")
@@ -718,14 +731,14 @@ def animate_rollout(
 _LEGACY_LABEL = "MAPPO (Legacy)"
 _FOFE_LABEL   = "FOFE-MAPPO"
 
-# Two coordinated palettes per metric family:
-#   Legacy (baseline) = lighter tones
-#   FOFE = darker tones
+# Two coordinated NLR palettes per metric family:
+#   Legacy (baseline) = lighter tint  (50 % tone or light grey)
+#   FOFE              = primary tone   (full NLR colour)
 _METRIC_COLORS = {
-    "blue":   {_LEGACY_LABEL: "#8ab6e6", _FOFE_LABEL: "#24508f"},
-    "orange": {_LEGACY_LABEL: "#f8be86", _FOFE_LABEL: "#b36200"},
-    "green":  {_LEGACY_LABEL: "#95d8a6", _FOFE_LABEL: "#1f7a33"},
-    "purple": {_LEGACY_LABEL: "#c7a8e6", _FOFE_LABEL: "#5d3f8c"},
+    "blue":   {_LEGACY_LABEL: NLR_LIGHTBLUE_50, _FOFE_LABEL: NLR_PRIMARY},
+    "orange": {_LEGACY_LABEL: NLR_TERRA_50,     _FOFE_LABEL: NLR_ACCENT},
+    "green":  {_LEGACY_LABEL: NLR_LIGHTBLUE_20, _FOFE_LABEL: NLR_SECONDARY},
+    "purple": {_LEGACY_LABEL: NLR_GRAY,         _FOFE_LABEL: NLR_DARKGRAY},
 }
 
 # Method styling: combine line pattern + marker shape + width for readability.

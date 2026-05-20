@@ -210,6 +210,34 @@ import torch
 import matplotlib.pyplot as plt
 import numpy as np
 
+try:
+    from .nlr_style import (
+        apply_nlr_style,
+        NLR_PRIMARY,
+        NLR_SECONDARY,
+        NLR_ACCENT,
+        NLR_GRAY,
+        NLR_DARKGRAY,
+        NLR_LIGHTBLUE_50,
+        NLR_TERRA_50,
+    )
+except ImportError:  # standalone script execution (python rewards.py)
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from nlr_style import (  # type: ignore[no-redef]
+        apply_nlr_style,
+        NLR_PRIMARY,
+        NLR_SECONDARY,
+        NLR_ACCENT,
+        NLR_GRAY,
+        NLR_DARKGRAY,
+        NLR_LIGHTBLUE_50,
+        NLR_TERRA_50,
+    )
+
+apply_nlr_style()
+
 
 def _piecewise_lin_exp(d: torch.Tensor, d_max: float, d_knee: float,
                        w_lin: float, w_exp: float, alpha: float) -> torch.Tensor:
@@ -303,13 +331,13 @@ def plot_reward_functions(reward_config: RewardConfig, distance_range: Tuple[flo
     )
 
     plt.figure(figsize=(12, 7))
-    plt.plot(d.numpy(), striker_app.numpy(), label="Striker Distance Penalty", color="#1f77b4", linewidth=2)
-    plt.plot(d.numpy(), jammer_app.numpy(), label="Jammer Distance Penalty", color="#17becf", linewidth=2)
-    plt.plot(d.numpy(), radar.numpy(), label="Radar Avoidance", color="#9467bd", linewidth=2)
-    plt.plot(d.numpy(), border.numpy(), label="Border Avoidance", color="#d62728", linewidth=2)
-    plt.plot(d.numpy(), striker_form.numpy(), label="Striker Formation (↔ jammer)", color="#8c564b", linewidth=2)
-    plt.plot(d.numpy(), jammer_form.numpy(),  label="Jammer Formation (↔ striker)",  color="#bcbd22", linewidth=2, linestyle="--")
-    plt.axhline(0, color="gray", lw=0.5)
+    plt.plot(d.numpy(), striker_app.numpy(), label="Striker Distance Penalty", color=NLR_PRIMARY, linewidth=2)
+    plt.plot(d.numpy(), jammer_app.numpy(), label="Jammer Distance Penalty", color=NLR_SECONDARY, linewidth=2)
+    plt.plot(d.numpy(), radar.numpy(), label="Radar Avoidance", color=NLR_ACCENT, linewidth=2)
+    plt.plot(d.numpy(), border.numpy(), label="Border Avoidance", color=NLR_TERRA_50, linewidth=2)
+    plt.plot(d.numpy(), striker_form.numpy(), label="Striker Formation (↔ jammer)", color=NLR_DARKGRAY, linewidth=2)
+    plt.plot(d.numpy(), jammer_form.numpy(),  label="Jammer Formation (↔ striker)",  color=NLR_LIGHTBLUE_50, linewidth=2, linestyle="--")
+    plt.axhline(0, color=NLR_GRAY, lw=0.5)
     plt.xlabel("Distance")
     plt.ylabel("Reward / Penalty")
     plt.title("Reward Shaping Functions (piecewise lin-exp)")

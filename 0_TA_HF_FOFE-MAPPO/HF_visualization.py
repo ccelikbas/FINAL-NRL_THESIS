@@ -25,6 +25,7 @@ from matplotlib.patches import Circle, Polygon
 
 from .config import EnvConfig, HFRadarConfig
 from .HF_environment import HFStrikeEA2DEnv
+from .nlr_style import apply_nlr_style
 
 # Re-export unchanged utilities from base visualization
 from .visualization import (
@@ -32,6 +33,8 @@ from .visualization import (
     _plot_fofe_diagnostics as plot_fofe_diagnostics,
     plot_comparison,
 )
+
+apply_nlr_style()
 
 try:
     from torchrl.envs.utils import ExplorationType, set_exploration_type

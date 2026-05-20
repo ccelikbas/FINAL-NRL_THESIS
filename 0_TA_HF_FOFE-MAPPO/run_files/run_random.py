@@ -62,10 +62,13 @@ except Exception:  # pragma: no cover - optional plotting dependency
 
 from .config import EnvConfig, ExperimentConfig, FOFEConfig, NetworkConfig, PPOConfig
 from .models import make_combined_critic, make_combined_policy
+from .nlr_style import apply_nlr_style
 from .rewards import RewardConfig
 from .trainer import build_env, evaluate_current_policy, train_mappo
 from . import trainer as trainer_module
 from .visualization import TestRunner, animate_rollout, plot_training
+
+apply_nlr_style()
 
 
 # ======================================================================

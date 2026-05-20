@@ -39,10 +39,23 @@ from .config import (
     FOFEConfig, HFRadarConfig, NetworkConfig, PPOConfig,
 )
 from .models import make_combined_critic, make_combined_policy
+from .nlr_style import (
+    apply_nlr_style,
+    NLR_PRIMARY,
+    NLR_SECONDARY,
+    NLR_ACCENT,
+    NLR_GRAY,
+    NLR_DARKGRAY,
+    NLR_LIGHTBLUE_50,
+    NLR_LIGHTBLUE_20,
+    NLR_TERRA_50,
+)
 from .rewards import RewardConfig
 from .trainer import build_env, evaluate_current_policy, train_mappo
 from .visualization import TestRunner, animate_rollout, plot_training
 from .HF_visualization import HFTestRunner, hf_animate_rollout
+
+apply_nlr_style()
 
 
 # =====================================================================
@@ -465,8 +478,10 @@ def plot_curriculum_dashboard(
         ax.plot(x[valid], y[valid], marker="o", markersize=2, label=label, **kwargs)
 
     def _add_phase_shading(ax, curriculum_phases):
-        bg = ["#e8f0fe", "#fef7e0", "#e8fce8", "#fce8e8", "#f0e8fc",
-              "#fce8f0", "#e0f7fe", "#fefce0"]
+        bg = [
+            NLR_PRIMARY, NLR_ACCENT, NLR_SECONDARY, NLR_DARKGRAY,
+            NLR_LIGHTBLUE_50, NLR_TERRA_50, NLR_GRAY, NLR_LIGHTBLUE_20,
+        ]
         for i, phase in enumerate(curriculum_phases):
             ax.axvspan(
                 phase.iters[0], phase.iters[1],
@@ -497,10 +512,10 @@ def plot_curriculum_dashboard(
     # ── Row 0 col 1: Policy + Value loss ─────────────────────────────
     ax = axes[0, 1]
     for key, lbl, clr in [
-        ("striker_loss_policy", "striker_pi", "tab:blue"),
-        ("striker_loss_value", "striker_V", "tab:orange"),
-        ("jammer_loss_policy", "jammer_pi", "tab:green"),
-        ("jammer_loss_value", "jammer_V", "tab:red"),
+        ("striker_loss_policy", "striker_pi", NLR_PRIMARY),
+        ("striker_loss_value", "striker_V", NLR_ACCENT),
+        ("jammer_loss_policy", "jammer_pi", NLR_SECONDARY),
+        ("jammer_loss_value", "jammer_V", NLR_TERRA_50),
     ]:
         if key in training_logs:
             iters = np.arange(1, len(training_logs[key]) + 1)
@@ -514,10 +529,10 @@ def plot_curriculum_dashboard(
     # ── Row 0 col 2: Entropy / KL ────────────────────────────────────
     ax = axes[0, 2]
     for key, lbl, clr in [
-        ("striker_entropy", "striker_H", "tab:green"),
-        ("jammer_entropy", "jammer_H", "tab:olive"),
-        ("striker_approx_kl", "striker_KL", "tab:red"),
-        ("jammer_approx_kl", "jammer_KL", "tab:pink"),
+        ("striker_entropy", "striker_H", NLR_PRIMARY),
+        ("jammer_entropy", "jammer_H", NLR_SECONDARY),
+        ("striker_approx_kl", "striker_KL", NLR_ACCENT),
+        ("jammer_approx_kl", "jammer_KL", NLR_TERRA_50),
     ]:
         if key in training_logs:
             iters = np.arange(1, len(training_logs[key]) + 1)
@@ -548,7 +563,7 @@ def plot_curriculum_dashboard(
             avg.append(sum(finite) / len(finite) if finite else float("nan"))
         _plot_valid(
             ax, eval_iters, avg, "AVERAGE",
-            linewidth=2.5, color="black", linestyle="--",
+            linewidth=2.5, color=NLR_DARKGRAY, linestyle="--",
         )
         _add_phase_shading(ax, curriculum)
         ax.set_title(f"Eval: {title}")
@@ -558,13 +573,15 @@ def plot_curriculum_dashboard(
 
     # ── Row 2 col 1: Curriculum phase timeline ────────────────────────
     ax = axes[2, 1]
-    palette = ["tab:blue", "tab:orange", "tab:green", "tab:red", "tab:purple",
-               "tab:brown", "tab:cyan", "tab:olive"]
+    palette = [
+        NLR_PRIMARY, NLR_ACCENT, NLR_SECONDARY, NLR_DARKGRAY,
+        NLR_LIGHTBLUE_50, NLR_TERRA_50, NLR_GRAY, NLR_LIGHTBLUE_20,
+    ]
     for i, phase in enumerate(curriculum):
         clr = palette[i % len(palette)]
         ax.barh(
             0, phase.iters[1] - phase.iters[0], left=phase.iters[0],
-            height=0.5, color=clr, alpha=0.7, edgecolor="black",
+            height=0.5, color=clr, alpha=0.7, edgecolor=NLR_DARKGRAY,
         )
         mid = (phase.iters[0] + phase.iters[1]) / 2
         cfg = phase.config
@@ -585,10 +602,10 @@ def plot_curriculum_dashboard(
     ax = axes[2, 2]
     if "iter_time_s" in training_logs:
         iters = np.arange(1, len(training_logs["iter_time_s"]) + 1)
-        _plot_valid(ax, iters, training_logs["iter_time_s"], "total", color="tab:blue")
+        _plot_valid(ax, iters, training_logs["iter_time_s"], "total", color=NLR_PRIMARY)
     if "iter_time_excl_eval_s" in training_logs:
         iters = np.arange(1, len(training_logs["iter_time_excl_eval_s"]) + 1)
-        _plot_valid(ax, iters, training_logs["iter_time_excl_eval_s"], "train only", color="tab:orange")
+        _plot_valid(ax, iters, training_logs["iter_time_excl_eval_s"], "train only", color=NLR_ACCENT)
     _add_phase_shading(ax, curriculum)
     ax.set_title("Time per Iteration (s)")
     ax.set_xlabel("Global Iteration")
