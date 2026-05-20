@@ -582,7 +582,9 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         n_killed = kill_t.float().sum(dim=-1)
         n_alive = self.agent_alive.float().sum(dim=-1).clamp_min(1.0)
         target_destroyed_full = torch.zeros(B, A, device=self.device)
-        if float(rp.target_destroyed) != 0.0 and bool(kill_t.any().item()):
+        # Branchless: when kill_t has no Trues, all terms below evaluate to
+        # zero. Removing .item() avoids a per-step GPU→CPU sync.
+        if float(rp.target_destroyed) != 0.0:
             team_share = (n_killed * float(rp.target_destroyed) / n_alive)
             team_comp = team_share.unsqueeze(-1) * alive_float
 
@@ -600,7 +602,9 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         # 1b. Terminal bonus
         terminal_bonus_full = torch.zeros(B, A, device=self.device)
         all_targets_done_now = (~self.target_alive).all(dim=-1)
-        if float(rp.terminal_bonus) != 0.0 and bool(all_targets_done_now.any().item()):
+        # Branchless: when no env hit the terminal, the masked write is a no-op
+        # and `reward += zeros` is a no-op. Removing .item() avoids a GPU sync.
+        if float(rp.terminal_bonus) != 0.0:
             terminal_bonus_full[all_targets_done_now] = float(rp.terminal_bonus)
             reward += terminal_bonus_full
 
@@ -829,7 +833,9 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         # 9. Agent destruction penalty
         death_pen_full = torch.zeros(B, A, device=self.device)
         n_killed_agents = killed.float().sum(dim=-1)
-        if float(rp.agent_destroyed) != 0.0 and bool(killed.any().item()):
+        # Branchless: when no agent died, all terms below are zero. Skipping
+        # .item() avoids a per-step GPU→CPU sync.
+        if float(rp.agent_destroyed) != 0.0:
             team_death = (n_killed_agents * float(rp.agent_destroyed) / n_alive)
             team_death_comp = team_death.unsqueeze(-1) * alive_float
             indiv_death_comp = killed.float() * float(rp.agent_destroyed)
@@ -981,27 +987,49 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
                 next_td.set(k, v)
             _t = self._prof_lap("env_build_fofe_critic", _t)
 
-        if bool(done.any().item()):
-            for b in range(B):
-                if done[b, 0].item():
-                    tgt_frac = float((~self.target_alive[b]).float().mean().item())
-                    surv_frac = float(self.agent_alive[b].float().mean().item())
-                    self._completed_episodes.append({
-                        "env_idx": b,
-                        "mission_complete": bool(all_targets_done[b, 0].item()),
-                        "targets_frac": tgt_frac,
-                        "survival_frac": surv_frac,
-                        "duration": int(self.step_count[b, 0].item()),
-                        "episode_total_reward": float(self._episode_team_reward[b].item()),
-                        "episode_component_reward": {
-                            comp_key: float(self._episode_component_reward[comp_key][b].item())
-                            for comp_key in self._episode_component_reward
-                        },
-                    })
+        # Track completed episode stats in Python list (immune to auto-reset).
+        # Vectorised: gather all per-env stats for done envs into ONE tensor,
+        # transfer in a single .cpu().tolist() call, then build dicts. This
+        # replaces the previous `for b in range(B): if done[b].item()` loop
+        # which produced O(B × n_components) GPU→CPU syncs every step.
+        done_flat = done.squeeze(-1)                                # [B] bool
+        done_idx_t = done_flat.nonzero(as_tuple=True)[0]            # [N_done]
+        if done_idx_t.numel() > 0:
+            comp_keys = list(self._episode_component_reward.keys())
+            tgt_frac_t   = (~self.target_alive[done_idx_t]).float().mean(dim=-1, keepdim=True)  # [N,1]
+            surv_frac_t  = self.agent_alive[done_idx_t].float().mean(dim=-1, keepdim=True)     # [N,1]
+            miss_t       = all_targets_done[done_idx_t].float()                                 # [N,1]
+            dur_t        = self.step_count[done_idx_t].float()                                  # [N,1]
+            team_r_t     = self._episode_team_reward[done_idx_t].unsqueeze(-1)                  # [N,1]
+            comp_stack_t = torch.stack(
+                [self._episode_component_reward[k][done_idx_t] for k in comp_keys], dim=-1
+            )                                                                                    # [N, n_comp]
+            all_data = torch.cat(
+                [tgt_frac_t, surv_frac_t, miss_t, dur_t, team_r_t, comp_stack_t], dim=-1
+            )                                                                                    # [N, 5 + n_comp]
 
-            self._episode_team_reward[done.squeeze(-1)] = 0.0
+            # Two batched GPU→CPU transfers total (vs B × n_components before).
+            env_indices = done_idx_t.cpu().tolist()
+            rows        = all_data.cpu().tolist()
+
+            for i, env_idx in enumerate(env_indices):
+                row = rows[i]
+                self._completed_episodes.append({
+                    "env_idx": int(env_idx),
+                    "targets_frac": row[0],
+                    "survival_frac": row[1],
+                    "mission_complete": bool(row[2]),
+                    "duration": int(row[3]),
+                    "episode_total_reward": row[4],
+                    "episode_component_reward": {
+                        k: row[5 + j] for j, k in enumerate(comp_keys)
+                    },
+                })
+
+            # Avoid duplicate logging if terminal envs are stepped again before reset
+            self._episode_team_reward[done_flat] = 0.0
             for comp_key in self._episode_component_reward:
-                self._episode_component_reward[comp_key][done.squeeze(-1)] = 0.0
+                self._episode_component_reward[comp_key][done_flat] = 0.0
         _t = self._prof_lap("env_done_loop", _t)
 
         return next_td
