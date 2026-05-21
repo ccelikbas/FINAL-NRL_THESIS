@@ -364,6 +364,8 @@ def _env_kwargs(env_cfg: EnvConfig, ppo_cfg: PPOConfig) -> dict:
         target_spawn_angle_range=env_cfg.target_spawn_angle_range,
         n_env_layouts=env_cfg.n_env_layouts,
         radar_min_sep=getattr(env_cfg, "radar_min_sep", 0.5),
+        scenario=getattr(env_cfg, "scenario", "S1"),
+        s2_radar_min_sep=getattr(env_cfg, "s2_radar_min_sep", 0.2),
         use_fofe=env_cfg.use_fofe,
     )
 

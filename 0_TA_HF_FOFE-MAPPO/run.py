@@ -44,6 +44,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--n_known_radars", type=int, default=env_defaults.n_known_radars)
     p.add_argument("--n_unknown_radars", type=int, default=env_defaults.n_unknown_radars)
     p.add_argument("--radar_min_sep", type=float, default=env_defaults.radar_min_sep)
+    p.add_argument(
+        "--scenario", type=str, choices=("S1", "S2"), default=env_defaults.scenario,
+        help="S1=protected targets (radars guard targets); S2=defensive line (radars between agents and targets)",
+    )
+    p.add_argument("--s2_radar_min_sep", type=float, default=env_defaults.s2_radar_min_sep)
     # PPO
     p.add_argument("--num_envs", type=int, default=ppo_defaults.num_envs)
     p.add_argument("--max_steps", type=int, default=env_defaults.max_steps)
@@ -110,6 +115,8 @@ def main() -> None:
         n_known_radars=args.n_known_radars,
         n_unknown_radars=args.n_unknown_radars,
         radar_min_sep=args.radar_min_sep,
+        scenario=args.scenario,
+        s2_radar_min_sep=args.s2_radar_min_sep,
         max_steps=args.max_steps,
         reward_config=reward_cfg,
     )
@@ -151,7 +158,7 @@ def main() -> None:
         print(f"Loaded checkpoint from: {args.load_checkpoint}")
 
     print(
-        f"Config: strikers={cfg.env.n_strikers}, jammers={cfg.env.n_jammers}, "
+        f"Config: scenario={cfg.env.scenario}, strikers={cfg.env.n_strikers}, jammers={cfg.env.n_jammers}, "
         f"targets={cfg.env.n_targets} (known={cfg.env.n_known_targets}/unknown={cfg.env.n_unknown_targets}), "
         f"radars={cfg.env.n_radars} (known={cfg.env.n_known_radars}/unknown={cfg.env.n_unknown_radars}), "
         f"iters={cfg.ppo.n_iters}, envs={cfg.ppo.num_envs}, max_steps={cfg.env.max_steps}"

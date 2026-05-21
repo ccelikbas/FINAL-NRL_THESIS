@@ -83,6 +83,9 @@ class StrikeEA2DEnv(EnvBase):
         seed:   int = 0,
         n_env_layouts: int = 0,
         radar_min_sep: float = 0.5,
+        # --- scenario selection ---
+        scenario: str = "S1",
+        s2_radar_min_sep: float = 0.2,
         # --- FOFE mode ---
         use_fofe: bool = False,
     ):
@@ -166,8 +169,35 @@ class StrikeEA2DEnv(EnvBase):
         # Layout control (pre-generated radar positions for reproducible scenarios)
         self.n_env_layouts = n_env_layouts
         self.radar_min_sep = float(radar_min_sep)
+        self.s2_radar_min_sep = float(s2_radar_min_sep)
         if self.radar_min_sep < 0.0:
             raise ValueError("radar_min_sep must be >= 0")
+        if self.s2_radar_min_sep < 0.0:
+            raise ValueError("s2_radar_min_sep must be >= 0")
+
+        # Scenario selection (see EnvConfig docstring):
+        #   "S1" = protected targets — radars in top band, targets clustered
+        #          around radars (legacy behaviour).
+        #   "S2" = defensive line — targets in top band, radars in middle band
+        #          (independent of targets).
+        scenario = str(scenario).upper()
+        if scenario not in ("S1", "S2"):
+            raise ValueError(f"scenario must be 'S1' or 'S2', got {scenario!r}")
+        self.scenario = scenario
+
+        # Per-scenario sampling boxes for the radar layout pool and (S2) the
+        # target uniform draw. Stored as plain floats — _pregenerate_layouts
+        # and _reset read them. Keeping them attributes (rather than module
+        # constants) makes future per-scenario tweaks a single-line change.
+        if self.scenario == "S1":
+            self._radar_box = (0.2, 0.8, 0.6, 0.8)  # x_lo, x_hi, y_lo, y_hi
+            self._radar_min_sep_active = self.radar_min_sep
+        else:  # S2
+            self._radar_box = (0.1, 0.9, 0.4, 0.6)
+            self._radar_min_sep_active = self.s2_radar_min_sep
+        # S2 target box (unused when scenario == "S1").
+        self._s2_target_box = (0.1, 0.9, 0.7, 0.9)
+
         self._layouts = self._pregenerate_layouts() if n_env_layouts > 0 else None
 
         # FOFE observation mode
@@ -383,9 +413,8 @@ class StrikeEA2DEnv(EnvBase):
         every env sees a different layout each episode while we still pay
         the slow rejection-sampling cost only once at construction time.
         """
-        x_lo, x_hi = 0.2, 0.8
-        y_lo, y_hi = 0.4, 0.8
-        min_sep = self.radar_min_sep
+        x_lo, x_hi, y_lo, y_hi = self._radar_box
+        min_sep = self._radar_min_sep_active
         layouts = []
         for seed_idx in range(self.n_env_layouts):
             rng = torch.Generator()
@@ -576,6 +605,26 @@ class StrikeEA2DEnv(EnvBase):
         target_pos = (assigned_radars + offsets).clamp(self.low, self.high)
         return target_pos
 
+    def _spawn_targets_uniform_box(
+        self,
+        B: int,
+        T: int,
+        box: Tuple[float, float, float, float],
+    ) -> torch.Tensor:
+        """S2 target sampler: uniform random positions inside an axis-aligned box.
+
+        Fully vectorised — one batched torch.rand call, no Python loops, no
+        rejection sampling. Targets are independent of radar positions and of
+        each other (overlap permitted).
+        """
+        if T == 0:
+            return torch.zeros(B, 0, 2, device=self.device)
+        x_lo, x_hi, y_lo, y_hi = box
+        u = torch.rand(B, T, 2, device=self.device)
+        scale = torch.tensor([x_hi - x_lo, y_hi - y_lo], device=self.device)
+        offset = torch.tensor([x_lo, y_lo], device=self.device)
+        return (u * scale + offset).clamp(self.low, self.high)
+
     # ------------------------------------------------------------------
     # Specs
     # ------------------------------------------------------------------
@@ -730,9 +779,8 @@ class StrikeEA2DEnv(EnvBase):
                 )
                 radar_pos_reset = self._layouts[layout_idx]                    # [n_reset, R, 2]
             else:
-                x_lo, x_hi = 0.2, 0.8
-                y_lo, y_hi = 0.6, 0.8
-                min_sep = self.radar_min_sep
+                x_lo, x_hi, y_lo, y_hi = self._radar_box
+                min_sep = self._radar_min_sep_active
                 radar_pos_reset = torch.zeros(n_reset, R, 2, device=self.device)
                 for i in range(n_reset):
                     radar_pos_reset[i] = self._sample_spaced_radars(
@@ -741,9 +789,14 @@ class StrikeEA2DEnv(EnvBase):
             self.radar_pos[reset_idx] = radar_pos_reset
             _prof_lap("env_reset_radar_spawn", _t_radar)
 
-            # Spawn targets relative to radars (strategic zone logic)
+            # Spawn targets. S1: clustered around their assigned radar
+            # (legacy "protected targets"). S2: uniform random in the top band,
+            # independent of radar positions ("defensive line").
             _t_target = _prof_tic()
-            target_pos_reset = self._spawn_targets_in_valid_zones(n_reset, T, R, radar_pos_reset)
+            if self.scenario == "S1":
+                target_pos_reset = self._spawn_targets_in_valid_zones(n_reset, T, R, radar_pos_reset)
+            else:  # S2
+                target_pos_reset = self._spawn_targets_uniform_box(n_reset, T, self._s2_target_box)
             self.target_pos[reset_idx] = target_pos_reset
             _prof_lap("env_reset_target_spawn", _t_target)
             self.target_alive[reset_idx] = True

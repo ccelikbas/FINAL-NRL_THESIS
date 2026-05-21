@@ -121,6 +121,20 @@ class EnvConfig:
     radar_min_sep: float = 0.5
     target_spawn_angle_range: Tuple[float, float] = (0, 360)
 
+    # ── Scenario selection ─────────────────────────────────────────
+    # "S1" = protected targets (legacy): radars spawned in top band, targets
+    #         spawned in a tight annulus around their assigned radar.
+    # "S2" = defensive line: targets spawned uniformly in a top band, radars
+    #         spawned uniformly (with min separation) in a middle band — radars
+    #         form a defensive line between agents and targets.
+    # The radar layout pool is still pre-generated at env init for both
+    # scenarios; only the sampling bounds + min-sep differ.
+    scenario: str = "S1"
+    # Minimum pairwise radar separation when scenario == "S2". S2's radar
+    # band is much thinner than S1's, so the default is lower to keep
+    # rejection sampling tractable.
+    s2_radar_min_sep: float = 0.2
+
     # Kinematics
     v_max: float = 0.02
     accel_magnitude: float = 0.01
@@ -165,6 +179,8 @@ class EnvConfig:
         self.n_known_radars = int(self.n_known_radars)
         self.n_unknown_radars = int(self.n_unknown_radars)
         self.radar_min_sep = float(self.radar_min_sep)
+        self.s2_radar_min_sep = float(self.s2_radar_min_sep)
+        self.scenario = str(self.scenario).upper()
 
         if self.n_known_targets < 0 or self.n_unknown_targets < 0:
             raise ValueError("n_known_targets and n_unknown_targets must be >= 0")
@@ -172,6 +188,10 @@ class EnvConfig:
             raise ValueError("n_known_radars and n_unknown_radars must be >= 0")
         if self.radar_min_sep < 0:
             raise ValueError("radar_min_sep must be >= 0")
+        if self.s2_radar_min_sep < 0:
+            raise ValueError("s2_radar_min_sep must be >= 0")
+        if self.scenario not in ("S1", "S2"):
+            raise ValueError(f"scenario must be 'S1' or 'S2', got {self.scenario!r}")
 
         if self.n_known_targets == 0 and self.n_unknown_targets == 0:
             self.n_targets = int(self.n_targets)
