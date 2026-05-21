@@ -150,6 +150,13 @@ def main() -> None:
         checkpoint = torch.load(args.load_checkpoint, map_location=cfg.ppo.device)
         print(f"Loaded checkpoint from: {args.load_checkpoint}")
 
+    print(
+        f"Config: strikers={cfg.env.n_strikers}, jammers={cfg.env.n_jammers}, "
+        f"targets={cfg.env.n_targets} (known={cfg.env.n_known_targets}/unknown={cfg.env.n_unknown_targets}), "
+        f"radars={cfg.env.n_radars} (known={cfg.env.n_known_radars}/unknown={cfg.env.n_unknown_radars}), "
+        f"iters={cfg.ppo.n_iters}, envs={cfg.ppo.num_envs}, max_steps={cfg.env.max_steps}"
+    )
+
     base_env, policy, critic, logs, reward_normalizer = train_mappo(
         cfg.env, cfg.ppo, cfg.net,
         fofe_cfg=cfg.fofe,

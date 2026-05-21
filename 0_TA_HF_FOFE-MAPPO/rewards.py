@@ -177,13 +177,13 @@ class RewardConfig:
     # Typical w_lin, w_exp: 0.01–0.05 (gentle penalty relative to approach rewards).
     striker_sep_d_max:  float = 0.1
     striker_sep_d_knee: float = 0.0
-    striker_sep_w_lin:  float = 0.05
+    striker_sep_w_lin:  float = 0.1
     striker_sep_w_exp:  float = 0.0
     striker_sep_alpha:  float = 0.0
 
     jammer_sep_d_max:  float = 0.1
     jammer_sep_d_knee: float = 0.0
-    jammer_sep_w_lin:  float = 0.05
+    jammer_sep_w_lin:  float = 0.1
     jammer_sep_w_exp:  float = 0.0
     jammer_sep_alpha:  float = 0.0
 
