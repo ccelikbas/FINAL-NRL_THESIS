@@ -98,11 +98,11 @@ class FOFEConfig:
 @dataclass
 class EnvConfig:
     # Team composition
-    n_strikers: int = 2
-    n_jammers: int = 2
-    n_known_targets: int = 2
+    n_strikers: int = 1
+    n_jammers: int = 1
+    n_known_targets: int = 1
     n_unknown_targets: int = 0
-    n_known_radars: int = 2
+    n_known_radars: int = 3
     n_unknown_radars: int = 0
     n_targets: int = 0
     n_radars: int = 0
@@ -129,7 +129,7 @@ class EnvConfig:
     #         form a defensive line between agents and targets.
     # The radar layout pool is still pre-generated at env init for both
     # scenarios; only the sampling bounds + min-sep differ.
-    scenario: str = "S1"
+    scenario: str = "S2"
     # Minimum pairwise radar separation when scenario == "S2". S2's radar
     # band is much thinner than S1's, so the default is lower to keep
     # rejection sampling tractable.
@@ -158,7 +158,7 @@ class EnvConfig:
 
     # Threats
     radar_range: float = 0.20
-    radar_kill_probability: float = 1
+    radar_kill_probability: float = 0
 
     # Rewards
     border_thresh: float = 0.05
@@ -212,7 +212,7 @@ class EnvConfig:
 class PPOConfig:
     """Shared PPO hyperparameters for both striker and jammer MAPPO."""
     num_envs: int = 1024
-    n_iters: int = 100
+    n_iters: int = 5
     frames_per_batch: Optional[int] = None
     num_epochs: int = 10
     minibatch_size: int = 16384

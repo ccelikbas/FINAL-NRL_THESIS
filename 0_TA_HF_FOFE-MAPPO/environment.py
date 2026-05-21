@@ -197,6 +197,20 @@ class StrikeEA2DEnv(EnvBase):
             self._radar_min_sep_active = self.s2_radar_min_sep
         # S2 target box (unused when scenario == "S1").
         self._s2_target_box = (0.1, 0.9, 0.7, 0.9)
+        # S2 per-radar boxes: pin radars 0 and 1 to the left/right map edges
+        # so they form bookends to the defensive line — preventing the agents
+        # from going around the borders. Remaining radars fill the wider band.
+        self._s2_radar_boxes: Optional[List[Tuple[float, float, float, float]]] = None
+        if self.scenario == "S2" and self.n_radars > 0:
+            full_band = self._radar_box
+            boxes: List[Tuple[float, float, float, float]] = []
+            if self.n_radars >= 1:
+                boxes.append((0.0, 0.2, full_band[2], full_band[3]))  # left edge
+            if self.n_radars >= 2:
+                boxes.append((0.8, 1.0, full_band[2], full_band[3]))  # right edge
+            for _ in range(max(0, self.n_radars - 2)):
+                boxes.append(full_band)
+            self._s2_radar_boxes = boxes
 
         self._layouts = self._pregenerate_layouts() if n_env_layouts > 0 else None
 
@@ -331,11 +345,18 @@ class StrikeEA2DEnv(EnvBase):
         rng: torch.Generator,
         device: Optional[torch.device] = None,
         max_attempts: int = 500,
+        per_radar_boxes: Optional[List[Tuple[float, float, float, float]]] = None,
     ) -> torch.Tensor:
         """Sample *n_radars* positions with at least *min_sep* between each pair.
 
         Uses rejection sampling: draw candidates one-by-one, reject if too
         close to any already-placed radar.
+
+        If *per_radar_boxes* is provided (list of length n_radars), each radar
+        i is drawn from its own (x_lo, x_hi, y_lo, y_hi) box and the
+        single-box arguments are ignored. This is used by S2 to pin the first
+        two radars to the left/right map edges while sampling the rest from
+        the wider defensive-line band.
 
         Raises RuntimeError if the requested spacing cannot be achieved within
         max_attempts. This avoids silently violating the separation constraint.
@@ -348,19 +369,37 @@ class StrikeEA2DEnv(EnvBase):
         if min_sep < 0.0:
             raise ValueError("min_sep must be >= 0")
 
-        # Quick impossibility check for pairwise distance in axis-aligned box.
+        if per_radar_boxes is not None:
+            if len(per_radar_boxes) != n_radars:
+                raise ValueError(
+                    f"per_radar_boxes length {len(per_radar_boxes)} != n_radars {n_radars}"
+                )
+            boxes: List[Tuple[float, float, float, float]] = [
+                (float(b[0]), float(b[1]), float(b[2]), float(b[3])) for b in per_radar_boxes
+            ]
+        else:
+            boxes = [(float(x_lo), float(x_hi), float(y_lo), float(y_hi))] * n_radars
+
+        # Quick impossibility check: pairwise distance between two disjoint
+        # boxes can be 0 if they overlap, so we bound feasibility by the
+        # diameter of the union bounding box.
         if n_radars > 1 and min_sep > 0.0:
-            max_pairwise_dist = math.hypot(x_hi - x_lo, y_hi - y_lo)
+            union_x_lo = min(b[0] for b in boxes)
+            union_x_hi = max(b[1] for b in boxes)
+            union_y_lo = min(b[2] for b in boxes)
+            union_y_hi = max(b[3] for b in boxes)
+            max_pairwise_dist = math.hypot(union_x_hi - union_x_lo, union_y_hi - union_y_lo)
             if min_sep > max_pairwise_dist + 1e-9:
                 raise ValueError(
-                    f"min_sep={min_sep:.3f} is impossible in box "
-                    f"x=[{x_lo:.3f},{x_hi:.3f}], y=[{y_lo:.3f},{y_hi:.3f}] "
+                    f"min_sep={min_sep:.3f} is impossible across union box "
+                    f"x=[{union_x_lo:.3f},{union_x_hi:.3f}], y=[{union_y_lo:.3f},{union_y_hi:.3f}] "
                     f"(max possible pairwise distance={max_pairwise_dist:.3f})."
                 )
 
-        def _draw_candidate() -> torch.Tensor:
-            cx = x_lo + (x_hi - x_lo) * torch.rand(1, generator=rng, device=sample_device)
-            cy = y_lo + (y_hi - y_lo) * torch.rand(1, generator=rng, device=sample_device)
+        def _draw_candidate(box_i: Tuple[float, float, float, float]) -> torch.Tensor:
+            bx_lo, bx_hi, by_lo, by_hi = box_i
+            cx = bx_lo + (bx_hi - bx_lo) * torch.rand(1, generator=rng, device=sample_device)
+            cy = by_lo + (by_hi - by_lo) * torch.rand(1, generator=rng, device=sample_device)
             return torch.tensor([cx.item(), cy.item()], device=sample_device)
 
         max_restarts = max(int(max_attempts), 1)
@@ -370,10 +409,10 @@ class StrikeEA2DEnv(EnvBase):
             placed: List[torch.Tensor] = []
             success = True
 
-            for _ in range(n_radars):
+            for i in range(n_radars):
                 found = False
                 for _ in range(draws_per_radar):
-                    candidate = _draw_candidate()
+                    candidate = _draw_candidate(boxes[i])
                     if all(torch.linalg.norm(candidate - p).item() >= min_sep for p in placed):
                         placed.append(candidate)
                         found = True
@@ -395,11 +434,17 @@ class StrikeEA2DEnv(EnvBase):
                     )
             return radar_pos
 
+        if per_radar_boxes is not None:
+            box_desc = "; ".join(
+                f"r{i}=([{b[0]:.3f},{b[1]:.3f}]x[{b[2]:.3f},{b[3]:.3f}])"
+                for i, b in enumerate(boxes)
+            )
+        else:
+            box_desc = f"([{x_lo:.3f},{x_hi:.3f}]x[{y_lo:.3f},{y_hi:.3f}])"
         raise RuntimeError(
             "Could not sample radar positions satisfying minimum separation: "
             f"n_radars={n_radars}, min_sep={min_sep:.3f}, "
-            f"box=([{x_lo:.3f},{x_hi:.3f}]x[{y_lo:.3f},{y_hi:.3f}]), "
-            f"restarts={max_restarts}, draws_per_radar={draws_per_radar}. "
+            f"boxes={box_desc}, restarts={max_restarts}, draws_per_radar={draws_per_radar}. "
             "Increase spawn area, reduce n_radars, or lower radar_min_sep."
         )
 
@@ -415,12 +460,14 @@ class StrikeEA2DEnv(EnvBase):
         """
         x_lo, x_hi, y_lo, y_hi = self._radar_box
         min_sep = self._radar_min_sep_active
+        per_radar_boxes = self._s2_radar_boxes  # None for S1; corner-pinned list for S2
         layouts = []
         for seed_idx in range(self.n_env_layouts):
             rng = torch.Generator()
             rng.manual_seed(seed_idx + 1000)  # Offset to avoid collision with main RNG
             radar_pos = self._sample_spaced_radars(
                 self.n_radars, x_lo, x_hi, y_lo, y_hi, min_sep, rng,
+                per_radar_boxes=per_radar_boxes,
             )
             layouts.append(radar_pos)
         # Stack onto self.device once so _reset can fetch positions for an
@@ -781,10 +828,12 @@ class StrikeEA2DEnv(EnvBase):
             else:
                 x_lo, x_hi, y_lo, y_hi = self._radar_box
                 min_sep = self._radar_min_sep_active
+                per_radar_boxes = self._s2_radar_boxes
                 radar_pos_reset = torch.zeros(n_reset, R, 2, device=self.device)
                 for i in range(n_reset):
                     radar_pos_reset[i] = self._sample_spaced_radars(
                         R, x_lo, x_hi, y_lo, y_hi, min_sep, self._rng, device=self.device,
+                        per_radar_boxes=per_radar_boxes,
                     ).to(self.device)
             self.radar_pos[reset_idx] = radar_pos_reset
             _prof_lap("env_reset_radar_spawn", _t_radar)
