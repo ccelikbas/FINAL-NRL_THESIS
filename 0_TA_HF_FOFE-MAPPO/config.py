@@ -364,6 +364,19 @@ class HFRadarConfig:
     beam_dpsi_max: float = math.pi
     beam_h_accel_magnitude_fraction: float = 0.1
 
+    # ------------------------------------------------------------------
+    # Per-jammer in-cone radar capacity
+    # ------------------------------------------------------------------
+    # When set, each jammer is only able to actively jam the K closest
+    # (Euclidean) radars that fall inside its cone — any additional
+    # in-cone radars are treated as un-jammed by that jammer (R_eff =
+    # R_unc). This affects R_eff_jar, _jammer_in_cone, _radar_jammed_flag,
+    # and (downstream) every reward / obs feature that gates on these.
+    #
+    # Set to None to disable the cap (jammer affects all in-cone radars,
+    # the legacy behaviour).
+    jammer_max_jammed_radars: Optional[int] = 2
+
     def __post_init__(self):
         if self.radar_rx_gain is None:
             self.radar_rx_gain = float(self.radar_tx_gain)
@@ -410,6 +423,11 @@ class HFRadarConfig:
             raise ValueError("beam_dpsi_max must be in (0, pi] radians/step")
         if not (0.0 <= float(self.beam_h_accel_magnitude_fraction) <= 1.0):
             raise ValueError("beam_h_accel_magnitude_fraction must be in [0, 1]")
+        if (self.jammer_max_jammed_radars is not None
+                and int(self.jammer_max_jammed_radars) < 1):
+            raise ValueError(
+                "jammer_max_jammed_radars must be None (unlimited) or >= 1"
+            )
 
     @staticmethod
     def db_to_linear(db_value: float) -> float:

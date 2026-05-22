@@ -101,6 +101,13 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         self._jammer_main_lobe_half = radians(
             float(getattr(hf_cfg, "jammer_main_lobe_deg", 30.0)) / 2.0
         )
+        # Per-jammer in-cone radar capacity. None → unlimited (every
+        # in-cone radar gets jammed by this jammer). Positive int K →
+        # each jammer only jams its K closest in-cone radars.
+        _cap = getattr(hf_cfg, "jammer_max_jammed_radars", None)
+        self._jammer_max_jammed_radars: Optional[int] = (
+            None if _cap is None else int(_cap)
+        )
 
         # Unconstrained range from radar SNR equation (SI meters).
         # Gains/losses are entered in dB and converted to linear above.
@@ -423,6 +430,11 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         in_cone = delta.abs() <= self._jammer_main_lobe_half                               # [B, J, R]
         jammer_alive = self.agent_alive[:, self.n_strikers:]                              # [B, J]
         in_cone = in_cone & jammer_alive[:, :, None]
+        # Apply the K-closest restriction so this flag matches the
+        # active-jamming set used by _compute_hf_radar_eff_range. Use the
+        # cached jammer→radar distance kept fresh by _update_geometry_cache.
+        dist_jr = self._c_dist_ar[:, self.n_strikers:, :]                                 # [B, J, R]
+        in_cone = self._restrict_to_closest_in_cone_radars(in_cone, dist_jr)
         return in_cone.any(dim=1).float()                                                 # [B, R]
 
     # ------------------------------------------------------------------
@@ -478,6 +490,37 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         now = time.perf_counter()
         self._profile_buckets[name] = self._profile_buckets.get(name, 0.0) + (now - t)
         return now
+
+    # ------------------------------------------------------------------
+    # Per-jammer "K closest in-cone radars" restriction
+    # ------------------------------------------------------------------
+
+    def _restrict_to_closest_in_cone_radars(
+        self,
+        in_cone_jr: torch.Tensor,    # [B, J, R] bool — directional gate (alive optional)
+        dist_jr: torch.Tensor,        # [B, J, R] float — jammer→radar distance (any unit)
+    ) -> torch.Tensor:
+        """Restrict `in_cone_jr` to each jammer's K closest in-cone radars.
+
+        K = `self._jammer_max_jammed_radars`. If None or K >= R, returns
+        `in_cone_jr` unchanged. Out-of-cone entries always stay False.
+
+        Uses `torch.topk(largest=False)` on a distance tensor where
+        out-of-cone entries are pushed to +inf, then AND-masks with the
+        original in-cone mask so that when fewer than K radars are
+        in-cone the extra topk picks (which sit at +inf) are dropped.
+        """
+        K = self._jammer_max_jammed_radars
+        if K is None:
+            return in_cone_jr
+        R = in_cone_jr.shape[-1]
+        if R == 0 or K >= R:
+            return in_cone_jr
+        dist_masked = dist_jr.masked_fill(~in_cone_jr, float("inf"))
+        _, top_idx = dist_masked.topk(K, dim=-1, largest=False, sorted=False)  # [B, J, K]
+        keep = torch.zeros_like(in_cone_jr)
+        keep.scatter_(-1, top_idx, True)
+        return in_cone_jr & keep
 
     # ------------------------------------------------------------------
     # Geometry-cache override
@@ -616,6 +659,13 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         delta_point = torch.atan2(torch.sin(delta_point), torch.cos(delta_point))
         abs_delta_point = delta_point.abs()                                 # [B, J, R] in [0, pi]
         in_cone_jr = abs_delta_point <= self._jammer_main_lobe_half         # [B, J, R]
+        # Capacity restriction: each jammer can only actively jam its K
+        # closest in-cone radars (K = self._jammer_max_jammed_radars).
+        # Other in-cone radars are demoted to "not actively jammed by this
+        # jammer", so R_eff for that (j, *, r) pair falls back to R_unc.
+        in_cone_jr = self._restrict_to_closest_in_cone_radars(
+            in_cone_jr, dist_jr_m
+        )
         R_eff_jar = torch.where(
             in_cone_jr[:, :, None, :],   # broadcast over A
             R_eff_jar,
