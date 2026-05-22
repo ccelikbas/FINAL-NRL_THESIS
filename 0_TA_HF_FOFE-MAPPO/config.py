@@ -212,7 +212,7 @@ class EnvConfig:
 class PPOConfig:
     """Shared PPO hyperparameters for both striker and jammer MAPPO."""
     num_envs: int = 1024
-    n_iters: int = 300
+    n_iters: int = 3
     frames_per_batch: Optional[int] = None
     num_epochs: int = 10
     minibatch_size: int = 16384
@@ -334,7 +334,7 @@ class HFRadarConfig:
 
     # Angular lobe boundaries (degrees, converted to radians internally)
     theta_main_deg: float = 6.0    # full main-lobe width (±1.5° each side)
-    theta_side_deg: float = 20.0    # full side-lobe+main-lobe cone width (±4.5° each side)
+    theta_side_deg: float = 40.0    # full side-lobe+main-lobe cone width (±4.5° each side)
 
     # ------------------------------------------------------------------
     # Directional jammer model
