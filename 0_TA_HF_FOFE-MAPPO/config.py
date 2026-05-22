@@ -99,10 +99,10 @@ class FOFEConfig:
 class EnvConfig:
     # Team composition
     n_strikers: int = 1
-    n_jammers: int = 1
+    n_jammers: int = 2
     n_known_targets: int = 1
     n_unknown_targets: int = 0
-    n_known_radars: int = 3
+    n_known_radars: int = 4
     n_unknown_radars: int = 0
     n_targets: int = 0
     n_radars: int = 0
@@ -158,7 +158,7 @@ class EnvConfig:
 
     # Threats
     radar_range: float = 0.20
-    radar_kill_probability: float = 1
+    radar_kill_probability: float = 0.1
 
     # Rewards
     border_thresh: float = 0.05
