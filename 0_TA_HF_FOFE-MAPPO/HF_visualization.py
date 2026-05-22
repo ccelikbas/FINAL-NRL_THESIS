@@ -276,6 +276,15 @@ class HFTestRunner:
             snap["reward_components"] = {
                 k: v[0].detach().cpu().clone() for k, v in env.last_reward_components.items()
             }
+        # Per-(agent, radar) actor margin features used by the animation's
+        # margin subplot. Pulled from _build_radar_extra so the values are
+        # the geometric truth (un-masked by visibility). Columns:
+        #   1 → range margin to R_unc      ∈ [-1, +1]
+        #   2 → angular margin to cone     ∈ [-1, +1]
+        if hasattr(env, "_build_radar_extra"):
+            radar_extra = env._build_radar_extra(env.num_envs, env.n_agents, env.n_radars)
+            snap["m_range"] = radar_extra[0, ..., 1].detach().cpu().clone()  # [A, R]
+            snap["m_angle"] = radar_extra[0, ..., 2].detach().cpu().clone()  # [A, R]
         return snap
 
 
@@ -306,28 +315,55 @@ def hf_animate_rollout(
         Display the figure window. Defaults to True when ``save_path`` is None
         and False otherwise so headless runs don't block.
     """
-    # --- Pre-compute reward time-series ---
-    reward_ts: Dict[str, List[float]] = {}
-    total_ts: List[float] = []
-    for fr in frames:
-        rc = fr.get("reward_components")
-        if rc is None:
-            continue
-        step_total = 0.0
-        for comp_name, comp_tensor in rc.items():
-            val = float(comp_tensor.sum().item())
-            reward_ts.setdefault(comp_name, []).append(val)
-            step_total += val
-        total_ts.append(step_total)
+    # --- Pre-compute reward time-series (kept commented; replaced by the
+    #     per-agent margin subplot below for verification of the new
+    #     actor-obs features) ---
+    # reward_ts: Dict[str, List[float]] = {}
+    # total_ts: List[float] = []
+    # for fr in frames:
+    #     rc = fr.get("reward_components")
+    #     if rc is None:
+    #         continue
+    #     step_total = 0.0
+    #     for comp_name, comp_tensor in rc.items():
+    #         val = float(comp_tensor.sum().item())
+    #         reward_ts.setdefault(comp_name, []).append(val)
+    #         step_total += val
+    #     total_ts.append(step_total)
+    #
+    # active_components: Dict[str, List[float]] = {}
+    # for name, vals in reward_ts.items():
+    #     arr = np.asarray(vals, dtype=float)
+    #     if np.nanmax(np.abs(arr)) > 1e-12:
+    #         active_components[name] = vals
 
-    active_components: Dict[str, List[float]] = {}
-    for name, vals in reward_ts.items():
-        arr = np.asarray(vals, dtype=float)
-        if np.nanmax(np.abs(arr)) > 1e-12:
-            active_components[name] = vals
+    # --- Pre-compute per-agent margin time-series ---
+    # For each agent and timestep, take the MIN over radars of each margin
+    # — i.e. the most-threatening radar per metric. Dead agents become NaN
+    # so their lines break at the death step. Shape per series: [n_steps].
+    n_agents_total = env.n_agents
+    m_range_ts = [[] for _ in range(n_agents_total)]
+    m_angle_ts = [[] for _ in range(n_agents_total)]
+    for fr in frames:
+        alive = fr.get("agent_alive")
+        mr = fr.get("m_range")
+        ma = fr.get("m_angle")
+        if mr is None or ma is None or alive is None:
+            continue
+        # mr / ma : [A, R]   → reduce over R
+        mr_per_agent = mr.min(dim=-1).values if mr.numel() > 0 else mr.new_zeros(n_agents_total)
+        ma_per_agent = ma.min(dim=-1).values if ma.numel() > 0 else ma.new_zeros(n_agents_total)
+        for k in range(n_agents_total):
+            if bool(alive[k].item()):
+                m_range_ts[k].append(float(mr_per_agent[k].item()))
+                m_angle_ts[k].append(float(ma_per_agent[k].item()))
+            else:
+                m_range_ts[k].append(float("nan"))
+                m_angle_ts[k].append(float("nan"))
+    n_margin_steps = len(m_range_ts[0]) if n_agents_total > 0 else 0
 
     # --- Figure layout ---
-    fig, (ax, ax_rew) = plt.subplots(
+    fig, (ax, ax_marg) = plt.subplots(
         1, 2, figsize=(22, 9), gridspec_kw={"width_ratios": [1.4, 1]}
     )
     ax.set_xlim(0, 1000)
@@ -410,24 +446,57 @@ def hf_animate_rollout(
                 label=f"Jammer cone ({math.degrees(2*jammer_lobe_half):.0f} deg)")
     ax.legend(loc="upper right")
 
-    # --- Reward subplot ---
-    ax_rew.set_xlabel("Timestep")
-    ax_rew.set_ylabel("Reward (team sum)")
-    ax_rew.set_ylim(-0.25, 0.25)
-    ax_rew.set_title("Per-Timestep Reward Components")
+    # --- Reward subplot (replaced — kept commented for reference) ---
+    # ax_rew.set_xlabel("Timestep")
+    # ax_rew.set_ylabel("Reward (team sum)")
+    # ax_rew.set_ylim(-0.25, 0.25)
+    # ax_rew.set_title("Per-Timestep Reward Components")
+    #
+    # n_reward_steps = len(total_ts)
+    # if n_reward_steps > 0:
+    #     timesteps = np.arange(1, n_reward_steps + 1)
+    #     for comp_name, values in sorted(active_components.items()):
+    #         ax_rew.plot(timesteps, values, lw=1.5, alpha=0.8, label=comp_name)
+    #     ax_rew.plot(timesteps, total_ts, lw=2.5, color="black", label="total", zorder=10)
+    #     ax_rew.axhline(0, color="gray", lw=0.5)
+    #     ax_rew.set_xlim(1, max(n_reward_steps, 2))
+    #     ax_rew.legend(loc="best", fontsize=7, ncol=2)
+    # ax_rew.grid(True, alpha=0.3)
+    #
+    # time_vline = ax_rew.axvline(x=1, color="red", lw=1.5, ls="--", alpha=0.8)
 
-    n_reward_steps = len(total_ts)
-    if n_reward_steps > 0:
-        timesteps = np.arange(1, n_reward_steps + 1)
-        for comp_name, values in sorted(active_components.items()):
-            ax_rew.plot(timesteps, values, lw=1.5, alpha=0.8, label=comp_name)
-        ax_rew.plot(timesteps, total_ts, lw=2.5, color="black", label="total", zorder=10)
-        ax_rew.axhline(0, color="gray", lw=0.5)
-        ax_rew.set_xlim(1, max(n_reward_steps, 2))
-        ax_rew.legend(loc="best", fontsize=7, ncol=2)
-    ax_rew.grid(True, alpha=0.3)
+    # --- Margin subplot (per agent, min over radars) ---
+    # Two lines per agent: solid = range margin (vs R_unc), dashed =
+    # angular margin (vs ±θ_side/2 jammed-cone boundary). y-axis fixed
+    # to [-1, +1] to match the actor obs scale. Positive = safe.
+    ax_marg.set_xlabel("Timestep")
+    ax_marg.set_ylabel("Margin (positive = safe)")
+    ax_marg.set_ylim(-1.05, 1.05)
+    ax_marg.set_title("Per-Agent Margins (min over radars)")
+    ax_marg.axhline(0, color="gray", lw=0.5)
 
-    time_vline = ax_rew.axvline(x=1, color="red", lw=1.5, ls="--", alpha=0.8)
+    if n_margin_steps > 0:
+        timesteps = np.arange(1, n_margin_steps + 1)
+        for k in range(n_agents_total):
+            role = "striker" if k < env.n_strikers else "jammer"
+            color = f"C{k}"
+            ax_marg.plot(
+                timesteps, m_range_ts[k],
+                lw=1.6, ls="-", color=color, alpha=0.9,
+                label=f"agent {k} ({role}) range",
+            )
+            ax_marg.plot(
+                timesteps, m_angle_ts[k],
+                lw=1.4, ls="--", color=color, alpha=0.9,
+                label=f"agent {k} ({role}) angle",
+            )
+        ax_marg.set_xlim(1, max(n_margin_steps, 2))
+        ax_marg.legend(loc="best", fontsize=7, ncol=2)
+    ax_marg.grid(True, alpha=0.3)
+
+    time_vline = ax_marg.axvline(x=1, color="red", lw=1.5, ls="--", alpha=0.8)
+    # n_reward_steps left in scope for the update() callback's vline math.
+    n_reward_steps = n_margin_steps
 
     # ---- init / update ----
 
