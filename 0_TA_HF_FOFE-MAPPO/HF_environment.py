@@ -260,42 +260,100 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
     # ------------------------------------------------------------------
 
     def _radar_extra_dim(self) -> int:
-        # One extra float per (agent, radar): signed beam→radar angle / pi,
-        # in [-1, 1]. Zero for striker rows (no beam).
-        return 1
+        # Three extra floats per (agent, radar):
+        #   col 0 — signed beam→radar angle / pi (jammer-only steering)
+        #   col 1 — range margin to R_unc, signed, in [-1, +1]
+        #           (positive = striker outside R_unc = safe; both roles)
+        #   col 2 — angular margin to the jammed cone, signed, in [-1, +1]
+        #           (positive = inside the cone = safe; zero when radar
+        #           not jammed; both roles)
+        return 3
 
     def _build_radar_extra(self, B: int, A: int, R: int) -> torch.Tensor:
-        """[B, A, R, 1] — signed (beam_pointing − radar_bearing) wrapped to
-        [-pi, pi] and normalised to [-1, 1]. Strikers and dead jammers
-        contribute zero. For multiple jammers we expose the value for the
-        SMALLEST |angle| (the jammer whose beam is most on-axis with this
-        radar), which is the actor's main steering target.
+        """[B, A, R, 3] — three per-(agent, radar) extras for the actor.
+
+        Column 0 (jammer-only): signed (beam_pointing − radar_bearing)
+            wrapped to [-pi, pi] and normalised to [-1, 1]. Strikers and
+            dead jammers contribute zero. For multiple jammers we expose
+            the value for the SMALLEST |angle| (the jammer whose beam is
+            most on-axis with this radar).
+
+        Column 1 (both roles): signed range margin against R_unc.
+            m_range = (d − R_unc)/R_unc           if d ≤ R_unc   (→ [-1, 0])
+                      (d − R_unc)/(D − R_unc)     if d  > R_unc   (→ [ 0,+1])
+            with d = ‖agent − radar‖ in world units and D = world
+            diagonal. Positive = striker beyond R_unc = safe.
+
+        Column 2 (both roles): signed angular margin against the side-lobe
+            outer cone boundary (±θ_s = ±θ_side/2 from the radar→jammer
+            direction), evaluated against the DEEPEST-CUT jammer at this
+            (agent, radar) pair (cached by _compute_hf_radar_eff_range).
+            With δ* the wrapped abs angle in [0, π]:
+                raw_θ = θ_s − δ*
+                inside  (raw_θ ≥ 0):  raw_θ / θ_s        → [ 0,+1]
+                outside (raw_θ < 0):  raw_θ / (π − θ_s)  → [-1, 0]
+            Multiplied by `_radar_jammed_flag` so the column is identically
+            zero on radars no alive jammer is currently pointing at.
         """
-        extra = torch.zeros(B, A, R, 1, device=self.device, dtype=torch.float32)
-        if self.n_jammers == 0 or R == 0:
+        extra = torch.zeros(B, A, R, 3, device=self.device, dtype=torch.float32)
+        if R == 0:
             return extra
 
-        # Recompute the signed delta inline so this works during _reset too
-        # (when _compute_hf_radar_eff_range may not have refreshed the cache
-        # for the reset slice).
-        jammer_pointing = self.agent_heading[:, self.n_strikers:] + self.jammer_bearing  # [B, J]
-        rel_jr = self.radar_pos[:, None, :, :] - self.agent_pos[:, self.n_strikers:, None, :]  # [B, J, R, 2]
-        angle_j_to_r = torch.atan2(rel_jr[..., 1], rel_jr[..., 0])                        # [B, J, R]
-        delta = angle_j_to_r - jammer_pointing[:, :, None]
-        delta = torch.atan2(torch.sin(delta), torch.cos(delta))                            # [-pi, pi]
+        # ----- Column 0: signed beam→radar angle (jammer-only) -----
+        if self.n_jammers > 0:
+            # Recompute the signed delta inline so this works during _reset
+            # too (jammer_bearing is post-reset and we want the same value
+            # _build_radar_extra has always returned, independent of caches).
+            jammer_pointing = self.agent_heading[:, self.n_strikers:] + self.jammer_bearing  # [B, J]
+            rel_jr = self.radar_pos[:, None, :, :] - self.agent_pos[:, self.n_strikers:, None, :]  # [B, J, R, 2]
+            angle_j_to_r = torch.atan2(rel_jr[..., 1], rel_jr[..., 0])                        # [B, J, R]
+            delta_signed = angle_j_to_r - jammer_pointing[:, :, None]
+            delta_signed = torch.atan2(torch.sin(delta_signed), torch.cos(delta_signed))      # [-pi, pi]
 
-        # Mask dead jammers with +inf |delta| so they lose the argmin race.
-        jammer_alive = self.agent_alive[:, self.n_strikers:]                              # [B, J]
-        abs_delta = delta.abs().masked_fill(~jammer_alive[:, :, None], float("inf"))      # [B, J, R]
-        best_jammer = abs_delta.argmin(dim=1, keepdim=True)                               # [B, 1, R]
-        best_delta = delta.gather(1, best_jammer).squeeze(1)                              # [B, R]
+            jammer_alive = self.agent_alive[:, self.n_strikers:]                              # [B, J]
+            abs_delta = delta_signed.abs().masked_fill(~jammer_alive[:, :, None], float("inf"))  # [B, J, R]
+            best_jammer = abs_delta.argmin(dim=1, keepdim=True)                               # [B, 1, R]
+            best_delta = delta_signed.gather(1, best_jammer).squeeze(1)                       # [B, R]
 
-        # Zero-fill radars whose every jammer is dead (no information to expose).
-        any_alive = jammer_alive.any(dim=1, keepdim=True).expand_as(best_delta)
-        best_delta = torch.where(any_alive, best_delta, torch.zeros_like(best_delta))
+            any_alive = jammer_alive.any(dim=1, keepdim=True).expand_as(best_delta)
+            best_delta = torch.where(any_alive, best_delta, torch.zeros_like(best_delta))
 
-        # Broadcast to per-agent and zero strikers.
-        extra[:, self.n_strikers:, :, 0] = best_delta[:, None, :].expand(B, self.n_jammers, R) / math.pi
+            extra[:, self.n_strikers:, :, 0] = (
+                best_delta[:, None, :].expand(B, self.n_jammers, R) / math.pi
+            )
+
+        # ----- Column 1: range margin to R_unc (both roles) -----
+        # _c_dist_ar is refreshed by _update_geometry_cache, so this value
+        # is consistent with the rest of the obs even in the reset slice.
+        eps = 1e-8
+        dist_ar = self._c_dist_ar                                              # [B, A, R] world units
+        R_unc = float(self.radar_range_unconstrained)
+        D = math.hypot(self.high - self.low, self.high - self.low)             # world diagonal
+        inside_norm = max(R_unc, eps)
+        outside_norm = max(D - R_unc, eps)
+        raw_d = dist_ar - R_unc
+        m_in = (raw_d / inside_norm).clamp(min=-1.0, max=0.0)
+        m_out = (raw_d / outside_norm).clamp(min=0.0, max=1.0)
+        extra[..., 1] = torch.where(raw_d <= 0.0, m_in, m_out)
+
+        # ----- Column 2: angular margin to jammed cone (both roles) -----
+        # Zero by construction when there are no jammers or the cache is
+        # empty; gated to zero on radars no alive jammer is covering.
+        if self.n_jammers > 0 and self._delta_jar.shape[1] > 0:
+            # Gather δ* for each (a, r) using the cached deepest-cut jammer
+            # index. _delta_jar: [B, J, A, R];  _deepest_jammer_idx: [B, A, R].
+            deepest_idx = self._deepest_jammer_idx.unsqueeze(1)                # [B, 1, A, R]
+            delta_a = self._delta_jar.gather(1, deepest_idx).squeeze(1)        # [B, A, R] in [0, π]
+            theta_s = float(self._theta_side_half)
+            theta_in_norm = max(theta_s, eps)
+            theta_out_norm = max(math.pi - theta_s, eps)
+            raw_t = theta_s - delta_a                                          # positive inside, negative outside
+            ang_in = (raw_t / theta_in_norm).clamp(min=0.0, max=1.0)
+            ang_out = (raw_t / theta_out_norm).clamp(min=-1.0, max=0.0)
+            m_angle = torch.where(raw_t >= 0.0, ang_in, ang_out)
+            jammed = self._radar_jammed_flag()                                 # [B, R] in {0, 1}
+            extra[..., 2] = m_angle * jammed[:, None, :]
+
         return extra
 
     def _radar_jammed_flag(self) -> torch.Tensor:
@@ -374,6 +432,23 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         return now
 
     # ------------------------------------------------------------------
+    # Geometry-cache override
+    # ------------------------------------------------------------------
+
+    def _update_geometry_cache(self) -> None:
+        """Refresh base geometry + HF jamming geometry in one pass.
+
+        The base method populates pairwise distance / bearing caches. HF
+        downstream consumers (radar_eff_range_per_agent, _delta_jar,
+        _deepest_jammer_idx, …) also need to stay in sync with current
+        positions — including reset-slice rebuilds where _step never runs.
+        Calling _compute_hf_radar_eff_range here keeps both paths
+        consistent without duplicating geometry code in _build_radar_extra.
+        """
+        super()._update_geometry_cache()
+        self._compute_hf_radar_eff_range()
+
+    # ------------------------------------------------------------------
     # HF radar model
     # ------------------------------------------------------------------
 
@@ -417,6 +492,11 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
             )
             self._jammer_abs_angular_delta = torch.zeros(
                 B, 0, R, device=self.device,
+            )
+            # Empty caches for the angular-margin obs feature.
+            self._delta_jar = torch.zeros(B, 0, A, R, device=self.device)
+            self._deepest_jammer_idx = torch.zeros(
+                B, A, R, dtype=torch.long, device=self.device,
             )
             return
 
@@ -501,12 +581,21 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         self._jammer_in_cone = in_cone_jr
         self._jammer_abs_angular_delta = abs_delta_point
 
+        # Cache for the angular-margin actor feature:
+        #   _delta_jar — |angle(radar→agent) − angle(radar→jammer)| wrapped
+        #                to [0, π]; the same `delta` tensor used for R_eff
+        #                above.
+        self._delta_jar = delta
+
         # Dead jammers have no effect → set to R_unc
         alive_mask = jammer_alive[:, :, None, None]                        # [B, J, 1, 1]
         R_eff_jar = torch.where(alive_mask, R_eff_jar, R_unc_m)
 
         # ----- min across jammers (deepest cut wins) → [B, A, R] in meters -----
-        R_eff_ar_m = R_eff_jar.min(dim=1).values
+        _min_result = R_eff_jar.min(dim=1)
+        R_eff_ar_m = _min_result.values
+        # Cache deepest-cut jammer index for the angular-margin actor feature.
+        self._deepest_jammer_idx = _min_result.indices                     # [B, A, R]
 
         # Convert back to normalized world units for env state/obs consumers.
         self.radar_eff_range_per_agent = R_eff_ar_m / self._meters_per_world_unit
@@ -601,8 +690,8 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         # ================================================================
         jammer_idx = torch.arange(self.n_strikers, self.n_agents, device=self.device)
 
-        # Compute per-(agent, radar) effective ranges from radar equations
-        self._compute_hf_radar_eff_range()
+        # _compute_hf_radar_eff_range already ran inside _update_geometry_cache
+        # above (overridden in HF env so reset slices stay consistent).
 
         # jam_active: in the HF model every alive jammer always jams
         if jammer_idx.numel() > 0:

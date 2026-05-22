@@ -99,10 +99,10 @@ class FOFEConfig:
 class EnvConfig:
     # Team composition
     n_strikers: int = 1
-    n_jammers: int = 2
+    n_jammers: int = 1
     n_known_targets: int = 1
     n_unknown_targets: int = 0
-    n_known_radars: int = 4
+    n_known_radars: int = 1
     n_unknown_radars: int = 0
     n_targets: int = 0
     n_radars: int = 0
@@ -129,7 +129,7 @@ class EnvConfig:
     #         form a defensive line between agents and targets.
     # The radar layout pool is still pre-generated at env init for both
     # scenarios; only the sampling bounds + min-sep differ.
-    scenario: str = "S2"
+    scenario: str = "S1"
     # Minimum pairwise radar separation when scenario == "S2". S2's radar
     # band is much thinner than S1's, so the default is lower to keep
     # rejection sampling tractable.
@@ -360,7 +360,7 @@ class HFRadarConfig:
     #     magnitude expressed as a fraction of beam_dpsi_max (mirrors
     #     EnvConfig.h_accel_magnitude_fraction). Default 0.1 → ~18°/step²
     #     at action=±1, so the beam needs ~10 steps to spin up from rest.
-    jammer_main_lobe_deg: float = 40.0
+    jammer_main_lobe_deg: float = 120.0
     beam_dpsi_max: float = math.pi
     beam_h_accel_magnitude_fraction: float = 0.1
 

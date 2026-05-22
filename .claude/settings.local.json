@@ -8,7 +8,8 @@
       "Bash(git -C \"c:/Users/celikbas/Documents/REPO GIT NLR\" diff HEAD -- 1_HF_FOFE-MAPPO/config.py)",
       "Bash(cd \"c:\\\\\\\\Users\\\\\\\\celikbas\\\\\\\\Documents\\\\\\\\REPO GIT NLR\")",
       "Bash(git.exe diff *)",
-      "Bash(python -c \"from importlib import import_module; m1 = import_module\\('0_TA_HF_FOFE-MAPPO.config'\\); print\\('config ok'\\); m2 = import_module\\('0_TA_HF_FOFE-MAPPO.HF_environment'\\); print\\('HF_environment ok'\\); m3 = import_module\\('0_TA_HF_FOFE-MAPPO.models'\\); print\\('models ok'\\); m4 = import_module\\('0_TA_HF_FOFE-MAPPO.HF_visualization'\\); print\\('HF_visualization ok'\\)\")"
+      "Bash(python -c \"from importlib import import_module; m1 = import_module\\('0_TA_HF_FOFE-MAPPO.config'\\); print\\('config ok'\\); m2 = import_module\\('0_TA_HF_FOFE-MAPPO.HF_environment'\\); print\\('HF_environment ok'\\); m3 = import_module\\('0_TA_HF_FOFE-MAPPO.models'\\); print\\('models ok'\\); m4 = import_module\\('0_TA_HF_FOFE-MAPPO.HF_visualization'\\); print\\('HF_visualization ok'\\)\")",
+      "Bash(python -c ' *)"
     ]
   }
 }

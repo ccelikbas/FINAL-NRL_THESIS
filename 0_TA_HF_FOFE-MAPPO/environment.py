@@ -1658,6 +1658,7 @@ class StrikeEA2DEnv(EnvBase):
             "jammer_bearing", "beam_rate",
             "radar_eff_range_per_agent",
             "_jammer_in_cone", "_jammer_abs_angular_delta",
+            "_delta_jar", "_deepest_jammer_idx",
             # Geometry & comm caches (recomputed inside the swap)
             "_c_rel_ar",  "_c_dist_ar",  "_c_angle_ar",
             "_c_rel_at",  "_c_dist_at",  "_c_angle_at",
