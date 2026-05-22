@@ -526,6 +526,21 @@ class StrikeEA2DEnv(EnvBase):
         """Return the per-(agent, radar) feature extension [B, A, R, d_extra]."""
         return torch.zeros(B, A, R, 0, device=self.device, dtype=torch.float32)
 
+    # ------------------------------------------------------------------
+    # Critic-side per-radar feature extension hooks
+    # ------------------------------------------------------------------
+    # Subclasses can append global per-radar features to the centralised
+    # critic's `crt_radars_feat` channel (e.g. HF env adds the cone
+    # direction (sin, cos) of the deepest-cut jammer).
+
+    def _critic_radar_extra_dim(self) -> int:
+        """Extra per-radar floats appended to `crt_radars_feat`."""
+        return 0
+
+    def _build_critic_radar_extra(self, B: int, R: int) -> torch.Tensor:
+        """Return the per-radar critic-side extension [B, R, d_extra]."""
+        return torch.zeros(B, R, 0, device=self.device, dtype=torch.float32)
+
     def _radar_jammed_flag(self) -> torch.Tensor:
         """Return [B, R] float in {0, 1}: 1 = radar currently jammed.
 
@@ -704,7 +719,8 @@ class StrikeEA2DEnv(EnvBase):
             root_dict["crt_agents_mask"]   = Unbounded(shape=B + torch.Size([A]),    dtype=torch.bool,    device=self.device)
             root_dict["crt_targets_feat"]  = Unbounded(shape=B + torch.Size([T, 3]), dtype=torch.float32, device=self.device)
             root_dict["crt_targets_mask"]  = Unbounded(shape=B + torch.Size([T]),    dtype=torch.bool,    device=self.device)
-            root_dict["crt_radars_feat"]   = Unbounded(shape=B + torch.Size([R, 3]), dtype=torch.float32, device=self.device)
+            d_crt_radar_slot = 3 + int(self._critic_radar_extra_dim())
+            root_dict["crt_radars_feat"]   = Unbounded(shape=B + torch.Size([R, d_crt_radar_slot]), dtype=torch.float32, device=self.device)
             root_dict["crt_radars_mask"]   = Unbounded(shape=B + torch.Size([R]),    dtype=torch.bool,    device=self.device)
             root_dict["crt_time_feat"]     = Unbounded(shape=B + torch.Size([1]),    dtype=torch.float32, device=self.device)
 
@@ -2122,10 +2138,11 @@ class StrikeEA2DEnv(EnvBase):
         tgt_alive = self.target_alive.float().unsqueeze(-1)
         target_feat = torch.cat([tgt_pos_norm, tgt_alive], dim=-1)
 
-        # ---- Radar features [B, R, 3] ----
+        # ---- Radar features [B, R, 3 + d_crt_radar_extra] ----
         rdr_pos_norm = (self.radar_pos - self.low) / world_range
         rdr_jammed = self._radar_jammed_flag().float().unsqueeze(-1)
-        radar_feat = torch.cat([rdr_pos_norm, rdr_jammed], dim=-1)
+        rdr_extra = self._build_critic_radar_extra(B, R)                       # [B, R, E]
+        radar_feat = torch.cat([rdr_pos_norm, rdr_jammed, rdr_extra], dim=-1)
 
         # ---- Time feature [B, 1] ----
         time_feat = (self.step_count.float() / float(self.max_steps)).clamp(0, 1)

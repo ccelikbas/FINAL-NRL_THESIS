@@ -356,6 +356,54 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
 
         return extra
 
+    # ------------------------------------------------------------------
+    # Critic-side per-radar extras: jamming-cone centre-axis direction
+    # ------------------------------------------------------------------
+
+    def _critic_radar_extra_dim(self) -> int:
+        # Two extra floats per radar: (sin θ*, cos θ*) of the radar→jammer
+        # bearing for the deepest-cut alive in-cone jammer. Both zero when
+        # no alive jammer is currently covering the radar.
+        return 2
+
+    def _build_critic_radar_extra(self, B: int, R: int) -> torch.Tensor:
+        """[B, R, 2] — (sin θ*, cos θ*) of the cone centre-axis bearing.
+
+        θ*(b, r) = atan2(jy − ry, jx − rx) for the deepest-cut jammer at
+        radar r, defined as the alive in-cone jammer closest to the radar
+        (smallest R_J, which monotonically gives the smallest R_main /
+        R_side). Both columns are multiplied by `_radar_jammed_flag`, so
+        the feature is identically zero when no alive jammer covers the
+        radar (including n_jammers == 0).
+        """
+        extra = torch.zeros(B, R, 2, device=self.device, dtype=torch.float32)
+        if self.n_jammers == 0 or R == 0:
+            return extra
+
+        ns = self.n_strikers
+        # Jammer→radar geometry in world frame.
+        rel_jr = self.agent_pos[:, ns:, None, :] - self.radar_pos[:, None, :, :]  # [B, J, R, 2]
+        dist_jr = self._c_dist_ar[:, ns:, :]                                       # [B, J, R]
+        bearing_jr = torch.atan2(rel_jr[..., 1], rel_jr[..., 0])                   # [B, J, R]
+
+        # Restrict the argmin to (alive ∧ in_cone) jammers; everyone else
+        # gets +inf so they lose the race. `_jammer_in_cone` is cached by
+        # _compute_hf_radar_eff_range (called via _update_geometry_cache,
+        # so it is fresh on both step and reset-slice paths).
+        jammer_alive = self.agent_alive[:, ns:]                                    # [B, J]
+        in_cone = getattr(self, "_jammer_in_cone", None)
+        if in_cone is None or in_cone.shape != (B, self.n_jammers, R):
+            in_cone = torch.zeros(B, self.n_jammers, R, dtype=torch.bool, device=self.device)
+        valid = in_cone & jammer_alive[:, :, None]                                 # [B, J, R]
+        dist_masked = dist_jr.masked_fill(~valid, float("inf"))
+        deepest_idx = dist_masked.argmin(dim=1, keepdim=True)                      # [B, 1, R]
+        chosen_bearing = bearing_jr.gather(1, deepest_idx).squeeze(1)              # [B, R]
+
+        jammed = self._radar_jammed_flag()                                         # [B, R] in {0, 1}
+        extra[..., 0] = torch.sin(chosen_bearing) * jammed
+        extra[..., 1] = torch.cos(chosen_bearing) * jammed
+        return extra
+
     def _radar_jammed_flag(self) -> torch.Tensor:
         """[B, R] float in {0, 1}: True when at least one alive jammer's
         beam main lobe currently covers the radar. Recomputed inline so it
