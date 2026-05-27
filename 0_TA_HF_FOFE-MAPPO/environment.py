@@ -193,7 +193,7 @@ class StrikeEA2DEnv(EnvBase):
             self._radar_box = (0.2, 0.8, 0.6, 0.8)  # x_lo, x_hi, y_lo, y_hi
             self._radar_min_sep_active = self.radar_min_sep
         else:  # S2
-            self._radar_box = (0.1, 0.9, 0.4, 0.6)
+            self._radar_box = (0.1, 0.9, 0.4, 0.9)
             self._radar_min_sep_active = self.s2_radar_min_sep
         # S2 target box (unused when scenario == "S1").
         self._s2_target_box = (0.1, 0.9, 0.7, 0.9)

@@ -138,8 +138,8 @@ class RewardConfig:
     # Defaults are 0.0 so existing training runs are unaffected unless these
     # weights are explicitly set. Suggested starting magnitudes when enabling:
     # exposed=-0.05, protected=-0.005, outside=0.001.
-    hf_margin_exposed_penalty:   float = -0.05
-    hf_margin_protected_penalty: float = -0.005
+    hf_margin_exposed_penalty:   float = -0.1
+    hf_margin_protected_penalty: float = -0.01
     hf_margin_outside_bonus:     float = -0.001
 
     # ─── JAMMER ACTIVE-JAMMING BONUS  (deactivated by default) ───────────────
