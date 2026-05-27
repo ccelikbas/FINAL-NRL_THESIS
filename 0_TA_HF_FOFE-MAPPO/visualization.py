@@ -46,6 +46,44 @@ def _deterministic_context():
     return contextlib.nullcontext()
 
 
+def _save_subplots_separately(
+    fig,
+    axes,
+    save_path: "Path",
+    *,
+    prefix: str = "",
+    dpi: int = 150,
+    pad_x: float = 1.15,
+    pad_y: float = 1.30,
+) -> None:
+    """Save each subplot in ``axes`` as its own PNG under ``save_path``.
+
+    File names are derived from each axes title (sanitised); axes without
+    a title fall back to ``panel_{i}``. The crop uses ``get_tightbbox`` so
+    axis labels, titles, and legends are included, then expanded slightly
+    for visual breathing room.
+    """
+    import re
+    fig.canvas.draw()  # ensure renderer + tight_layout positions are final
+    renderer = fig.canvas.get_renderer()
+    inv = fig.dpi_scale_trans.inverted()
+    axes_flat = np.asarray(axes).ravel()
+    seen: Dict[str, int] = {}
+    for i, ax in enumerate(axes_flat):
+        title = ax.get_title()
+        slug = re.sub(r"[^A-Za-z0-9._-]+", "_", title).strip("_").lower()
+        if not slug:
+            slug = f"panel_{i}"
+        # Disambiguate any duplicate slugs.
+        n = seen.get(slug, 0)
+        seen[slug] = n + 1
+        out_name = f"{prefix}{slug}.png" if n == 0 else f"{prefix}{slug}_{n + 1}.png"
+        out = save_path / out_name
+        bbox = ax.get_tightbbox(renderer).transformed(inv).expanded(pad_x, pad_y)
+        fig.savefig(out, dpi=dpi, bbox_inches=bbox)
+    print(f"Saved {len(axes_flat)} individual panels to {save_path}")
+
+
 def plot_training(
     logs: Dict[str, List[float]],
     save_dir: Optional[str] = None,
@@ -190,6 +228,7 @@ def plot_training(
         out_file = save_path / "training_dashboard.png"
         fig.savefig(out_file, dpi=150, bbox_inches="tight")
         print(f"Saved plot: {out_file}")
+        _save_subplots_separately(fig, axes, save_path, prefix="training_")
     if show:
         plt.show()
     else:
@@ -323,6 +362,7 @@ def _plot_fofe_diagnostics(
         out_file = save_path / "fofe_diagnostics.png"
         fig.savefig(out_file, dpi=150, bbox_inches="tight")
         print(f"Saved plot: {out_file}")
+        _save_subplots_separately(fig, axes, save_path, prefix="fofe_")
     if show:
         plt.show()
     else:
