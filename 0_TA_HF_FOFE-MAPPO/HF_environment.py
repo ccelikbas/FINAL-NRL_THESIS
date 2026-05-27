@@ -237,6 +237,9 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         self._episode_component_reward["beam_control_effort"] = torch.zeros(
             self.num_envs, device=self.device,
         )
+        self._episode_component_reward["hf_margin_reward"] = torch.zeros(
+            self.num_envs, device=self.device,
+        )
         # Rebuild specs so action_spec reflects the new act_dim/n_choices.
         self._make_specs()
 
@@ -896,6 +899,43 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         )
         reward += radar_pen
 
+        # 4b. HF margin reward (per-(agent, radar), summed over radars, both roles)
+        # Uses already-cached fields: _c_dist_ar, radar_range_unconstrained,
+        # _delta_jar, _deepest_jammer_idx, _theta_side_half, _radar_jammed_flag.
+        hf_margin_full = torch.zeros(B, A, device=self.device)
+        exposed_w   = float(rp.hf_margin_exposed_penalty)
+        protected_w = float(rp.hf_margin_protected_penalty)
+        outside_w   = float(rp.hf_margin_outside_bonus)
+        if (
+            (exposed_w != 0.0 or protected_w != 0.0 or outside_w != 0.0)
+            and self.n_radars > 0
+        ):
+            inside_range_ar = dist_ar < float(self.radar_range_unconstrained)  # [B, A, R]
+
+            if self.n_jammers > 0 and self._delta_jar.shape[1] > 0:
+                deepest_idx = self._deepest_jammer_idx.unsqueeze(1)            # [B, 1, A, R]
+                delta_a = self._delta_jar.gather(1, deepest_idx).squeeze(1)    # [B, A, R] in [0, π]
+                inside_cone_geom = delta_a < float(self._theta_side_half)      # [B, A, R]
+                jammed_ar = self._radar_jammed_flag().bool()                   # [B, R]
+                protected_ar = inside_cone_geom & jammed_ar[:, None, :]
+            else:
+                protected_ar = torch.zeros(
+                    B, A, self.n_radars, dtype=torch.bool, device=self.device,
+                )
+
+            exposed_ar = inside_range_ar & (~protected_ar)
+            in_cone_ar = inside_range_ar & protected_ar
+            outside_ar = ~inside_range_ar
+
+            per_radar = (
+                exposed_w   * exposed_ar.float()
+                + protected_w * in_cone_ar.float()
+                + outside_w   * outside_ar.float()
+            )                                                                   # [B, A, R]
+            hf_margin = per_radar.sum(dim=-1) * alive_float                     # [B, A]
+            reward += hf_margin
+            hf_margin_full = hf_margin
+
         # 5. Striker approach
         striker_approach_full = torch.zeros(B, A, device=self.device)
         if striker_idx.numel() > 0 and self.n_targets > 0:
@@ -1201,6 +1241,7 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
             "separation_penalty":         separation_pen_full.detach(),
             "control_effort":             control_pen_full.detach(),
             "beam_control_effort":        beam_control_pen_full.detach(),
+            "hf_margin_reward":           hf_margin_full.detach(),
         }
 
         reward = reward.unsqueeze(-1).contiguous()  # [B, A, 1]

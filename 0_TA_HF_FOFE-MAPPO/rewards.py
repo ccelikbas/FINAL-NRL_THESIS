@@ -120,6 +120,28 @@ class RewardConfig:
     striker_progress_scale: float = 0
     jammer_progress_scale:  float = 0
 
+    # ─── HF RADAR MARGIN REWARD  (HF env only, per alive agent, per radar) ──
+    # Discrete reward keyed on the signs of the HF margins exposed in the
+    # actor's per-(agent, radar) obs:
+    #     m_range = (d − R_unc)  (sign only is used here)
+    #     m_angle = θ_s − δ*     (sign only; protection requires the radar
+    #                              to be actively jammed by an alive jammer)
+    # Three mutually-exclusive cases per (agent, radar) pair, summed over
+    # all radars and applied to alive agents of BOTH roles:
+    #   1) m_range < 0, m_angle < 0  →  exposed inside R_unc
+    #        contributes hf_margin_exposed_penalty   (large negative)
+    #   2) m_range < 0, m_angle > 0  →  inside R_unc but inside an
+    #        actively jammed side-lobe cone
+    #        contributes hf_margin_protected_penalty (small negative)
+    #   3) m_range > 0                →  outside R_unc (safe)
+    #        contributes hf_margin_outside_bonus     (small positive)
+    # Defaults are 0.0 so existing training runs are unaffected unless these
+    # weights are explicitly set. Suggested starting magnitudes when enabling:
+    # exposed=-0.05, protected=-0.005, outside=0.001.
+    hf_margin_exposed_penalty:   float = 0.0
+    hf_margin_protected_penalty: float = 0.0
+    hf_margin_outside_bonus:     float = 0.0
+
     # ─── JAMMER ACTIVE-JAMMING BONUS  (deactivated by default) ───────────────
     # Per-step bonus when a jammer is within jam_radius of ≥ 1 radar.
     jammer_jam_bonus: float = 0   # Deactivated
