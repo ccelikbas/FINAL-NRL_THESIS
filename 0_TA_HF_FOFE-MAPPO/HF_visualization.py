@@ -181,6 +181,87 @@ def _jammer_cone_polygon_km(
     ))
 
 
+def _jammer_cone_ring_polygon_km(
+    jx_world: float,
+    jy_world: float,
+    pointing_rad: float,
+    half_width_rad: float,
+    r_inner_km: float,
+    r_outer_km: float,
+    n_arc: int = 32,
+) -> np.ndarray:
+    """Annular wedge segment between r_inner_km and r_outer_km. When
+    r_inner_km <= 0 this collapses to an apex triangle, matching the
+    legacy `_jammer_cone_polygon_km` shape for the innermost ring.
+    """
+    cx_km = jx_world * 1000.0
+    cy_km = jy_world * 1000.0
+    ang = np.linspace(
+        pointing_rad - half_width_rad,
+        pointing_rad + half_width_rad,
+        n_arc,
+    )
+    outer_x = cx_km + r_outer_km * np.cos(ang)
+    outer_y = cy_km + r_outer_km * np.sin(ang)
+    if r_inner_km <= 0.0:
+        return np.vstack((
+            [cx_km, cy_km],
+            np.column_stack([outer_x, outer_y]),
+        ))
+    inner_x = cx_km + r_inner_km * np.cos(ang)
+    inner_y = cy_km + r_inner_km * np.sin(ang)
+    return np.vstack((
+        np.column_stack([outer_x, outer_y]),
+        np.column_stack([inner_x[::-1], inner_y[::-1]]),
+    ))
+
+
+# Cone gradient configuration: alpha tapers linearly from `_CONE_ALPHA_NEAR`
+# at the jammer to 0 at the cone tip across `_CONE_N_RINGS` ring segments.
+_CONE_N_RINGS = 16
+_CONE_BASE_RGB = (1.0, 0.85, 0.2)
+_CONE_ALPHA_NEAR = 0.35
+
+
+def _make_cone_gradient_artists(ax) -> list:
+    """Create the stack of ring-segment Polygons for one jammer cone."""
+    alphas = np.linspace(_CONE_ALPHA_NEAR, 0.0, _CONE_N_RINGS + 1)[:-1]
+    return [
+        ax.add_patch(Polygon(
+            np.empty((0, 2)), closed=True,
+            fc=(*_CONE_BASE_RGB, float(a)), ec="none", zorder=1,
+        ))
+        for a in alphas
+    ]
+
+
+def _update_cone_gradient(
+    patches: list,
+    jx_world: float,
+    jy_world: float,
+    pointing_rad: float,
+    half_width_rad: float,
+    radius_km: float,
+    n_arc: int = 32,
+) -> None:
+    r_edges = np.linspace(0.0, radius_km, len(patches) + 1)
+    for k, patch in enumerate(patches):
+        verts = _jammer_cone_ring_polygon_km(
+            jx_world, jy_world,
+            pointing_rad, half_width_rad,
+            r_inner_km=float(r_edges[k]),
+            r_outer_km=float(r_edges[k + 1]),
+            n_arc=n_arc,
+        )
+        patch.set_visible(True)
+        patch.set_xy(verts)
+
+
+def _hide_cone_gradient(patches: list) -> None:
+    for p in patches:
+        p.set_visible(False)
+
+
 # ------------------------------------------------------------------
 # HF Test Runner
 # ------------------------------------------------------------------
@@ -423,15 +504,13 @@ def hf_animate_rollout(
                              fc="C2", alpha=0.18, ec="C2"))
         for _ in range(env.n_strikers)
     ]
-    # Directional-jammer cone wedges (one per jammer). Drawn behind
-    # other artists so markers stay visible on top.
+    # Directional-jammer cone wedges (one per jammer), rendered as a
+    # radial alpha gradient: opaque near the jammer, fully transparent
+    # at the cone tip. Drawn behind other artists so markers stay
+    # visible on top.
     jammer_lobe_half = getattr(env, "_jammer_main_lobe_half", 0.0)
     jammer_cone_polys = [
-        ax.add_patch(Polygon(
-            np.empty((0, 2)), closed=True,
-            fc=(1.0, 0.85, 0.2, 0.18), ec="none", zorder=1,
-        ))
-        for _ in range(env.n_jammers)
+        _make_cone_gradient_artists(ax) for _ in range(env.n_jammers)
     ]
     heading_lines = [ax.plot([], [])[0] for _ in range(env.n_agents)]
     comm_lines = [
@@ -442,7 +521,7 @@ def hf_animate_rollout(
     ax.plot([], [], color="black", lw=0.9, ls="-.", alpha=0.35, label="R_comm")
     ax.plot([], [], color="C0", lw=1.0, ls=":", alpha=0.45, label="R_obs")
     if env.n_jammers > 0:
-        ax.plot([], [], color=(1.0, 0.85, 0.2), lw=6, alpha=0.4,
+        ax.plot([], [], color=_CONE_BASE_RGB, lw=6, alpha=_CONE_ALPHA_NEAR,
                 label=f"Jammer cone ({math.degrees(2*jammer_lobe_half):.0f} deg)")
     ax.legend(loc="upper right")
 
@@ -514,7 +593,7 @@ def hf_animate_rollout(
         for a in striker_arcs:
             a.set_visible(False)
         for w in jammer_cone_polys:
-            w.set_visible(False)
+            _hide_cone_gradient(w)
         for ln in heading_lines:
             ln.set_data([], [])
         for cl in comm_lines:
@@ -592,17 +671,16 @@ def hf_animate_rollout(
         cone_radius_km = 1.5 * 1000.0 * (env.high - env.low)
         for j in range(env.n_jammers):
             if not bool(jammer_alive_np[j]):
-                jammer_cone_polys[j].set_visible(False)
+                _hide_cone_gradient(jammer_cone_polys[j])
                 continue
             jx, jy = float(jammer_pos_np[j, 0]), float(jammer_pos_np[j, 1])
-            cone_verts = _jammer_cone_polygon_km(
+            _update_cone_gradient(
+                jammer_cone_polys[j],
                 jx, jy,
                 pointing_rad=float(jammer_pointing_np[j]),
                 half_width_rad=jammer_lobe_half,
                 radius_km=cone_radius_km,
             )
-            jammer_cone_polys[j].set_visible(True)
-            jammer_cone_polys[j].set_xy(cone_verts)
 
         # Obs / comm circles
         for k, oc in enumerate(obs_circles):
@@ -815,11 +893,7 @@ def _draw_hf_world_panel(ax, env: HFStrikeEA2DEnv, frames: List[Dict[str, torch.
     ]
     jammer_lobe_half = getattr(env, "_jammer_main_lobe_half", 0.0)
     jammer_cone_polys = [
-        ax.add_patch(Polygon(
-            np.empty((0, 2)), closed=True,
-            fc=(1.0, 0.85, 0.2, 0.18), ec="none", zorder=1,
-        ))
-        for _ in range(env.n_jammers)
+        _make_cone_gradient_artists(ax) for _ in range(env.n_jammers)
     ]
     heading_lines = [ax.plot([], [])[0] for _ in range(env.n_agents)]
     comm_lines = [
@@ -830,7 +904,7 @@ def _draw_hf_world_panel(ax, env: HFStrikeEA2DEnv, frames: List[Dict[str, torch.
     ax.plot([], [], color="black", lw=0.9, ls="-.", alpha=0.35, label="R_comm")
     ax.plot([], [], color="C0", lw=1.0, ls=":", alpha=0.45, label="R_obs")
     if env.n_jammers > 0:
-        ax.plot([], [], color=(1.0, 0.85, 0.2), lw=6, alpha=0.4,
+        ax.plot([], [], color=_CONE_BASE_RGB, lw=6, alpha=_CONE_ALPHA_NEAR,
                 label=f"Jammer cone ({math.degrees(2*jammer_lobe_half):.0f} deg)")
     ax.legend(loc="upper right", fontsize=6)
 
@@ -894,17 +968,16 @@ def _draw_hf_world_panel(ax, env: HFStrikeEA2DEnv, frames: List[Dict[str, torch.
         cone_radius_km = 1.5 * 1000.0 * (env.high - env.low)
         for j in range(env.n_jammers):
             if not bool(jammer_alive_np[j]):
-                jammer_cone_polys[j].set_visible(False)
+                _hide_cone_gradient(jammer_cone_polys[j])
                 continue
             jx, jy = float(jammer_pos_np[j, 0]), float(jammer_pos_np[j, 1])
-            cone_verts = _jammer_cone_polygon_km(
+            _update_cone_gradient(
+                jammer_cone_polys[j],
                 jx, jy,
                 pointing_rad=float(jammer_pointing_np[j]),
                 half_width_rad=jammer_lobe_half,
                 radius_km=cone_radius_km,
             )
-            jammer_cone_polys[j].set_visible(True)
-            jammer_cone_polys[j].set_xy(cone_verts)
 
         # Obs / comm circles
         for k, oc in enumerate(obs_circles):
