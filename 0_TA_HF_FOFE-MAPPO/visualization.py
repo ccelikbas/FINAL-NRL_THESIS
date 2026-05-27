@@ -46,42 +46,87 @@ def _deterministic_context():
     return contextlib.nullcontext()
 
 
-def _save_subplots_separately(
-    fig,
-    axes,
-    save_path: "Path",
-    *,
-    prefix: str = "",
-    dpi: int = 150,
-    pad_x: float = 1.15,
-    pad_y: float = 1.30,
-) -> None:
-    """Save each subplot in ``axes`` as its own PNG under ``save_path``.
+def _plot_valid(ax, series: List[float], label: str, **kwargs) -> None:
+    y = np.asarray(series, dtype=float)
+    if y.size == 0:
+        return
+    x = np.arange(1, y.size + 1)
+    valid = np.isfinite(y)
+    if not np.any(valid):
+        return
+    ax.plot(x[valid], y[valid], marker="o", markersize=2, label=label, **kwargs)
 
-    File names are derived from each axes title (sanitised); axes without
-    a title fall back to ``panel_{i}``. The crop uses ``get_tightbbox`` so
-    axis labels, titles, and legends are included, then expanded slightly
-    for visual breathing room.
+
+def _draw_episode_reward(ax, logs: Dict[str, List[float]]) -> None:
+    if "train_mean_episode_total_reward" in logs:
+        _plot_valid(ax, logs["train_mean_episode_total_reward"], "train_ep_return_total")
+    for key in sorted(logs.keys()):
+        if not key.startswith("train_component_"):
+            continue
+        y = np.asarray(logs[key], dtype=float)
+        if y.size == 0:
+            continue
+        valid = np.isfinite(y)
+        if not np.any(valid) or np.nanmax(np.abs(y[valid])) <= 1e-12:
+            continue
+        label = key.replace("train_component_", "")
+        _plot_valid(ax, logs[key], label)
+    ax.set_title("Training Episode Reward")
+    ax.set_xlabel("Iteration")
+    ax.legend(fontsize=6)
+    ax.grid(True)
+
+
+def _draw_policy_value_loss(ax, logs: Dict[str, List[float]]) -> None:
+    if "striker_loss_policy" in logs:
+        _plot_valid(ax, logs["striker_loss_policy"], "striker_policy_loss", color=NLR_PRIMARY)
+    if "striker_loss_value" in logs:
+        _plot_valid(ax, logs["striker_loss_value"], "striker_value_loss", color=NLR_ACCENT)
+    if "jammer_loss_policy" in logs:
+        _plot_valid(ax, logs["jammer_loss_policy"], "jammer_policy_loss", color=NLR_SECONDARY)
+    if "jammer_loss_value" in logs:
+        _plot_valid(ax, logs["jammer_loss_value"], "jammer_value_loss", color=NLR_TERRA_50)
+    ax.set_title("Policy & Value Loss (Striker + Jammer)")
+    ax.set_xlabel("Iteration")
+    ax.legend()
+    ax.grid(True)
+
+
+def _draw_eval_kpi(ax, logs: Dict[str, List[float]]) -> None:
+    if "eval_survival_rate" in logs:
+        _plot_valid(ax, logs["eval_survival_rate"], "eval_survival_ratio")
+    if "eval_task_completion_rate" in logs:
+        _plot_valid(ax, logs["eval_task_completion_rate"], "eval_completion_ratio")
+    if "eval_targets_destroyed_rate" in logs:
+        _plot_valid(ax, logs["eval_targets_destroyed_rate"], "eval_targets_destroyed_ratio")
+    ax.set_title("Eval Survival, Completion & Targets Destroyed")
+    ax.set_xlabel("Iteration")
+    ax.legend()
+    ax.grid(True)
+
+
+def _save_standalone_panels(
+    logs: Dict[str, List[float]],
+    save_path: Path,
+    *,
+    dpi: int = 150,
+) -> None:
+    """Save three real, standalone figures (not crops): episode reward,
+    policy/value loss, and eval KPI ratios.
     """
-    import re
-    fig.canvas.draw()  # ensure renderer + tight_layout positions are final
-    renderer = fig.canvas.get_renderer()
-    inv = fig.dpi_scale_trans.inverted()
-    axes_flat = np.asarray(axes).ravel()
-    seen: Dict[str, int] = {}
-    for i, ax in enumerate(axes_flat):
-        title = ax.get_title()
-        slug = re.sub(r"[^A-Za-z0-9._-]+", "_", title).strip("_").lower()
-        if not slug:
-            slug = f"panel_{i}"
-        # Disambiguate any duplicate slugs.
-        n = seen.get(slug, 0)
-        seen[slug] = n + 1
-        out_name = f"{prefix}{slug}.png" if n == 0 else f"{prefix}{slug}_{n + 1}.png"
-        out = save_path / out_name
-        bbox = ax.get_tightbbox(renderer).transformed(inv).expanded(pad_x, pad_y)
-        fig.savefig(out, dpi=dpi, bbox_inches=bbox)
-    print(f"Saved {len(axes_flat)} individual panels to {save_path}")
+    specs = [
+        ("episode_reward.png",     _draw_episode_reward),
+        ("policy_value_loss.png",  _draw_policy_value_loss),
+        ("eval_kpi.png",           _draw_eval_kpi),
+    ]
+    for fname, draw_fn in specs:
+        fig_i, ax_i = plt.subplots(figsize=(8, 5))
+        draw_fn(ax_i, logs)
+        fig_i.tight_layout()
+        out = save_path / fname
+        fig_i.savefig(out, dpi=dpi, bbox_inches="tight")
+        plt.close(fig_i)
+        print(f"Saved plot: {out}")
 
 
 def plot_training(
@@ -112,52 +157,14 @@ def plot_training(
     if save_dir is not None:
         save_path = Path(save_dir)
         save_path.mkdir(parents=True, exist_ok=True)
-    def _plot_valid(ax, series: List[float], label: str, **kwargs):
-        y = np.asarray(series, dtype=float)
-        if y.size == 0:
-            return
-        x = np.arange(1, y.size + 1)
-        valid = np.isfinite(y)
-        if not np.any(valid):
-            return
-        ax.plot(x[valid], y[valid], marker="o", markersize=2, label=label, **kwargs)
 
     fig, axes = plt.subplots(2, 3, figsize=(22, 10))
 
     # --- Row 0, Col 0: Training Episode Reward ---
-    ax = axes[0, 0]
-    if "train_mean_episode_total_reward" in logs:
-        _plot_valid(ax, logs["train_mean_episode_total_reward"], "train_ep_return_total")
-    for key in sorted(logs.keys()):
-        if not key.startswith("train_component_"):
-            continue
-        y = np.asarray(logs[key], dtype=float)
-        if y.size == 0:
-            continue
-        valid = np.isfinite(y)
-        if not np.any(valid) or np.nanmax(np.abs(y[valid])) <= 1e-12:
-            continue
-        label = key.replace("train_component_", "")
-        _plot_valid(ax, logs[key], label)
-    ax.set_title("Training Episode Reward")
-    ax.set_xlabel("Iteration")
-    ax.legend(fontsize=6)
-    ax.grid(True)
+    _draw_episode_reward(axes[0, 0], logs)
 
     # --- Row 0, Col 1: Combined striker+jammer losses ---
-    ax = axes[0, 1]
-    if "striker_loss_policy" in logs:
-        _plot_valid(ax, logs["striker_loss_policy"], "striker_policy_loss", color=NLR_PRIMARY)
-    if "striker_loss_value" in logs:
-        _plot_valid(ax, logs["striker_loss_value"], "striker_value_loss", color=NLR_ACCENT)
-    if "jammer_loss_policy" in logs:
-        _plot_valid(ax, logs["jammer_loss_policy"], "jammer_policy_loss", color=NLR_SECONDARY)
-    if "jammer_loss_value" in logs:
-        _plot_valid(ax, logs["jammer_loss_value"], "jammer_value_loss", color=NLR_TERRA_50)
-    ax.set_title("Policy & Value Loss (Striker + Jammer)")
-    ax.set_xlabel("Iteration")
-    ax.legend()
-    ax.grid(True)
+    _draw_policy_value_loss(axes[0, 1], logs)
 
     # --- Row 0, Col 2: Combined striker+jammer diagnostics ---
     ax = axes[0, 2]
@@ -201,17 +208,7 @@ def plot_training(
     ax.grid(True)
 
     # --- Row 1, Col 1: Eval Survival, Completion & Targets Destroyed ---
-    ax = axes[1, 1]
-    if "eval_survival_rate" in logs:
-        _plot_valid(ax, logs["eval_survival_rate"], "eval_survival_ratio")
-    if "eval_task_completion_rate" in logs:
-        _plot_valid(ax, logs["eval_task_completion_rate"], "eval_completion_ratio")
-    if "eval_targets_destroyed_rate" in logs:
-        _plot_valid(ax, logs["eval_targets_destroyed_rate"], "eval_targets_destroyed_ratio")
-    ax.set_title("Eval Survival, Completion & Targets Destroyed")
-    ax.set_xlabel("Iteration")
-    ax.legend()
-    ax.grid(True)
+    _draw_eval_kpi(axes[1, 1], logs)
 
     # --- Row 1, Col 2: Eval Mission Duration ---
     ax = axes[1, 2]
@@ -228,7 +225,7 @@ def plot_training(
         out_file = save_path / "training_dashboard.png"
         fig.savefig(out_file, dpi=150, bbox_inches="tight")
         print(f"Saved plot: {out_file}")
-        _save_subplots_separately(fig, axes, save_path, prefix="training_")
+        _save_standalone_panels(logs, save_path)
     if show:
         plt.show()
     else:
@@ -362,7 +359,6 @@ def _plot_fofe_diagnostics(
         out_file = save_path / "fofe_diagnostics.png"
         fig.savefig(out_file, dpi=150, bbox_inches="tight")
         print(f"Saved plot: {out_file}")
-        _save_subplots_separately(fig, axes, save_path, prefix="fofe_")
     if show:
         plt.show()
     else:
