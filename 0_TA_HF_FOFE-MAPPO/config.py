@@ -92,6 +92,50 @@ class FOFEConfig:
 
 
 # ======================================================================
+# Domain randomization (per-environment, used by the curriculum runner)
+# ======================================================================
+
+@dataclass
+class DomainRandomization:
+    """Per-environment domain-randomization ranges.
+
+    Each field is either ``None`` (the parameter is NOT randomized — the
+    env's fixed count/value is used for every environment) or an inclusive
+    ``(lo, hi)`` range. When a range is given, EACH parallel environment
+    independently samples its own value in ``[lo, hi]`` at every reset, so a
+    single training batch (and each evaluation episode) contains a mix of
+    configurations — true per-environment domain randomization, not a single
+    sample shared per iteration.
+
+    Counts are realised by activating a per-environment subset of entity
+    slots ("present" masks) over tensors that the env allocates at the
+    maximum (``hi``) size. ``hi`` for every count range must therefore be
+    ``<=`` the corresponding ``EnvConfig`` count (which the curriculum runner
+    sets to the range maximum).
+    """
+    n_strikers:        Optional[Tuple[int, int]]   = None
+    n_jammers:         Optional[Tuple[int, int]]   = None
+    n_known_targets:   Optional[Tuple[int, int]]   = None
+    n_unknown_targets: Optional[Tuple[int, int]]   = None
+    n_known_radars:    Optional[Tuple[int, int]]   = None
+    n_unknown_radars:  Optional[Tuple[int, int]]   = None
+    radar_kill_probability: Optional[Tuple[float, float]] = None
+    max_steps:         Optional[Tuple[int, int]]   = None
+
+    def active(self) -> bool:
+        """True if any field requests randomization."""
+        return any(
+            v is not None
+            for v in (
+                self.n_strikers, self.n_jammers,
+                self.n_known_targets, self.n_unknown_targets,
+                self.n_known_radars, self.n_unknown_radars,
+                self.radar_kill_probability, self.max_steps,
+            )
+        )
+
+
+# ======================================================================
 # Environment configuration
 # ======================================================================
 
@@ -163,6 +207,11 @@ class EnvConfig:
     # Rewards
     border_thresh: float = 0.05
     reward_config: RewardConfig = field(default_factory=RewardConfig)
+
+    # Per-environment domain randomization (None = disabled → fixed counts).
+    # Used by run_curriculum.py. When set, the entity counts above must be the
+    # range maxima (tensors are allocated at this size and masked down per-env).
+    dr: Optional[DomainRandomization] = None
 
     # Internal: propagated from FOFEConfig.use_fofe by ExperimentConfig.finalize().
     # Do NOT set directly — change FOFEConfig.use_fofe instead.

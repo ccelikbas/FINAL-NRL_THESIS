@@ -88,6 +88,8 @@ class StrikeEA2DEnv(EnvBase):
         s2_radar_min_sep: float = 0.2,
         # --- FOFE mode ---
         use_fofe: bool = False,
+        # --- per-environment domain randomization (None = disabled) ---
+        dr=None,
     ):
         self._device = device if device is not None else torch.device("cpu")
         super().__init__(device=self._device, batch_size=torch.Size([num_envs]))
@@ -158,6 +160,19 @@ class StrikeEA2DEnv(EnvBase):
             v_min=float(jammer_v_min),
         )
         self.radar   = RadarAgent(kill_probability=float(radar_kill_probability))
+        self._base_kill_probability = float(radar_kill_probability)
+
+        # ── Per-environment domain randomization ─────────────────────────
+        # `dr` is a DomainRandomization (duck-typed: any object exposing the
+        # same Optional[(lo, hi)] attributes). When active, each env samples
+        # its own counts/scalars at reset; tensors are allocated at the max
+        # counts (the values passed above) and surplus entities are masked
+        # out per-env via the *_present buffers. When None/inactive the env
+        # behaves exactly as before (all entities present, scalar kill_prob).
+        self._dr = dr
+        self._dr_active = bool(dr is not None and dr.active())
+        if self._dr_active:
+            self._validate_dr_ranges(dr)
 
         # RNG
         try:
@@ -254,6 +269,17 @@ class StrikeEA2DEnv(EnvBase):
         self.radar_known   = torch.zeros(B, R,    dtype=torch.bool, device=self.device)
         self.radar_eff_range = torch.full((B, R), self.radar_range, device=self.device)
         self.step_count    = torch.zeros(B, 1, dtype=torch.int64, device=self.device)
+        # ── Per-env DR state (default: everything present, scalar kill_prob,
+        #    uniform max_steps — so non-DR runs match the original behaviour) ──
+        # *_present[b, i] = True  →  entity slot i is a real entity in env b.
+        # Absent agents/targets start with alive=False; absent radars are
+        # parked far outside the world so distance-based terms ignore them.
+        self.agent_present  = torch.ones(B, A, dtype=torch.bool, device=self.device)
+        self.target_present = torch.ones(B, T, dtype=torch.bool, device=self.device)
+        self.radar_present  = torch.ones(B, R, dtype=torch.bool, device=self.device)
+        # Per-env radar kill probability and episode horizon (scalars when DR off).
+        self.radar_kill_prob = torch.full((B, 1), self._base_kill_probability, device=self.device)
+        self.max_steps_t     = torch.full((B, 1), float(self.max_steps), device=self.device)
         # Previous striker→target distances for progress reward (potential-based shaping)
         self._striker_prev_dist = torch.zeros(B, n_strikers, self.n_targets, device=self._device)
         # Previous jammer→radar distances for progress reward (potential-based shaping)
@@ -790,6 +816,68 @@ class StrikeEA2DEnv(EnvBase):
 
         return reset_mask
 
+    # ------------------------------------------------------------------
+    # Domain-randomization helpers
+    # ------------------------------------------------------------------
+    # Coordinate well outside world_bounds where absent radars are parked.
+    _ABSENT_RADAR_COORD: float = 100.0
+
+    def _validate_dr_ranges(self, dr) -> None:
+        """Validate DR ranges are well-formed and within the allocated maxima."""
+        def _chk(name: str, rng, max_val: int) -> None:
+            if rng is None:
+                return
+            lo, hi = int(rng[0]), int(rng[1])
+            if lo > hi:
+                raise ValueError(f"dr.{name} has lo>hi: {rng}")
+            if lo < 0:
+                raise ValueError(f"dr.{name} must be >= 0: {rng}")
+            if hi > max_val:
+                raise ValueError(
+                    f"dr.{name} hi={hi} exceeds allocated max {max_val}; set the "
+                    f"EnvConfig count to the range maximum so tensors are large enough."
+                )
+        _chk("n_strikers",        dr.n_strikers,        self.n_strikers)
+        _chk("n_jammers",         dr.n_jammers,         self.n_jammers)
+        _chk("n_known_targets",   dr.n_known_targets,   self.n_known_targets)
+        _chk("n_unknown_targets", dr.n_unknown_targets, self.n_unknown_targets)
+        _chk("n_known_radars",    dr.n_known_radars,    self.n_known_radars)
+        _chk("n_unknown_radars",  dr.n_unknown_radars,  self.n_unknown_radars)
+        _chk("max_steps",         dr.max_steps,         self.max_steps)
+        if dr.radar_kill_probability is not None:
+            lo, hi = dr.radar_kill_probability
+            if float(lo) > float(hi):
+                raise ValueError(f"dr.radar_kill_probability lo>hi: {dr.radar_kill_probability}")
+
+    def _dr_sample_int(self, rng, n: int, default_max: int) -> torch.Tensor:
+        """Per-env integer count [n]: sampled in the inclusive range, or filled
+        with default_max when the range is None (parameter not randomized)."""
+        if rng is None:
+            return torch.full((n,), int(default_max), dtype=torch.long, device=self.device)
+        lo, hi = int(rng[0]), int(rng[1])
+        if lo == hi:
+            return torch.full((n,), lo, dtype=torch.long, device=self.device)
+        return torch.randint(lo, hi + 1, (n,), generator=self._rng, device=self.device)
+
+    def _present_block(self, counts: torch.Tensor, block_size: int) -> torch.Tensor:
+        """[n, block_size] bool with the first `counts[i]` entries True per row."""
+        ar = torch.arange(block_size, device=self.device)
+        return ar.unsqueeze(0) < counts.unsqueeze(1)
+
+    def _episode_metric_fracs(self, idx: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Present-aware (targets_destroyed_frac, survival_frac), each [N, 1].
+
+        Computed over PRESENT entities only so masked-out (absent) slots never
+        count as destroyed targets or dead agents. Reduces to the plain mean
+        when DR is off (all entities present)."""
+        tp = self.target_present[idx]
+        tgt_frac = ((~self.target_alive[idx]) & tp).float().sum(-1, keepdim=True) / \
+            tp.float().sum(-1, keepdim=True).clamp_min(1.0)
+        ap = self.agent_present[idx]
+        surv_frac = (self.agent_alive[idx] & ap).float().sum(-1, keepdim=True) / \
+            ap.float().sum(-1, keepdim=True).clamp_min(1.0)
+        return tgt_frac, surv_frac
+
     def _reset(self, tensordict: Optional[TensorDict] = None, **kwargs) -> TensorDict:
         B, A, T, R = self.num_envs, self.n_agents, self.n_targets, self.n_radars
 
@@ -804,6 +892,61 @@ class StrikeEA2DEnv(EnvBase):
         n_reset = int(reset_idx.numel())
 
         if n_reset > 0:
+            # ── Per-env domain-randomization sampling ────────────────────
+            # Vectorised over the reset envs (no Python per-env loop). When
+            # DR is inactive every count equals its max and every mask is all
+            # True, so the masks/known-blocks reduce to the original behaviour.
+            dr = self._dr
+            def _rng_of(attr):
+                return getattr(dr, attr, None) if dr is not None else None
+
+            ns_cnt  = self._dr_sample_int(_rng_of("n_strikers"),        n_reset, self.n_strikers)
+            nj_cnt  = self._dr_sample_int(_rng_of("n_jammers"),         n_reset, self.n_jammers)
+            nkt_cnt = self._dr_sample_int(_rng_of("n_known_targets"),   n_reset, self.n_known_targets)
+            nut_cnt = self._dr_sample_int(_rng_of("n_unknown_targets"), n_reset, self.n_unknown_targets)
+            nkr_cnt = self._dr_sample_int(_rng_of("n_known_radars"),    n_reset, self.n_known_radars)
+            nur_cnt = self._dr_sample_int(_rng_of("n_unknown_radars"),  n_reset, self.n_unknown_radars)
+
+            present_s  = self._present_block(ns_cnt,  self.n_strikers)
+            present_j  = self._present_block(nj_cnt,  self.n_jammers)
+            agent_present_reset = torch.cat([present_s, present_j], dim=1)        # [n_reset, A]
+
+            present_kt = self._present_block(nkt_cnt, self.n_known_targets)
+            present_ut = self._present_block(nut_cnt, self.n_unknown_targets)
+            target_present_reset = torch.cat([present_kt, present_ut], dim=1)     # [n_reset, T]
+            target_known_reset   = torch.cat([present_kt, torch.zeros_like(present_ut)], dim=1)
+
+            present_kr = self._present_block(nkr_cnt, self.n_known_radars)
+            present_ur = self._present_block(nur_cnt, self.n_unknown_radars)
+            radar_present_reset  = torch.cat([present_kr, present_ur], dim=1)     # [n_reset, R]
+            radar_known_reset    = torch.cat([present_kr, torch.zeros_like(present_ur)], dim=1)
+
+            # Per-env scalars: radar kill probability + episode horizon.
+            kp_rng = _rng_of("radar_kill_probability")
+            if kp_rng is not None:
+                kill_prob_reset = torch.empty(n_reset, 1, device=self.device).uniform_(
+                    float(kp_rng[0]), float(kp_rng[1]), generator=self._rng,
+                )
+            else:
+                kill_prob_reset = torch.full((n_reset, 1), self._base_kill_probability, device=self.device)
+
+            ms_rng = _rng_of("max_steps")
+            if ms_rng is not None and int(ms_rng[0]) != int(ms_rng[1]):
+                max_steps_reset = torch.randint(
+                    int(ms_rng[0]), int(ms_rng[1]) + 1, (n_reset, 1),
+                    generator=self._rng, device=self.device,
+                ).float()
+            elif ms_rng is not None:
+                max_steps_reset = torch.full((n_reset, 1), float(ms_rng[0]), device=self.device)
+            else:
+                max_steps_reset = torch.full((n_reset, 1), float(self.max_steps), device=self.device)
+
+            self.agent_present[reset_idx]  = agent_present_reset
+            self.target_present[reset_idx] = target_present_reset
+            self.radar_present[reset_idx]  = radar_present_reset
+            self.radar_kill_prob[reset_idx] = kill_prob_reset
+            self.max_steps_t[reset_idx]     = max_steps_reset
+
             # --- Agents spawn at bottom middle of map, facing north ---
             center_x = (self.low + self.high) / 2.0
             bottom_y = self.low + 0.05  # 50 km from bottom edge
@@ -824,7 +967,9 @@ class StrikeEA2DEnv(EnvBase):
             speed_reset[:, self.n_strikers:] = self.jammer.v_min
             self.agent_speed[reset_idx] = speed_reset
             self.agent_heading_rate[reset_idx] = 0.0
-            self.agent_alive[reset_idx] = True
+            # Present agents start alive; absent (masked-out) agents start dead
+            # so every alive-gated reward/obs/termination term ignores them.
+            self.agent_alive[reset_idx] = agent_present_reset
 
             # --- Radars: top half of map, not too close to borders ---
             # Domain randomisation: every env being reset gets an independently
@@ -851,6 +996,15 @@ class StrikeEA2DEnv(EnvBase):
                         R, x_lo, x_hi, y_lo, y_hi, min_sep, self._rng, device=self.device,
                         per_radar_boxes=per_radar_boxes,
                     ).to(self.device)
+            # Park absent radars far outside the world so every distance-based
+            # term (threat, avoidance, approach, jamming, visibility) ignores
+            # them with no per-step masking. radar_present still gates the few
+            # boolean/critic spots where "far" is not sufficient.
+            radar_pos_reset = torch.where(
+                radar_present_reset.unsqueeze(-1),
+                radar_pos_reset,
+                torch.full_like(radar_pos_reset, self._ABSENT_RADAR_COORD),
+            )
             self.radar_pos[reset_idx] = radar_pos_reset
             _prof_lap("env_reset_radar_spawn", _t_radar)
 
@@ -864,16 +1018,14 @@ class StrikeEA2DEnv(EnvBase):
                 target_pos_reset = self._spawn_targets_uniform_box(n_reset, T, self._s2_target_box)
             self.target_pos[reset_idx] = target_pos_reset
             _prof_lap("env_reset_target_spawn", _t_target)
-            self.target_alive[reset_idx] = True
-            target_known_reset = torch.zeros(n_reset, T, dtype=torch.bool, device=self.device)
-            if self.n_known_targets > 0:
-                target_known_reset[:, :self.n_known_targets] = True
+            # Present targets start alive; absent targets start dead (so they
+            # never appear in obs, are never engageable, and the mission-
+            # complete check `(~target_alive).all()` reduces to "all present
+            # targets destroyed"). target_known is True only for present known
+            # slots.
+            self.target_alive[reset_idx] = target_present_reset
             self.target_known[reset_idx] = target_known_reset
-
-            radar_known_reset = torch.zeros(n_reset, R, dtype=torch.bool, device=self.device)
-            if self.n_known_radars > 0:
-                radar_known_reset[:, :self.n_known_radars] = True
-            self.radar_known[reset_idx] = radar_known_reset
+            self.radar_known[reset_idx]  = radar_known_reset
 
             self.radar_eff_range[reset_idx] = self.radar_range
             self.step_count[reset_idx] = 0
@@ -996,11 +1148,11 @@ class StrikeEA2DEnv(EnvBase):
 
         # ---- radar kills own agents (probabilistic) ----
         dist_ar = self._c_dist_ar                                                  # [B,A,R]
-        in_radar = dist_ar <= radar_eff_range[:, None, :]                         # [B,A,R]
-        
+        in_radar = (dist_ar <= radar_eff_range[:, None, :]) & self.radar_present[:, None, :]  # [B,A,R]
+
         kill_samples = torch.rand(B, A, self.n_radars, device=self.device, generator=self._rng)
-        kill_prob = self.radar.kill_probability
-        kills_from_radar = in_radar & (kill_samples < kill_prob)
+        # Per-env kill probability ([B,1]→[B,1,1]); scalar fill when DR is off.
+        kills_from_radar = in_radar & (kill_samples < self.radar_kill_prob.unsqueeze(-1))
         killed = kills_from_radar.any(dim=-1) & alive
         self.agent_alive = self.agent_alive & (~killed)
 
@@ -1416,7 +1568,7 @@ class StrikeEA2DEnv(EnvBase):
         self.step_count += 1
         all_targets_done = (~self.target_alive).all(dim=-1, keepdim=True)
         all_agents_dead  = (~self.agent_alive).all(dim=-1, keepdim=True)
-        timeout          = self.step_count >= self.max_steps
+        timeout          = self.step_count >= self.max_steps_t
 
         terminated = all_targets_done | all_agents_dead
         done       = terminated | timeout
@@ -1454,8 +1606,7 @@ class StrikeEA2DEnv(EnvBase):
         done_idx_t = done_flat.nonzero(as_tuple=True)[0]           # [N_done]
         if done_idx_t.numel() > 0:
             comp_keys = list(self._episode_component_reward.keys())
-            tgt_frac_t   = (~self.target_alive[done_idx_t]).float().mean(dim=-1, keepdim=True)  # [N,1]
-            surv_frac_t  = self.agent_alive[done_idx_t].float().mean(dim=-1, keepdim=True)     # [N,1]
+            tgt_frac_t, surv_frac_t = self._episode_metric_fracs(done_idx_t)                    # [N,1] each
             miss_t       = all_targets_done[done_idx_t].float()                                 # [N,1]
             dur_t        = self.step_count[done_idx_t].float()                                  # [N,1]
             team_r_t     = self._episode_team_reward[done_idx_t].unsqueeze(-1)                  # [N,1]
@@ -1552,7 +1703,7 @@ class StrikeEA2DEnv(EnvBase):
         rdr_flat      = rdr_feat.reshape(B, -1)                                    # [B, 3R]
 
         # --- Global normalised time feature: t / max_steps ---
-        time_norm = (self.step_count.float() / float(self.max_steps)).clamp(0.0, 1.0)  # [B,1]
+        time_norm = (self.step_count.float() / self.max_steps_t).clamp(0.0, 1.0)  # [B,1]
 
         return torch.cat([agent_flat, tgt_flat, rdr_flat, time_norm], dim=-1)
 
@@ -1670,6 +1821,11 @@ class StrikeEA2DEnv(EnvBase):
             "target_pos", "target_alive", "target_known",
             "radar_pos", "radar_known", "radar_eff_range",
             "step_count",
+            # Per-env DR state (present masks + per-env scalars) — must be
+            # sliced with everything else so the subset-rebuild builders see
+            # consistent shapes.
+            "agent_present", "target_present", "radar_present",
+            "radar_kill_prob", "max_steps_t",
             # HF subclass adds these — slice them if present, ignore otherwise.
             "jammer_bearing", "beam_rate",
             "radar_eff_range_per_agent",
@@ -1840,7 +1996,7 @@ class StrikeEA2DEnv(EnvBase):
         speed_norm   = (self.agent_speed / self.v_max).unsqueeze(-1)            # [B,A,1] in ~[0,1]
         heading_norm = (self.agent_heading / math.pi).unsqueeze(-1)             # [B,A,1] in ~[0,2]
         hrate_norm   = (self.agent_heading_rate / self.dpsi_max).unsqueeze(-1)  # [B,A,1] in ~[-1,1]
-        time_norm    = (self.step_count.float() / float(self.max_steps)).clamp(0.0, 1.0)  # [B,1]
+        time_norm    = (self.step_count.float() / self.max_steps_t).clamp(0.0, 1.0)  # [B,1]
         time_exp     = time_norm.unsqueeze(1).expand(B, A, 1)                    # [B,A,1]
         own_base = torch.cat([pos_norm, speed_norm, heading_norm, hrate_norm, time_exp], dim=-1)  # [B,A,6]
         own_extra = self._build_self_extra(B, A)                                 # [B,A,d_extra]
@@ -2015,7 +2171,7 @@ class StrikeEA2DEnv(EnvBase):
         speed_norm = (self.agent_speed / self.v_max).unsqueeze(-1)
         heading_norm = (self.agent_heading / math.pi).unsqueeze(-1)
         hrate_norm = (self.agent_heading_rate / self.dpsi_max).unsqueeze(-1)
-        time_norm = (self.step_count.float() / float(self.max_steps)).clamp(0, 1)
+        time_norm = (self.step_count.float() / self.max_steps_t).clamp(0, 1)
         time_exp = time_norm.unsqueeze(1).expand(B, A, 1)
         obs_self_base = torch.cat([pos_norm, speed_norm, heading_norm, hrate_norm, time_exp], dim=-1)
         obs_self_extra = self._build_self_extra(B, A)
@@ -2145,16 +2301,23 @@ class StrikeEA2DEnv(EnvBase):
         radar_feat = torch.cat([rdr_pos_norm, rdr_jammed, rdr_extra], dim=-1)
 
         # ---- Time feature [B, 1] ----
-        time_feat = (self.step_count.float() / float(self.max_steps)).clamp(0, 1)
+        time_feat = (self.step_count.float() / self.max_steps_t).clamp(0, 1)
 
-        # All masks True — critic has full global visibility
+        # Critic has full global visibility over PRESENT entities. The present
+        # masks are all-True when DR is off (identical to the old all-ones), and
+        # exclude masked-out entities (dead-from-reset agents/targets, far-parked
+        # radars) from the critic's set encoders under DR.
+        # Clone the present masks: the persistent buffer for these is the live
+        # self.*_present tensor (mutated in-place at reset), so returning a fresh
+        # copy per step keeps the rollout collector from aliasing a single tensor
+        # across timesteps (matches the old fresh-torch.ones semantics).
         return {
             "crt_agents_feat":  agent_feat,
-            "crt_agents_mask":  torch.ones(B, A, dtype=torch.bool, device=self.device),
+            "crt_agents_mask":  self.agent_present.clone(),
             "crt_targets_feat": target_feat,
-            "crt_targets_mask": torch.ones(B, T, dtype=torch.bool, device=self.device),
+            "crt_targets_mask": self.target_present.clone(),
             "crt_radars_feat":  radar_feat,
-            "crt_radars_mask":  torch.ones(B, R, dtype=torch.bool, device=self.device),
+            "crt_radars_mask":  self.radar_present.clone(),
             "crt_time_feat":    time_feat,
         }
 

@@ -803,11 +803,11 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
 
         # ---- radar kills (probabilistic, per-agent effective range) ----
         dist_ar = self._c_dist_ar                                          # [B, A, R]
-        in_radar = dist_ar <= self.radar_eff_range_per_agent               # [B, A, R]
+        in_radar = (dist_ar <= self.radar_eff_range_per_agent) & self.radar_present[:, None, :]  # [B, A, R]
 
         kill_samples = torch.rand(B, A, self.n_radars, device=self.device, generator=self._rng)
-        kill_prob = self.radar.kill_probability
-        kills_from_radar = in_radar & (kill_samples < kill_prob)
+        # Per-env kill probability ([B,1]→[B,1,1]); scalar fill when DR is off.
+        kills_from_radar = in_radar & (kill_samples < self.radar_kill_prob.unsqueeze(-1))
         killed = kills_from_radar.any(dim=-1) & alive
         self.agent_alive = self.agent_alive & (~killed)
 
@@ -1041,12 +1041,11 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
             # gate. Only alive radars count.
             beam_scale = float(getattr(rp, "jammer_beam_on_radar_bonus", 0.0))
             if beam_scale != 0.0:
-                # _jammer_in_cone: [B, J, R] — radar inside this jammer's cone
-                radar_alive = torch.ones(
-                    B, self.n_radars, dtype=torch.bool, device=self.device,
-                )  # radars don't die in this env
+                # _jammer_in_cone: [B, J, R] — radar inside this jammer's cone.
+                # radar_present excludes masked-out (absent) radars under DR;
+                # it is all-True when DR is off.
                 any_in_cone = (
-                    self._jammer_in_cone & radar_alive[:, None, :]
+                    self._jammer_in_cone & self.radar_present[:, None, :]
                 ).any(dim=-1).float()                                              # [B, J]
                 beam_bonus = beam_scale * any_in_cone * jammer_alive_f
                 reward[:, self.n_strikers:] += beam_bonus
@@ -1256,7 +1255,7 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         self.step_count += 1
         all_targets_done = (~self.target_alive).all(dim=-1, keepdim=True)
         all_agents_dead = (~self.agent_alive).all(dim=-1, keepdim=True)
-        timeout = self.step_count >= self.max_steps
+        timeout = self.step_count >= self.max_steps_t
 
         terminated = all_targets_done | all_agents_dead
         done = terminated | timeout
@@ -1300,8 +1299,7 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         done_idx_t = done_flat.nonzero(as_tuple=True)[0]            # [N_done]
         if done_idx_t.numel() > 0:
             comp_keys = list(self._episode_component_reward.keys())
-            tgt_frac_t   = (~self.target_alive[done_idx_t]).float().mean(dim=-1, keepdim=True)  # [N,1]
-            surv_frac_t  = self.agent_alive[done_idx_t].float().mean(dim=-1, keepdim=True)     # [N,1]
+            tgt_frac_t, surv_frac_t = self._episode_metric_fracs(done_idx_t)                    # [N,1] each
             miss_t       = all_targets_done[done_idx_t].float()                                 # [N,1]
             dur_t        = self.step_count[done_idx_t].float()                                  # [N,1]
             team_r_t     = self._episode_team_reward[done_idx_t].unsqueeze(-1)                  # [N,1]
