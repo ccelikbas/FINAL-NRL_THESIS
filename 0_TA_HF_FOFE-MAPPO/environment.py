@@ -503,7 +503,7 @@ class StrikeEA2DEnv(EnvBase):
     def _compute_obs_dim(self) -> int:
         # Fixed-size ego-centric body-frame observations (independent of team sizes):
         #   own state:     [x, y, speed, heading, heading_rate, t_norm, *extra]     = 6 + d_extra
-        #   other agents:  top-K slots [dx, dy, dist, heading, role]                 = K_a * 5
+        #   other agents:  top-K slots [dx, dy, dist, heading, role, *agent_extra]  = K_a * (5 + agent_extra)
         #   radars:        top-K slots [dx, dy, dist, jammed, *radar_extra]          = K_r * (4 + radar_extra)
         #   targets:       top-K slots [dx, dy, dist, alive]                          = K_t * 4
         # (dx, dy) are in the observing agent's body frame; dist is the Euclidean
@@ -511,7 +511,7 @@ class StrikeEA2DEnv(EnvBase):
         # explicit). Unseen or missing entities are zero-padded.
         return (
             self.d_self
-            + self.n_other_agent_obs_slots * 5
+            + self.n_other_agent_obs_slots * (5 + int(self._other_agent_extra_dim()))
             + self.n_radar_obs_slots * (4 + int(self._radar_extra_dim()))
             + self.n_target_obs_slots * 4
         )
@@ -534,6 +534,23 @@ class StrikeEA2DEnv(EnvBase):
         kinematic state. d_extra must equal _self_extra_dim().
         """
         return torch.zeros(B, A, 0, device=self.device, dtype=torch.float32)
+
+    # ------------------------------------------------------------------
+    # Other-agent observation extension hooks
+    # ------------------------------------------------------------------
+    # Subclasses can append role-specific per-(observer, other-agent)
+    # features to each "other agents" slot (e.g. HF env adds the observed
+    # jammer's beam bearing in the observer's body frame). Features are
+    # indexed [B, observer, other], so subclasses are responsible for any
+    # body-frame rotation. The default contributes zero extra dimensions.
+
+    def _other_agent_extra_dim(self) -> int:
+        """Extra per-(observer, other-agent) floats appended to each slot."""
+        return 0
+
+    def _build_other_agent_extra(self, B: int, A: int) -> torch.Tensor:
+        """Return the per-(observer, other-agent) extension [B, A, A, d_extra]."""
+        return torch.zeros(B, A, A, 0, device=self.device, dtype=torch.float32)
 
     # ------------------------------------------------------------------
     # Radar-observation extension hooks
@@ -732,9 +749,10 @@ class StrikeEA2DEnv(EnvBase):
 
         if self.use_fofe:
             d_radar_slot = 4 + int(self._radar_extra_dim())
+            d_agent_slot = 5 + int(self._other_agent_extra_dim())
             # FOFE actor per-channel observations (nested under "agents")
             agents_dict["obs_self"]          = Unbounded(shape=B + torch.Size([A, self.d_self]),    dtype=torch.float32, device=self.device)
-            agents_dict["obs_agents_feat"]   = Unbounded(shape=B + torch.Size([A, A, 5]), dtype=torch.float32, device=self.device)
+            agents_dict["obs_agents_feat"]   = Unbounded(shape=B + torch.Size([A, A, d_agent_slot]), dtype=torch.float32, device=self.device)
             agents_dict["obs_agents_mask"]   = Unbounded(shape=B + torch.Size([A, A]),    dtype=torch.bool,    device=self.device)
             agents_dict["obs_targets_feat"]  = Unbounded(shape=B + torch.Size([A, T, 4]), dtype=torch.float32, device=self.device)
             agents_dict["obs_targets_mask"]  = Unbounded(shape=B + torch.Size([A, T]),    dtype=torch.bool,    device=self.device)
@@ -1939,7 +1957,7 @@ class StrikeEA2DEnv(EnvBase):
 
         Layout (per agent):
           own:     [x, y, speed, heading, heading_rate, t_norm, *self_extra]      (d_self)
-          agents:  3 nearest visible others [dx, dy, dist, heading, role]          (3×5)
+          agents:  3 nearest visible others [dx, dy, dist, heading, role, *agent_extra]  (3×(5+E_a))
           radars:  2 nearest visible radars [dx, dy, dist, jammed, *radar_extra]  (2×(4+E))
           targets: 2 nearest visible alive targets [dx, dy, dist, alive]            (2×4)
 
@@ -2032,16 +2050,23 @@ class StrikeEA2DEnv(EnvBase):
         heading_other = self.agent_heading[:, None, :].expand(B, A, A) / math.pi    # [B,A,A]
         role_other    = role[:, None, :].expand(B, A, A)                            # [B,A,A]
 
-        other_feat = torch.stack(
+        other_base = torch.stack(
             [dx_aa_n, dy_aa_n, dist_aa_norm, heading_other, role_other], dim=-1,
         )  # [B,A,A,5]
+        # Role-specific per-(observer, other-agent) extras (e.g. HF observed
+        # jammer beam bearing in the observer's body frame).
+        other_extra = self._build_other_agent_extra(B, A)                    # [B,A,A,E_a]
+        if other_extra.shape[-1] > 0:
+            other_feat = torch.cat([other_base, other_extra], dim=-1)        # [B,A,A,5+E_a]
+        else:
+            other_feat = other_base
         other_slots = _select_nearest_slots(
             dist=dist_aa,
             feat=other_feat,
             visible=visible,
             k=self.n_other_agent_obs_slots,
-        )  # [B,A,3,5]
-        other_obs = other_slots.reshape(B, A, -1)  # [B,A,3*5]
+        )  # [B,A,3,5+E_a]
+        other_obs = other_slots.reshape(B, A, -1)  # [B,A,3*(5+E_a)]
 
         # --- Radars (body-frame dx, dy, dist, jammed, *radar_extra) ---
         dist_ar       = self._c_dist_ar                                      # [B,A,R]
@@ -2152,8 +2177,8 @@ class StrikeEA2DEnv(EnvBase):
 
         Returns dict with keys matching FOFE_ACTOR_KEYS:
             obs_self          [B, A, d_self]        ego kinematic state
-            obs_agents_feat   [B, A, A, 5]          per-other-agent features (self-row masked)
-                                                    layout: dx_body, dy_body, dist, heading, role
+            obs_agents_feat   [B, A, A, 5+E_a]      per-other-agent features (self-row masked)
+                                                    layout: dx_body, dy_body, dist, heading, role, *agent_extra
             obs_agents_mask   [B, A, A]             True = visible & alive & not self
             obs_targets_feat  [B, A, T, 4]          per-target features
                                                     layout: dx_body, dy_body, dist, alive
@@ -2197,13 +2222,18 @@ class StrikeEA2DEnv(EnvBase):
         dy_aa_b = -sin_h[:, :, None] * rel_aa_w[..., 0] + cos_h[:, :, None] * rel_aa_w[..., 1]
         agents_visible = (dist_aa <= self.R_obs) & self.agent_alive[:, None, :] & ~eye
 
-        agents_feat = torch.stack([
+        agents_base = torch.stack([
             dx_aa_b / max_dist,
             dy_aa_b / max_dist,
             dist_aa / max_dist,
             self.agent_heading[:, None, :].expand(B, A, A) / math.pi,
             role[:, None, :].expand(B, A, A),
         ], dim=-1)  # [B, A, A, 5]
+        agents_extra = self._build_other_agent_extra(B, A)                     # [B, A, A, E_a]
+        if agents_extra.shape[-1] > 0:
+            agents_feat = torch.cat([agents_base, agents_extra], dim=-1)       # [B, A, A, 5+E_a]
+        else:
+            agents_feat = agents_base
         agents_feat = agents_feat * agents_visible.unsqueeze(-1).float()
         agents_feat = torch.nan_to_num(agents_feat, nan=0.0)
 

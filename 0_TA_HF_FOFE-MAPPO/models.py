@@ -641,7 +641,7 @@ def make_combined_policy(env: StrikeEA2DEnv, hidden=256, depth=3,
     d_self = int(getattr(env, "d_self", 6))
     # Per-channel actor feature dims (must match env._build_fofe_obs output).
     # See StrikeEA2DEnv._build_fofe_obs for the canonical layout.
-    d_agents_actor  = 5
+    d_agents_actor  = 5 + int(getattr(env, "_other_agent_extra_dim", lambda: 0)())
     d_targets_actor = 4
     d_radars_actor  = 4 + int(getattr(env, "_radar_extra_dim", lambda: 0)())
 

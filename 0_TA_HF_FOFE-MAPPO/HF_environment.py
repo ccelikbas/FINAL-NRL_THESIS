@@ -265,6 +265,47 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         return extra
 
     # ------------------------------------------------------------------
+    # Other-agent obs extension: observed jammer's beam bearing in the
+    # observing agent's body frame, as a (sin, cos) pair.
+    # ------------------------------------------------------------------
+
+    def _other_agent_extra_dim(self) -> int:
+        # Two extra floats per (observer, other-agent): (sin, cos) of the
+        # observed jammer's beam pointing direction, rotated into the
+        # observing agent's body frame. Both zero when the observed agent
+        # is a striker (no beam) or a dead jammer.
+        return 2
+
+    def _build_other_agent_extra(self, B: int, A: int) -> torch.Tensor:
+        extra = torch.zeros(B, A, A, 2, device=self.device, dtype=torch.float32)
+        if self.n_jammers == 0:
+            return extra
+
+        # World-frame beam pointing direction per agent (only jammer columns
+        # are meaningful; striker columns stay at 0 and are masked out below).
+        beam_world = torch.zeros(B, A, device=self.device, dtype=torch.float32)
+        beam_world[:, self.n_strikers:] = (
+            self.agent_heading[:, self.n_strikers:] + self.jammer_bearing
+        )  # [B, J] → jammer columns
+
+        # Express the observed agent j's beam in observer i's body frame:
+        #   angle_body = beam_world[j] − heading[i]
+        rel = beam_world[:, None, :] - self.agent_heading[:, :, None]          # [B, A(obs i), A(other j)]
+        sin_b = torch.sin(rel)
+        cos_b = torch.cos(rel)
+
+        # Mask to alive-jammer columns only; strikers / dead jammers → (0, 0).
+        jammer_col = torch.zeros(A, dtype=torch.bool, device=self.device)
+        jammer_col[self.n_strikers:] = True
+        jammer_alive = torch.zeros(B, A, dtype=torch.bool, device=self.device)
+        jammer_alive[:, self.n_strikers:] = self.agent_alive[:, self.n_strikers:]
+        mask_j = (jammer_col[None, None, :] & jammer_alive[:, None, :]).float()  # [B, A, A]
+
+        extra[..., 0] = sin_b * mask_j
+        extra[..., 1] = cos_b * mask_j
+        return extra
+
+    # ------------------------------------------------------------------
     # Radar-obs extension: per-(agent, radar) beam-to-radar angle (signed)
     # and a beam-on-radar jammed flag instead of effective-range degradation.
     # ------------------------------------------------------------------
