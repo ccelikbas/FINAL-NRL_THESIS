@@ -161,8 +161,8 @@ class EnvConfig:
     # per-env-per-episode-reset, which is the dominant reset-time cost when
     # multiple radars + a tight min_sep force many rejection retries.
     # Set to 0 for the old random-per-reset behaviour.
-    n_env_layouts: int = 256
-    radar_min_sep: float = 0.5
+    n_env_layouts: int = 1024
+    radar_min_sep: float = 0.5 # for S1 scenario
     target_spawn_angle_range: Tuple[float, float] = (0, 360)
 
     # ── Scenario selection ─────────────────────────────────────────

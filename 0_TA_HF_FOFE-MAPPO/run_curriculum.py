@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import gc
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -118,31 +119,34 @@ CURRICULUM: List[CurriculumSection] = [
     # ── Stage 1: the simplest possible case, fixed, to bootstrap behaviour ──
     CurriculumSection(
         name="warmup_1v1",
-        n_iters=50,
+        n_iters=20,
         n_strikers=1, n_jammers=1,
         n_known_targets=1, n_unknown_targets=0,
         n_known_radars=1, n_unknown_radars=0,
-        radar_kill_probability=1.0,
+        radar_kill_probability=0.1,
+        scenario="S1"
     ),
     # ── Stage 2: randomize the threat field per-env (targets + radars vary) ──
     CurriculumSection(
-        name="dr_targets_radars",
-        n_iters=150,
+        name="1x2",
+        n_iters=20,
         n_strikers=1, n_jammers=1,
-        n_known_targets=(1, 3),
-        n_known_radars=(1, 4),
-        radar_kill_probability=1.0,
+        n_known_targets=(1, 2),
+        n_known_radars=(1, 2),
+        radar_kill_probability=0.1,
+        scenario="S1"
     ),
     # ── Stage 3: full per-env DR including team size + softer kills ──────────
     CurriculumSection(
         name="dr_full",
-        n_iters=300,
+        n_iters=20,
         n_strikers=(1, 2),
         n_jammers=(1, 2),
-        n_known_targets=(1, 3),
-        n_known_radars=(1, 4),
-        radar_kill_probability=(0.7, 1.0),
-    ),
+        n_known_targets=(1, 2),
+        n_known_radars=(1, 2),
+        radar_kill_probability=0.1,
+        scenario="S1"
+    )
 ]
 
 
@@ -270,6 +274,14 @@ def _merge_logs(dst: Dict[str, List[float]], src: Dict[str, List[float]]) -> Non
     for key, values in src.items():
         dst.setdefault(key, [])
         dst[key].extend(values)
+
+
+def _state_dict_to_cpu(sd: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Detach a state_dict to CPU so the carried checkpoint does not pin VRAM
+    while the next section rebuilds its env/policy/critic."""
+    if sd is None:
+        return None
+    return {k: (v.detach().to("cpu") if torch.is_tensor(v) else v) for k, v in sd.items()}
 
 
 # ── dashboard ─────────────────────────────────────────────────────────
@@ -530,7 +542,7 @@ def main() -> None:
               f"{_section_label(sec, env_cfg)}")
         print("-" * 78)
 
-        _, policy, critic, logs, reward_normalizer = train_mappo(
+        base_env, policy, critic, logs, reward_normalizer = train_mappo(
             exp_cfg.env, exp_cfg.ppo, exp_cfg.net, fofe_cfg, checkpoint,
             hf_radar_cfg=hf_radar_cfg,
         )
@@ -540,14 +552,21 @@ def main() -> None:
         global_iter += sec.n_iters
         last_env_cfg = env_cfg
 
-        # Carry weights forward (strict load works — FOFE nets are count-invariant).
+        # Carry weights forward on CPU (strict load works — FOFE nets are
+        # count-invariant). Offloading to CPU lets us release this section's
+        # GPU env/policy/critic/collector BEFORE the next section allocates,
+        # otherwise both sections' models coexist in VRAM and OOM on small GPUs.
         checkpoint = {
-            "policy_state_dict": policy.state_dict(),
-            "critic_state_dict": critic.state_dict(),
-            "reward_normalizer_state_dict": (
+            "policy_state_dict": _state_dict_to_cpu(policy.state_dict()),
+            "critic_state_dict": _state_dict_to_cpu(critic.state_dict()),
+            "reward_normalizer_state_dict": _state_dict_to_cpu(
                 reward_normalizer.state_dict() if reward_normalizer is not None else None
             ),
         }
+        del base_env, policy, critic, logs, reward_normalizer
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     # ── save ─────────────────────────────────────────────────────────
     save_dir = Path(args.save_dir)
