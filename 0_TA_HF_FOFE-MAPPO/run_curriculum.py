@@ -505,7 +505,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--save_dir", type=str, default="runs")
     p.add_argument("--save_name", type=str, default="curriculum_mappo.pt")
     p.add_argument("--load_checkpoint", type=str, default=None)
-    p.add_argument("--n_rollouts", type=int, default=5, help="Final-stage rollouts to animate.")
+    p.add_argument("--n_rollouts", type=int, default=15, help="Final-stage rollouts to animate.")
     p.add_argument("--no_plot", action="store_true")
     p.add_argument("--no_animate", action="store_true")
     return p

@@ -7,8 +7,15 @@ python run.py --load_checkpoint ../runs/curriculum_mappo.pt
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
+
+# Force Inductor to compile Triton kernels in the main process instead of a
+# subprocess pool. Works around a Triton bug where worker subprocesses return
+# an asm dict missing the 'cubin' key on some Linux + CUDA toolchains, which
+# raises `KeyError: 'cubin'` during the first PPO update.
+os.environ.setdefault("TORCHINDUCTOR_COMPILE_THREADS", "1")
 
 if __package__ in (None, ""):
     import types
