@@ -256,11 +256,20 @@ def _merge_logs(dst: Dict[str, List[float]], src: Dict[str, List[float]]) -> Non
 
 
 def _state_dict_to_cpu(sd: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    """Detach a state_dict to CPU so the carried checkpoint does not pin VRAM
-    while the next section rebuilds its env/policy/critic."""
+    """Detach a state_dict to CPU and strip torch.compile's `_orig_mod.` prefix.
+
+    Moving to CPU prevents the carried checkpoint from pinning VRAM while the
+    next section rebuilds its env/policy/critic. Stripping `_orig_mod.` keeps
+    checkpoints portable: on Linux+GPU the trainer compiles the actor/critic
+    nets, which inserts `_orig_mod.` into every parameter key — that breaks
+    strict loads into a fresh uncompiled policy (e.g. `_rebuild_policy` for
+    rollouts, or resuming on Windows where Triton is unavailable)."""
     if sd is None:
         return None
-    return {k: (v.detach().to("cpu") if torch.is_tensor(v) else v) for k, v in sd.items()}
+    return {
+        k.replace("_orig_mod.", ""): (v.detach().to("cpu") if torch.is_tensor(v) else v)
+        for k, v in sd.items()
+    }
 
 
 # ── dashboard ─────────────────────────────────────────────────────────
@@ -374,7 +383,7 @@ def plot_curriculum_dashboard(
             print(f"Saved dashboard to: {save_path}")
         except Exception as exc:
             print(f"dashboard save warning (continuing): {type(exc).__name__}: {exc}")
-    plt.show()
+    plt.close(fig)
 
 
 # =====================================================================

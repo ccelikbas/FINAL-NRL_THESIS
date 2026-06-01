@@ -800,6 +800,29 @@ def train_mappo(
     critic = make_combined_critic(base_env, hidden=net_cfg.critic_hidden,
                                   depth=net_cfg.depth, fofe_cfg=fofe_cfg)
 
+    # ── Reward normalizer ────────────────────────────────────────────
+    reward_normalizer: Optional[RewardNormalizer] = None
+    if bool(ppo_cfg.normalize_rewards):
+        reward_normalizer = RewardNormalizer(
+            num_envs=ppo_cfg.num_envs, gamma=ppo_cfg.gamma, device=device,
+        )
+
+    # ── Load checkpoint (BEFORE torch.compile) ───────────────────────
+    # Loading must happen before compile: torch.compile wraps the module
+    # so state_dict keys gain an `_orig_mod.` prefix, which would mismatch
+    # the stripped-prefix state_dicts carried between curriculum sections
+    # and the on-disk checkpoint.
+    if checkpoint is not None:
+        try:
+            if "policy_state_dict" in checkpoint:
+                policy.load_state_dict(checkpoint["policy_state_dict"])
+            if "critic_state_dict" in checkpoint:
+                critic.load_state_dict(checkpoint["critic_state_dict"])
+            if reward_normalizer is not None and checkpoint.get("reward_normalizer_state_dict") is not None:
+                reward_normalizer.load_state_dict(checkpoint["reward_normalizer_state_dict"])
+        except Exception as exc:
+            print(f"checkpoint load warning (continuing): {type(exc).__name__}: {exc}")
+
     # ── Optional torch.compile ────────────────────────────────────────
     # Compiles the underlying actor/critic nets in place. The wrappers
     # (CombinedPolicy / CombinedCritic) still call them through .striker_*
@@ -831,25 +854,6 @@ def train_mappo(
                 print("torch.compile: ENABLED (policy + critic). First iter will be slow (graph trace).")
             except Exception as exc:
                 print(f"torch.compile setup failed (continuing uncompiled): {type(exc).__name__}: {exc}")
-
-    # ── Reward normalizer ────────────────────────────────────────────
-    reward_normalizer: Optional[RewardNormalizer] = None
-    if bool(ppo_cfg.normalize_rewards):
-        reward_normalizer = RewardNormalizer(
-            num_envs=ppo_cfg.num_envs, gamma=ppo_cfg.gamma, device=device,
-        )
-
-    # ── Load checkpoint ──────────────────────────────────────────────
-    if checkpoint is not None:
-        try:
-            if "policy_state_dict" in checkpoint:
-                policy.load_state_dict(checkpoint["policy_state_dict"])
-            if "critic_state_dict" in checkpoint:
-                critic.load_state_dict(checkpoint["critic_state_dict"])
-            if reward_normalizer is not None and checkpoint.get("reward_normalizer_state_dict") is not None:
-                reward_normalizer.load_state_dict(checkpoint["reward_normalizer_state_dict"])
-        except Exception as exc:
-            print(f"checkpoint load warning (continuing): {type(exc).__name__}: {exc}")
 
     # ── Collector ────────────────────────────────────────────────────
     collector = make_collector(env, policy, ppo_cfg.frames_per_batch, ppo_cfg.n_iters, device)
