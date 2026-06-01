@@ -168,6 +168,30 @@ class RewardConfig:
     # Set to 0.0 to disable.
     jammer_beam_alignment_scale: float = 0.01 # deze kleiner maken
 
+    # ─── JAMMER COALITION COVERAGE  (HF directional-jammer model only) ───────
+    # Encourages pairs of nearby jammers to point their beams in different
+    # directions, maximising joint angular coverage.
+    #
+    # Coalition: any pair of *alive* jammers whose Euclidean distance is
+    # ≤ jammer_coalition_d_max are considered to be in the same coalition.
+    # Uses the cached pairwise agent-distance tensor (_c_dist_aa), so the
+    # coalition test is essentially free.
+    #
+    # Per-pair reward as a function of the smallest angle Δ ∈ [0, π] between
+    # the two jammers' beam directions (jammer_pointing = heading + bearing):
+    #     r_pair(Δ) = R_min + (−R_min / main_lobe_rad) · Δ
+    # where main_lobe_rad = radians(HFRadarConfig.jammer_main_lobe_deg).
+    # Properties:
+    #   Δ = 0                   → r = R_min                  (beams co-aligned, penalty)
+    #   Δ = main_lobe_rad       → r = 0                       (beams just stop overlapping)
+    #   Δ = π                   → r = R_min · (1 − π/main_lobe_rad)  (continues linearly)
+    # Aggregation: each jammer receives the SUM of r_pair over all coalition
+    # partners (symmetric, so both jammers in a pair receive the same term).
+    # Dead jammers receive 0 and do not form coalitions.
+    # Set jammer_coalition_R_min = 0.0 to disable.
+    jammer_coalition_d_max: float = 0.3
+    jammer_coalition_R_min: float = 0.0
+
     # ─── FORMATION COHESION  (striker ↔ jammer cross-role proximity) ──────────
     # Each striker/jammer receives a distance penalty for being far from the
     # nearest alive cross-role teammate.  Flipped sign convention (same as
@@ -203,11 +227,11 @@ class RewardConfig:
     striker_sep_w_exp:  float = 0.0
     striker_sep_alpha:  float = 0.0
 
-    jammer_sep_d_max:  float = 0.1
-    jammer_sep_d_knee: float = 0.0
-    jammer_sep_w_lin:  float = 0.1
-    jammer_sep_w_exp:  float = 0.0
-    jammer_sep_alpha:  float = 0.0
+    jammer_sep_d_max:  float = 0
+    jammer_sep_d_knee: float = 0
+    jammer_sep_w_lin:  float = 0
+    jammer_sep_w_exp:  float = 0
+    jammer_sep_alpha:  float = 0
 
     # ─── CONTROL EFFORT PENALTY  (per alive agent, per step) ───────────────
     # Penalises large control actions to encourage smooth trajectories.
