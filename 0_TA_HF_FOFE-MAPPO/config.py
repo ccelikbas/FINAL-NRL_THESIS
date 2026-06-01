@@ -142,11 +142,11 @@ class DomainRandomization:
 @dataclass
 class EnvConfig:
     # Team composition
-    n_strikers: int = 2
-    n_jammers: int = 2
-    n_known_targets: int = 2
+    n_strikers: int = 1
+    n_jammers: int = 1
+    n_known_targets: int = 1
     n_unknown_targets: int = 0
-    n_known_radars: int = 2
+    n_known_radars: int = 1
     n_unknown_radars: int = 0
     n_targets: int = 0
     n_radars: int = 0
@@ -202,7 +202,7 @@ class EnvConfig:
 
     # Threats
     radar_range: float = 0.20
-    radar_kill_probability: float = 0
+    radar_kill_probability: float = 0.5
 
     # Rewards
     border_thresh: float = 0.05
@@ -260,11 +260,11 @@ class EnvConfig:
 @dataclass
 class PPOConfig:
     """Shared PPO hyperparameters for both striker and jammer MAPPO."""
-    num_envs: int = 1048  #256 or 2048
-    n_iters: int = 5
+    num_envs: int = 1048  #1048 (local) or 2048 (remote)
+    n_iters: int = 50
     frames_per_batch: Optional[int] = None
     num_epochs: int = 6
-    minibatch_size: int = 8192  #4096 or 16384
+    minibatch_size: int = 8192  #8192 (local) or 16384 (remote)
 
     gamma: float = 0.99
     lmbda: float = 0.95
@@ -409,7 +409,7 @@ class HFRadarConfig:
     #     magnitude expressed as a fraction of beam_dpsi_max (mirrors
     #     EnvConfig.h_accel_magnitude_fraction). Default 0.1 → ~18°/step²
     #     at action=±1, so the beam needs ~10 steps to spin up from rest.
-    jammer_main_lobe_deg: float = 60.0
+    jammer_main_lobe_deg: float = 120.0
     beam_dpsi_max: float = math.pi
     beam_h_accel_magnitude_fraction: float = 0.1
 

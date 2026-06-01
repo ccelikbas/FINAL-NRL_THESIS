@@ -777,7 +777,7 @@ def hf_animate_rollout(
         # Directional jammer cones (drawn from each jammer in its
         # currently-selected bearing). Length is a display-only choice;
         # the jammer is treated as range-unlimited in the physics.
-        cone_radius_km = 1.5 * 1000.0 * (env.high - env.low)
+        cone_radius_km = 0.5 * 1000.0 * (env.high - env.low)
         for j in range(env.n_jammers):
             if not bool(jammer_alive_np[j]):
                 _hide_cone_gradient(jammer_cone_polys[j])
@@ -1084,7 +1084,7 @@ def _draw_hf_world_panel(ax, env: HFStrikeEA2DEnv, frames: List[Dict[str, torch.
             radar_coverage_polys[j].set_xy(verts)
 
         # Directional jammer cones (display-only, range-unlimited).
-        cone_radius_km = 1.5 * 1000.0 * (env.high - env.low)
+        cone_radius_km = 0.5 * 1000.0 * (env.high - env.low)
         for j in range(env.n_jammers):
             if not bool(jammer_alive_np[j]):
                 _hide_cone_gradient(jammer_cone_polys[j])
