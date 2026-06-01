@@ -386,6 +386,84 @@ def plot_curriculum_dashboard(
     plt.close(fig)
 
 
+# ── standalone plots ─────────────────────────────────────────────────
+
+def _plot_valid_xy(ax, x, y, label, **kwargs):
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    valid = np.isfinite(y)
+    if not np.any(valid):
+        return
+    ax.plot(x[valid], y[valid], marker="o", markersize=2, label=label, **kwargs)
+
+
+def _shade_sections(ax, section_bounds: List[Tuple[str, int, int]]) -> None:
+    palette = [
+        NLR_PRIMARY, NLR_ACCENT, NLR_SECONDARY, NLR_DARKGRAY,
+        NLR_LIGHTBLUE_50, NLR_TERRA_50, NLR_GRAY, NLR_LIGHTBLUE_20,
+    ]
+    for i, (_, s, e) in enumerate(section_bounds):
+        ax.axvspan(s, e, alpha=0.16, color=palette[i % len(palette)], zorder=0)
+
+
+def _save_fig(fig, save_path: Optional[str], label: str) -> None:
+    if not save_path:
+        plt.close(fig); return
+    try:
+        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(save_path, dpi=120)
+        print(f"Saved {label} to: {save_path}")
+    except Exception as exc:
+        print(f"{label} save warning (continuing): {type(exc).__name__}: {exc}")
+    plt.close(fig)
+
+
+def plot_curriculum_reward(
+    logs: Dict[str, List[float]],
+    section_bounds: List[Tuple[str, int, int]],
+    save_path: Optional[str] = None,
+) -> None:
+    """Training episode reward over the full curriculum."""
+    fig, ax = plt.subplots(1, 1, figsize=(11, 5.5))
+    key = "train_mean_episode_total_reward"
+    if logs.get(key):
+        x = np.arange(1, len(logs[key]) + 1)
+        _plot_valid_xy(ax, x, logs[key], "train_reward", color=NLR_PRIMARY)
+    _shade_sections(ax, section_bounds)
+    ax.set_title("Training Episode Reward", fontsize=13, fontweight="bold")
+    ax.set_xlabel("Global Iteration"); ax.set_ylabel("Mean Episode Reward")
+    ax.legend(fontsize=8); ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    _save_fig(fig, save_path, "reward plot")
+
+
+def plot_curriculum_eval_rates(
+    logs: Dict[str, List[float]],
+    section_bounds: List[Tuple[str, int, int]],
+    save_path: Optional[str] = None,
+) -> None:
+    """Eval rates over the full curriculum: survival, task completion,
+    targets destroyed — all bounded in [0, 1] so they share one axis."""
+    fig, ax = plt.subplots(1, 1, figsize=(11, 5.5))
+    series = [
+        ("eval_survival_rate",        "survival rate",         NLR_PRIMARY),
+        ("eval_task_completion_rate", "task completion rate",  NLR_ACCENT),
+        ("eval_targets_destroyed_rate", "targets destroyed rate", NLR_SECONDARY),
+    ]
+    for key, label, color in series:
+        if logs.get(key):
+            x = np.arange(1, len(logs[key]) + 1)
+            _plot_valid_xy(ax, x, logs[key], label, color=color)
+    _shade_sections(ax, section_bounds)
+    ax.set_title("Eval: Survival / Completion / Targets-Destroyed Rates",
+                 fontsize=13, fontweight="bold")
+    ax.set_xlabel("Global Iteration"); ax.set_ylabel("Rate")
+    ax.set_ylim(0.0, 1.05)
+    ax.legend(fontsize=8); ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    _save_fig(fig, save_path, "eval-rates plot")
+
+
 # =====================================================================
 #  CLI
 # =====================================================================
@@ -590,6 +668,20 @@ def main() -> None:
             )
         except Exception as exc:
             print(f"plot warning (continuing): {type(exc).__name__}: {exc}")
+        try:
+            plot_curriculum_reward(
+                all_logs, section_bounds,
+                save_path=str(project_dir / "plots" / "curriculum_reward.png"),
+            )
+        except Exception as exc:
+            print(f"reward plot warning (continuing): {type(exc).__name__}: {exc}")
+        try:
+            plot_curriculum_eval_rates(
+                all_logs, section_bounds,
+                save_path=str(project_dir / "plots" / "curriculum_eval_rates.png"),
+            )
+        except Exception as exc:
+            print(f"eval-rates plot warning (continuing): {type(exc).__name__}: {exc}")
 
     # ── final-stage rollouts ─────────────────────────────────────────
     if not args.no_animate and last_env_cfg is not None:
