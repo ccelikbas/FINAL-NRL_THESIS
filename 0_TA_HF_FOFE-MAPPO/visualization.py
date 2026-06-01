@@ -5,10 +5,12 @@ import math
 from pathlib import Path
 from typing import Dict, List, Optional
 
+import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from matplotlib import animation
+from matplotlib.collections import LineCollection
 from matplotlib.patches import Circle, Polygon
 
 from .config import EnvConfig
@@ -482,12 +484,28 @@ def animate_rollout(
     ax.set_ylabel("Y (km)")
     ax.set_title(f"Dual-MAPPO Rollout | R_obs={env.R_obs:.2f}, R_comm={env.R_comm:.2f}")
 
-    striker_sc = ax.scatter([], [], s=60, marker="^", label="Strikers")
-    jammer_sc = ax.scatter([], [], s=60, marker="s", label="Jammers")
+    striker_color = NLR_PRIMARY
+    jammer_color = NLR_ACCENT
+
+    striker_sc = ax.scatter([], [], s=60, marker="^", color=striker_color, label="Strikers")
+    jammer_sc = ax.scatter([], [], s=60, marker="s", color=jammer_color, label="Jammers")
     target_known_sc = ax.scatter([], [], s=80, marker="*", label="Targets (known)", color="#a65e00")
     target_unknown_sc = ax.scatter([], [], s=80, marker="*", label="Targets (unknown)", facecolors="none", edgecolors="#a65e00", linewidths=1.8)
     radar_known_sc = ax.scatter([], [], s=80, marker="X", label="Radars (known)", color="#243c9b")
     radar_unknown_sc = ax.scatter([], [], s=80, marker="X", label="Radars (unknown)", facecolors="none", edgecolors="#243c9b", linewidths=1.8)
+
+    # Trailing path behind agents: per-agent fading LineCollection.
+    trail_len = 20
+    trail_max_alpha = 0.45
+    agent_trail_colors = (
+        [mcolors.to_rgba(striker_color)] * env.n_strikers
+        + [mcolors.to_rgba(jammer_color)] * env.n_jammers
+    )
+    agent_trail_history: List[List[tuple]] = [[] for _ in range(env.n_agents)]
+    agent_trail_lcs = [
+        ax.add_collection(LineCollection([], linewidths=2.0, zorder=1.5, capstyle="round"))
+        for _ in range(env.n_agents)
+    ]
 
     radar_circles = [ax.add_patch(Circle((0, 0), 0, fill=False, edgecolor="C3", alpha=0.6, lw=2)) for _ in range(env.n_radars)]
     jammer_circles = [ax.add_patch(Circle((0, 0), 0, fill=False, edgecolor="C4", alpha=0.5, lw=1.5, ls="--")) for _ in range(env.n_jammers)]
@@ -499,6 +517,7 @@ def animate_rollout(
     ax.plot([], [], color="black", lw=1.4, alpha=0.7, label="Comm MST (<= R_comm)")
     ax.plot([], [], color="black", lw=0.9, ls="-.", alpha=0.35, label="R_comm")
     ax.plot([], [], color="C0", lw=1.0, ls=":", alpha=0.45, label="R_obs")
+    ax.plot([], [], color=NLR_DARKGRAY, lw=2.0, alpha=trail_max_alpha, label=f"Agent trail (last {trail_len} steps)")
     ax.legend(loc="upper right")
 
     ax_rew.set_xlabel("Timestep")
@@ -536,6 +555,10 @@ def animate_rollout(
             ln.set_data([], [])
         for cl in comm_lines:
             cl.set_data([], [])
+        for hist in agent_trail_history:
+            hist.clear()
+        for lc in agent_trail_lcs:
+            lc.set_segments([])
         time_vline.set_xdata([1])
         return [
             striker_sc,
@@ -551,6 +574,7 @@ def animate_rollout(
             *striker_arcs,
             *heading_lines,
             *comm_lines,
+            *agent_trail_lcs,
             time_vline,
         ]
 
@@ -569,6 +593,30 @@ def animate_rollout(
         ap_km = ap * 1000
         tp_km = tp * 1000
         rp_km = rp * 1000
+
+        # Reset trail history when the animation loops back to frame 0.
+        if i == 0:
+            for hist in agent_trail_history:
+                hist.clear()
+
+        # Update per-agent fading trails (only while the agent is alive).
+        for k in range(env.n_agents):
+            if aa[k].item():
+                agent_trail_history[k].append((float(ap_km[k, 0]), float(ap_km[k, 1])))
+                if len(agent_trail_history[k]) > trail_len:
+                    del agent_trail_history[k][: len(agent_trail_history[k]) - trail_len]
+            pts = agent_trail_history[k]
+            if len(pts) >= 2:
+                pts_arr = np.asarray(pts, dtype=float)
+                segs = np.stack([pts_arr[:-1], pts_arr[1:]], axis=1)
+                n = segs.shape[0]
+                alphas = np.linspace(0.05, trail_max_alpha, n)
+                colors = np.tile(np.asarray(agent_trail_colors[k], dtype=float), (n, 1))
+                colors[:, 3] = alphas
+                agent_trail_lcs[k].set_segments(segs)
+                agent_trail_lcs[k].set_color(colors)
+            else:
+                agent_trail_lcs[k].set_segments([])
 
         striker_xy = ap_km[: env.n_strikers][aa[: env.n_strikers]]
         jammer_xy = ap_km[env.n_strikers:][aa[env.n_strikers:]]
@@ -741,6 +789,7 @@ def animate_rollout(
             *striker_arcs,
             *heading_lines,
             *comm_lines,
+            *agent_trail_lcs,
             time_vline,
         ]
 
