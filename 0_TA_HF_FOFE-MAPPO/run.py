@@ -4,7 +4,6 @@ python -m fofe_mappo.run --load_checkpoint runs/fofe_mappo.pt
 """
 
 
-
 from __future__ import annotations
 
 import argparse

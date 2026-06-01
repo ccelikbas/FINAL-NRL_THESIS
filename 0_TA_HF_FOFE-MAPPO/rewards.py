@@ -153,7 +153,7 @@ class RewardConfig:
     # stack on top of the smooth alignment shaping below.
     # No effect in the legacy (non-HF) jammer model, which has no cone.
     # Set to 0.0 to disable.
-    jammer_beam_on_radar_bonus: float = 0.005
+    jammer_beam_on_radar_bonus: float = 0.01
 
     # ─── JAMMER BEAM ALIGNMENT SHAPING  (HF directional-jammer model only) ───
     # Smooth angular shaping toward the *physically nearest* alive radar.
