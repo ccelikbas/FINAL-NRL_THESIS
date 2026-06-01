@@ -603,7 +603,7 @@ def evaluate_current_policy(
     policy: CombinedPolicy,
     env_cfg: EnvConfig,
     ppo_cfg: PPOConfig,
-    n_eval_episodes: int = 100,
+    n_eval_episodes: int = 200,
     hf_radar_cfg: Optional[HFRadarConfig] = None,
 ) -> Dict[str, float]:
     # Run all episodes in parallel: num_envs = n_eval_episodes so every env

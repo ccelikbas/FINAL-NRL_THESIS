@@ -518,7 +518,7 @@ def animate_rollout(
     ax.plot([], [], color="black", lw=0.9, ls="-.", alpha=0.35, label="R_comm")
     ax.plot([], [], color="C0", lw=1.0, ls=":", alpha=0.45, label="R_obs")
     ax.plot([], [], color=NLR_DARKGRAY, lw=2.0, alpha=trail_max_alpha, label=f"Agent trail (last {trail_len} steps)")
-    ax.legend(loc="upper right")
+    ax.legend(loc="lower right", fontsize=5, markerscale=0.6, handlelength=1.5, borderpad=0.3, labelspacing=0.3)
 
     ax_rew.set_xlabel("Timestep")
     ax_rew.set_ylabel("Reward (team sum)")

@@ -597,7 +597,8 @@ def hf_animate_rollout(
                 label=f"Jammer cone ({math.degrees(2*jammer_lobe_half):.0f} deg)")
     ax.plot([], [], color=NLR_DARKGRAY, lw=2.0, alpha=trail_max_alpha,
             label=f"Agent trail (last {trail_len} steps)")
-    ax.legend(loc="upper right")
+    ax.legend(loc="lower right", fontsize=8, markerscale=0.6,
+              handlelength=1.5, borderpad=0.3, labelspacing=0.3)
 
     # --- Reward subplot (replaced — kept commented for reference) ---
     # ax_rew.set_xlabel("Timestep")
