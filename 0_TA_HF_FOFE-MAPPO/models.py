@@ -686,13 +686,15 @@ def make_combined_critic(env: StrikeEA2DEnv, hidden=256, depth=3,
 
     if use_fofe:
         # Critic entity dims match _build_fofe_critic_state output:
-        #   agents: 7 (x,y,v,ψ,ω,role,alive)
+        #   agents: 7 (x,y,v,ψ,ω,role,alive) + _critic_agent_extra_dim()
+        #           (HF env appends 2 cols: jammer_bearing/π, beam_rate/beam_dpsi_max)
         #   targets: 3 (x,y,alive)
         #   radars:  3 (x,y,jammed) + _critic_radar_extra_dim()
         #            (HF env appends 2 cols: sin/cos of cone centre axis)
+        d_agents_critic = 7 + int(getattr(env, "_critic_agent_extra_dim", lambda: 0)())
         d_radars_critic = 3 + int(getattr(env, "_critic_radar_extra_dim", lambda: 0)())
-        striker_critic = FOFEValueNet(fofe_cfg, env.n_strikers, d_agents=7, d_targets=3, d_radars=d_radars_critic).to(env.device)
-        jammer_critic = FOFEValueNet(fofe_cfg, env.n_jammers, d_agents=7, d_targets=3, d_radars=d_radars_critic).to(env.device)
+        striker_critic = FOFEValueNet(fofe_cfg, env.n_strikers, d_agents=d_agents_critic, d_targets=3, d_radars=d_radars_critic).to(env.device)
+        jammer_critic = FOFEValueNet(fofe_cfg, env.n_jammers, d_agents=d_agents_critic, d_targets=3, d_radars=d_radars_critic).to(env.device)
     else:
         striker_critic = RoleValueNet(env.state_dim, env.n_strikers, hidden, depth).to(env.device)
         jammer_critic = RoleValueNet(env.state_dim, env.n_jammers, hidden, depth).to(env.device)

@@ -408,6 +408,27 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         return extra
 
     # ------------------------------------------------------------------
+    # Critic-side per-agent extras: jammer beam state in the global view.
+    # Mirrors the actor's self-extra so the centralised critic sees each
+    # jammer's (beam_bearing, beam_rate) alongside its kinematics.
+    # ------------------------------------------------------------------
+
+    def _critic_agent_extra_dim(self) -> int:
+        # Two extra floats per agent in crt_agents_feat:
+        #   col 0 — jammer_bearing / pi          (beam pointing offset from heading)
+        #   col 1 — beam_rate / beam_dpsi_max    (beam angular velocity)
+        # Both zero for strikers (no beam).
+        return 2
+
+    def _build_critic_agent_extra(self, B: int, A: int) -> torch.Tensor:
+        extra = torch.zeros(B, A, 2, device=self.device, dtype=torch.float32)
+        if self.n_jammers > 0:
+            beam_dpsi = max(float(getattr(self, "_beam_dpsi_max", math.pi)), 1e-8)
+            extra[:, self.n_strikers:, 0] = self.jammer_bearing / math.pi
+            extra[:, self.n_strikers:, 1] = self.beam_rate / beam_dpsi
+        return extra
+
+    # ------------------------------------------------------------------
     # Critic-side per-radar extras: jamming-cone centre-axis direction
     # ------------------------------------------------------------------
 

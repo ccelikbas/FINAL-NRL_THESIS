@@ -584,6 +584,22 @@ class StrikeEA2DEnv(EnvBase):
         """Return the per-radar critic-side extension [B, R, d_extra]."""
         return torch.zeros(B, R, 0, device=self.device, dtype=torch.float32)
 
+    # ------------------------------------------------------------------
+    # Critic-side per-agent feature extension hooks
+    # ------------------------------------------------------------------
+    # Subclasses can append global per-agent features to the centralised
+    # critic's `crt_agents_feat` channel and to the flat global-state
+    # vector (e.g. HF env appends each jammer's beam_bearing and beam_rate
+    # so the critic sees beam state alongside agent kinematics).
+
+    def _critic_agent_extra_dim(self) -> int:
+        """Extra per-agent floats appended to `crt_agents_feat` (and flat state)."""
+        return 0
+
+    def _build_critic_agent_extra(self, B: int, A: int) -> torch.Tensor:
+        """Return the per-agent critic-side extension [B, A, d_extra]."""
+        return torch.zeros(B, A, 0, device=self.device, dtype=torch.float32)
+
     def _radar_jammed_flag(self) -> torch.Tensor:
         """Return [B, R] float in {0, 1}: 1 = radar currently jammed.
 
@@ -596,11 +612,11 @@ class StrikeEA2DEnv(EnvBase):
     def _compute_state_dim(self) -> int:
         A, T, R = self.n_agents, self.n_targets, self.n_radars
         # Global absolute state for centralised critic:
-        #   Per agent:  (x, y, v, ψ, ω, role, alive)     = 7 × A
-        #   Per target: (x, y, alive)                      = 3 × T
-        #   Per radar:  (x, y, jammed)                     = 3 × R
-        #   Global:     (t_norm)                           = 1
-        return 7 * A + 3 * T + 3 * R + 1
+        #   Per agent:  (x, y, v, ψ, ω, role, alive, *agent_extra)  = (7 + E_a) × A
+        #   Per target: (x, y, alive)                                = 3 × T
+        #   Per radar:  (x, y, jammed)                               = 3 × R
+        #   Global:     (t_norm)                                     = 1
+        return (7 + int(self._critic_agent_extra_dim())) * A + 3 * T + 3 * R + 1
 
     def _spawn_targets_in_valid_zones(self, B: int, T: int, R: int, radar_pos: torch.Tensor) -> torch.Tensor:
         """
@@ -759,7 +775,8 @@ class StrikeEA2DEnv(EnvBase):
             agents_dict["obs_radars_feat"]   = Unbounded(shape=B + torch.Size([A, R, d_radar_slot]), dtype=torch.float32, device=self.device)
             agents_dict["obs_radars_mask"]   = Unbounded(shape=B + torch.Size([A, R]),    dtype=torch.bool,    device=self.device)
             # FOFE critic global-state channels (root-level keys)
-            root_dict["crt_agents_feat"]   = Unbounded(shape=B + torch.Size([A, 7]), dtype=torch.float32, device=self.device)
+            d_crt_agent_slot = 7 + int(self._critic_agent_extra_dim())
+            root_dict["crt_agents_feat"]   = Unbounded(shape=B + torch.Size([A, d_crt_agent_slot]), dtype=torch.float32, device=self.device)
             root_dict["crt_agents_mask"]   = Unbounded(shape=B + torch.Size([A]),    dtype=torch.bool,    device=self.device)
             root_dict["crt_targets_feat"]  = Unbounded(shape=B + torch.Size([T, 3]), dtype=torch.float32, device=self.device)
             root_dict["crt_targets_mask"]  = Unbounded(shape=B + torch.Size([T]),    dtype=torch.bool,    device=self.device)
@@ -1685,12 +1702,12 @@ class StrikeEA2DEnv(EnvBase):
         """Global absolute state for the centralised critic.
 
         Layout (flat vector):
-          Per agent i:  (x, y, v, ψ, ω, role, alive)      × A   (7A)
-          Per target k: (x, y, alive)                       × T   (3T)
-          Per radar r:  (x, y, jammed)                      × R   (3R)
-          Global:       (t_norm)                                  (1)
+          Per agent i:  (x, y, v, ψ, ω, role, alive, *agent_extra) × A   ((7+E_a)A)
+          Per target k: (x, y, alive)                                × T   (3T)
+          Per radar r:  (x, y, jammed)                               × R   (3R)
+          Global:       (t_norm)                                           (1)
 
-        Total dim = 7A + 3T + 3R + 1
+        Total dim = (7+E_a)A + 3T + 3R + 1
         """
         B    = self.num_envs
         A, T, R = self.n_agents, self.n_targets, self.n_radars
@@ -1704,9 +1721,14 @@ class StrikeEA2DEnv(EnvBase):
         role       = torch.zeros(B, A, 1, device=self.device)
         role[:, :self.n_strikers, 0] = 1.0                                         # strikers=1, jammers=0
         alive_a    = self.agent_alive.float().unsqueeze(-1)                        # [B,A,1]
-        agent_feat = torch.cat([pos_norm, speed_norm, hdg_norm,
+        agent_base = torch.cat([pos_norm, speed_norm, hdg_norm,
                                 omega_norm, role, alive_a], dim=-1)                # [B,A,7]
-        agent_flat = agent_feat.reshape(B, -1)                                     # [B, 7A]
+        agent_extra = self._build_critic_agent_extra(B, A)                         # [B,A,E_a]
+        if agent_extra.shape[-1] > 0:
+            agent_feat = torch.cat([agent_base, agent_extra], dim=-1)              # [B,A,7+E_a]
+        else:
+            agent_feat = agent_base
+        agent_flat = agent_feat.reshape(B, -1)                                     # [B, (7+E_a)A]
 
         # --- Target features: (x, y, alive) per target ---
         tgt_pos_norm = (self.target_pos - self.low) / world_range                  # [B,T,2]
@@ -2296,7 +2318,7 @@ class StrikeEA2DEnv(EnvBase):
 
         The critic sees the GLOBAL state (all entities, no partial
         observability), decomposed into entity sets:
-            agents  [B, A, 7]   x, y, v, ψ, ω, role, alive
+            agents  [B, A, 7+E_a]   x, y, v, ψ, ω, role, alive, *agent_extra
             targets [B, T, 3]   x, y, alive
             radars  [B, R, 3]   x, y, jammed
             time    [B, 1]      t_norm
@@ -2317,7 +2339,12 @@ class StrikeEA2DEnv(EnvBase):
         role = torch.zeros(B, A, 1, device=self.device)
         role[:, :self.n_strikers, 0] = 1.0
         alive_a = self.agent_alive.float().unsqueeze(-1)
-        agent_feat = torch.cat([pos_norm, speed_norm, hdg_norm, omega_norm, role, alive_a], dim=-1)
+        agent_base = torch.cat([pos_norm, speed_norm, hdg_norm, omega_norm, role, alive_a], dim=-1)
+        agent_extra = self._build_critic_agent_extra(B, A)                        # [B, A, E_a]
+        if agent_extra.shape[-1] > 0:
+            agent_feat = torch.cat([agent_base, agent_extra], dim=-1)             # [B, A, 7+E_a]
+        else:
+            agent_feat = agent_base
 
         # ---- Target features [B, T, 3] ----
         tgt_pos_norm = (self.target_pos - self.low) / world_range
