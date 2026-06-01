@@ -166,7 +166,7 @@ class RewardConfig:
     # discontinuity of a binary in/out-of-cone bonus.
     # Applied unconditionally every step (no in-cone gate).
     # Set to 0.0 to disable.
-    jammer_beam_alignment_scale: float = 0.01 # deze kleiner maken
+    jammer_beam_alignment_scale: float = 0.015 # deze kleiner maken
 
     # ─── JAMMER COALITION COVERAGE  (HF directional-jammer model only) ───────
     # Encourages pairs of nearby jammers to point their beams in different
@@ -189,8 +189,8 @@ class RewardConfig:
     # partners (symmetric, so both jammers in a pair receive the same term).
     # Dead jammers receive 0 and do not form coalitions.
     # Set jammer_coalition_R_min = 0.0 to disable.
-    jammer_coalition_d_max: float = 0.3
-    jammer_coalition_R_min: float = 0.0
+    jammer_coalition_d_max: float = 0.2
+    jammer_coalition_R_min: float = 0.01
 
     # ─── FORMATION COHESION  (striker ↔ jammer cross-role proximity) ──────────
     # Each striker/jammer receives a distance penalty for being far from the

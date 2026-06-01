@@ -302,6 +302,7 @@ class StrikeEA2DEnv(EnvBase):
             "agent_destroyed": torch.zeros(B, device=self.device),
             "paper_mission": torch.zeros(B, device=self.device),
             "separation_penalty": torch.zeros(B, device=self.device),
+            "jammer_coalition_coverage": torch.zeros(B, device=self.device),
             "control_effort": torch.zeros(B, device=self.device),
         }
 
@@ -1588,6 +1589,7 @@ class StrikeEA2DEnv(EnvBase):
             "agent_destroyed":    death_pen_full.detach(),
             "paper_mission":      mission_reward_full.detach(),
             "separation_penalty": separation_pen_full.detach(),
+            "jammer_coalition_coverage": torch.zeros_like(separation_pen_full),
             "control_effort":     control_pen_full.detach(),
         }
         
