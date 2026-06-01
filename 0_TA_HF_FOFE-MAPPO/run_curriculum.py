@@ -1,36 +1,7 @@
 """Curriculum runner for FOFE-MAPPO with per-environment domain randomization.
 
-Why this exists
----------------
-The agents struggle to learn the full task directly, so we train through a
-sequence of *sections* that start simple and grow harder. Within a section,
-any parameter may be **domain-randomized per environment**: when a section
-says "targets between 1 and 4", every parallel environment (and every
-evaluation episode) independently draws its own value — a single training
-batch therefore contains a mix of configurations, NOT one sample shared per
-iteration. Randomization is realised inside the env by allocating tensors at
-the range maximum and masking surplus entities out per-env (see
-environment.py / config.DomainRandomization).
-
-How the curriculum is specified
--------------------------------
-Edit the CURRICULUM list below. Each CurriculumSection field follows one rule:
-
-    None          → inherit the value from config.py (EnvConfig default)
-    a scalar      → fixed for the whole section (overrides config.py)
-    a (lo, hi)    → per-environment domain randomization in [lo, hi] inclusive
-
-(`scenario` only takes None or "S1"/"S2" — it is fixed per section, not
-randomized.)
-
-Because the FOFE actor/critic are invariant to entity counts, ONE network is
-trained straight through the whole curriculum: weights carry across sections
-with an exact (strict) load — no architecture change, no adaptation.
-
-Evaluation mirrors the active section's parameters/DR (train_mappo evaluates
-on the same env_cfg every `--log_every` iterations). The dashboard appends the
-entire learning curve so it spans the whole curriculum. Final rollouts are
-rendered from the last section's configuration.
+To run from prev checkpoint: 
+python -m fofe_mappo.run_curriculum --load_checkpoint runs/curriculum_mappo.pt
 """
 
 from __future__ import annotations
