@@ -38,10 +38,18 @@ from __future__ import annotations
 import argparse
 import copy
 import gc
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
+
+# Force Inductor to compile Triton kernels in the main process instead of a
+# subprocess pool. Works around a Triton bug where worker subprocesses return
+# an asm dict missing the 'cubin' key on some Linux + CUDA toolchains, which
+# raises `KeyError: 'cubin'` during the first PPO update. setdefault lets the
+# user override with `TORCHINDUCTOR_COMPILE_THREADS=N python ...` if desired.
+os.environ.setdefault("TORCHINDUCTOR_COMPILE_THREADS", "1")
 
 if __package__ in (None, ""):
     import types
@@ -119,7 +127,7 @@ CURRICULUM: List[CurriculumSection] = [
     # ── Stage 1: the simplest possible case, fixed, to bootstrap behaviour ──
     CurriculumSection(
         name="warmup_1v1",
-        n_iters=100,
+        n_iters=10,
         n_strikers=1, n_jammers=1,
         n_known_targets=1, n_unknown_targets=0,
         n_known_radars=1, n_unknown_radars=0,
@@ -129,7 +137,7 @@ CURRICULUM: List[CurriculumSection] = [
     # ── Stage 2: randomize the threat field per-env (targets + radars vary) ──
     CurriculumSection(
         name="1x2",
-        n_iters=200,
+        n_iters=20,
         n_strikers=1, n_jammers=1,
         n_known_targets=(1, 2),
         n_known_radars=(1, 2),
@@ -139,7 +147,7 @@ CURRICULUM: List[CurriculumSection] = [
     # ── Stage 3: full per-env DR including team size + softer kills ──────────
     CurriculumSection(
         name="dr_full",
-        n_iters=400,
+        n_iters=20,
         n_strikers=(1, 2),
         n_jammers=(1, 2),
         n_known_targets=(1, 2),

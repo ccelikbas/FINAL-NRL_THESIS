@@ -260,11 +260,11 @@ class EnvConfig:
 @dataclass
 class PPOConfig:
     """Shared PPO hyperparameters for both striker and jammer MAPPO."""
-    num_envs: int = 2048  #256 or 2048
+    num_envs: int = 256  #256 or 2048
     n_iters: int = 10
     frames_per_batch: Optional[int] = None
     num_epochs: int = 6
-    minibatch_size: int = 16384 #4096 or 16384
+    minibatch_size: int = 4096 #4096 or 16384
 
     gamma: float = 0.99
     lmbda: float = 0.95
