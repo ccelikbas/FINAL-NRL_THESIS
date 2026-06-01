@@ -1,6 +1,6 @@
 """"
 To run from prev checkpoint: 
-python -m fofe_mappo.run --load_checkpoint runs/fofe_mappo.pt
+python run.py --load_checkpoint ../runs/curriculum_mappo.pt
 """
 
 
@@ -160,7 +160,7 @@ def main() -> None:
 
     checkpoint = None
     if args.load_checkpoint:
-        checkpoint = torch.load(args.load_checkpoint, map_location=cfg.ppo.device)
+        checkpoint = torch.load(args.load_checkpoint, map_location=cfg.ppo.device, weights_only=False)
         print(f"Loaded checkpoint from: {args.load_checkpoint}")
 
     print(

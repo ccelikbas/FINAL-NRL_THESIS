@@ -166,7 +166,7 @@ class RewardConfig:
     # discontinuity of a binary in/out-of-cone bonus.
     # Applied unconditionally every step (no in-cone gate).
     # Set to 0.0 to disable.
-    jammer_beam_alignment_scale: float = 0.02
+    jammer_beam_alignment_scale: float = 0.01 # deze kleiner maken
 
     # ─── FORMATION COHESION  (striker ↔ jammer cross-role proximity) ──────────
     # Each striker/jammer receives a distance penalty for being far from the
