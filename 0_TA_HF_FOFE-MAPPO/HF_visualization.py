@@ -17,15 +17,17 @@ import math
 from pathlib import Path
 from typing import Dict, List, Optional
 
+import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from matplotlib import animation
+from matplotlib.collections import LineCollection
 from matplotlib.patches import Circle, Polygon
 
 from .config import EnvConfig, HFRadarConfig
 from .HF_environment import HFStrikeEA2DEnv
-from .nlr_style import apply_nlr_style
+from .nlr_style import apply_nlr_style, NLR_PRIMARY, NLR_ACCENT, NLR_DARKGRAY
 
 # Re-export unchanged utilities from base visualization
 from .visualization import (
@@ -513,8 +515,23 @@ def hf_animate_rollout(
     empty_xy = np.empty((0, 2), dtype=float)
 
     # --- Static artists ---
-    striker_sc = ax.scatter([], [], s=60, marker="^", label="Strikers")
-    jammer_sc = ax.scatter([], [], s=60, marker="s", label="Jammers")
+    striker_color = NLR_PRIMARY
+    jammer_color = NLR_ACCENT
+    striker_sc = ax.scatter([], [], s=60, marker="^", color=striker_color, label="Strikers")
+    jammer_sc = ax.scatter([], [], s=60, marker="s", color=jammer_color, label="Jammers")
+
+    # Trailing path behind each agent: per-agent fading LineCollection.
+    trail_len = 40
+    trail_max_alpha = 0.45
+    agent_trail_colors = (
+        [mcolors.to_rgba(striker_color)] * env.n_strikers
+        + [mcolors.to_rgba(jammer_color)] * env.n_jammers
+    )
+    agent_trail_history: List[List[tuple]] = [[] for _ in range(env.n_agents)]
+    agent_trail_lcs = [
+        ax.add_collection(LineCollection([], linewidths=2.0, zorder=1.5, capstyle="round"))
+        for _ in range(env.n_agents)
+    ]
     target_known_sc = ax.scatter([], [], s=80, marker="*", label="Targets (known)", color="#a65e00")
     target_unknown_sc = ax.scatter(
         [], [], s=80, marker="*", label="Targets (unknown)",
@@ -578,6 +595,8 @@ def hf_animate_rollout(
     if env.n_jammers > 0:
         ax.plot([], [], color=_CONE_BASE_RGB, lw=6, alpha=_CONE_ALPHA_NEAR,
                 label=f"Jammer cone ({math.degrees(2*jammer_lobe_half):.0f} deg)")
+    ax.plot([], [], color=NLR_DARKGRAY, lw=2.0, alpha=trail_max_alpha,
+            label=f"Agent trail (last {trail_len} steps)")
     ax.legend(loc="upper right")
 
     # --- Reward subplot (replaced — kept commented for reference) ---
@@ -653,6 +672,10 @@ def hf_animate_rollout(
             ln.set_data([], [])
         for cl in comm_lines:
             cl.set_data([], [])
+        for hist in agent_trail_history:
+            hist.clear()
+        for lc in agent_trail_lcs:
+            lc.set_segments([])
         time_vline.set_xdata([1])
         return []
 
@@ -670,6 +693,30 @@ def hf_animate_rollout(
         ap_km = ap * 1000
         tp_km = tp * 1000
         rp_km = rp * 1000
+
+        # Reset trail history when the animation loops back to frame 0.
+        if i == 0:
+            for hist in agent_trail_history:
+                hist.clear()
+
+        # Update per-agent fading trails (only while the agent is alive).
+        for k in range(env.n_agents):
+            if aa[k].item():
+                agent_trail_history[k].append((float(ap_km[k, 0]), float(ap_km[k, 1])))
+                if len(agent_trail_history[k]) > trail_len:
+                    del agent_trail_history[k][: len(agent_trail_history[k]) - trail_len]
+            pts = agent_trail_history[k]
+            if len(pts) >= 2:
+                pts_arr = np.asarray(pts, dtype=float)
+                segs = np.stack([pts_arr[:-1], pts_arr[1:]], axis=1)
+                n = segs.shape[0]
+                alphas = np.linspace(0.05, trail_max_alpha, n)
+                colors = np.tile(np.asarray(agent_trail_colors[k], dtype=float), (n, 1))
+                colors[:, 3] = alphas
+                agent_trail_lcs[k].set_segments(segs)
+                agent_trail_lcs[k].set_color(colors)
+            else:
+                agent_trail_lcs[k].set_segments([])
 
         # Scatter agents
         striker_xy = ap_km[:env.n_strikers][aa[:env.n_strikers]]

@@ -495,7 +495,7 @@ def animate_rollout(
     radar_unknown_sc = ax.scatter([], [], s=80, marker="X", label="Radars (unknown)", facecolors="none", edgecolors="#243c9b", linewidths=1.8)
 
     # Trailing path behind agents: per-agent fading LineCollection.
-    trail_len = 20
+    trail_len = 40
     trail_max_alpha = 0.45
     agent_trail_colors = (
         [mcolors.to_rgba(striker_color)] * env.n_strikers
