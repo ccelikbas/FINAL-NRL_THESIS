@@ -627,24 +627,33 @@ class GATPolicyNet(nn.Module):
                 targets_feat, targets_mask, radars_feat, radars_mask):
         """
         Same signature as FOFEPolicyNet.forward.
-        All inputs: [B, n_role, ...].
-        Returns logits [B, n_role, act_dim, n_choices].
+        All inputs share leading shape `lead` — e.g. (B, n_role) at PPO update
+        time, but can be any rank (e.g. (T, B, n_role) when called on a full
+        rollout td). nn.MultiheadAttention requires strictly 3D inputs, so we
+        flatten every leading dim into one before the GAT stack and reshape
+        back at the end.
+        Returns logits with shape `lead + (act_dim, n_choices)`.
         """
-        B, A = obs_self.shape[:2]
-        # Flatten B×A for shared-weight processing.
-        sf = obs_self.reshape(B * A, -1)                                    # [B*A, d_self]
-        af = agents_feat.reshape(B * A, *agents_feat.shape[2:])             # [B*A, n_a, d_a]
-        am = agents_mask.reshape(B * A, *agents_mask.shape[2:])             # [B*A, n_a]
-        tf = targets_feat.reshape(B * A, *targets_feat.shape[2:])
-        tm = targets_mask.reshape(B * A, *targets_mask.shape[2:])
-        rf = radars_feat.reshape(B * A, *radars_feat.shape[2:])
-        rm = radars_mask.reshape(B * A, *radars_mask.shape[2:])
+        # `lead` includes everything up to (but not including) the feature dim
+        # of obs_self. Entity-channel feats have one extra axis (the entity
+        # axis) past `lead`; masks have the same `lead` plus the entity axis.
+        lead = obs_self.shape[:-1]                                          # e.g. (B, A) or (T, B, A)
+        N_lead = int(torch.prod(torch.tensor(lead)).item()) if lead else 1
+
+        # Flatten leading dims for shared-weight processing.
+        sf = obs_self.reshape(N_lead, -1)                                   # [N_lead, d_self]
+        af = agents_feat.reshape(N_lead, *agents_feat.shape[len(lead):])    # [N_lead, n_a, d_a]
+        am = agents_mask.reshape(N_lead, *agents_mask.shape[len(lead):])    # [N_lead, n_a]
+        tf = targets_feat.reshape(N_lead, *targets_feat.shape[len(lead):])
+        tm = targets_mask.reshape(N_lead, *targets_mask.shape[len(lead):])
+        rf = radars_feat.reshape(N_lead, *radars_feat.shape[len(lead):])
+        rm = radars_mask.reshape(N_lead, *radars_mask.shape[len(lead):])
 
         # Self channel needs an entity axis (singleton) and an always-True mask
         # so it can be packed into the node tensor like the other channels.
-        self_feat = sf.unsqueeze(-2)                                        # [B*A, 1, d_self]
+        self_feat = sf.unsqueeze(-2)                                        # [N_lead, 1, d_self]
         self_mask = torch.ones(self_feat.shape[:-1],
-                               dtype=torch.bool, device=self_feat.device)   # [B*A, 1]
+                               dtype=torch.bool, device=self_feat.device)   # [N_lead, 1]
 
         # ---- Encode + concat into a single node set ----
         nodes, mask, slices = self.encoder({
@@ -675,12 +684,12 @@ class GATPolicyNet(nn.Module):
         }
 
         # ---- Global readout = masked maxpool over ALL nodes ----
-        pooled = _masked_max_pool(nodes, mask)                              # [B*A, D]
+        pooled = _masked_max_pool(nodes, mask)                              # [N_lead, D]
 
-        # ---- Post-pool MLP → action head ----
+        # ---- Post-pool MLP → action head, then restore leading shape ----
         x = self.post_pool_mlp(pooled)
         logits = self.action_head(x)
-        return logits.reshape(B, A, self.act_dim, self.n_choices)
+        return logits.reshape(*lead, self.act_dim, self.n_choices)
 
 
 # ======================================================================
@@ -744,15 +753,35 @@ class GATValueNet(nn.Module):
                 radar_feat, radar_mask, time_feat):
         """
         Same signature as FOFEValueNet.forward.
-        Entity inputs: [B, E, d]. Masks: [B, E] bool. time_feat: [B, 1].
-        Returns [B, 1, 1].
+        Entity inputs: [*, E, d]. Masks: [*, E] bool. time_feat: [*, 1].
+        Returns [*, 1, 1], where `*` is the input's leading shape.
+
+        Leading shape `*` can be anything (e.g. (B,) at PPO update time, or
+        (B, T) when the critic is called on a full rollout TensorDict).
+        nn.MultiheadAttention is strictly 3D, so we flatten every leading dim
+        into one before the GAT stack and reshape back at the end. FOFE's
+        pooling tolerates arbitrary leading dims and so silently works on
+        rollout-shaped inputs; MHA does not — hence this explicit flatten.
         """
+        # Leading shape = everything before the entity axis of the agents feat.
+        lead = agent_feat.shape[:-2]
+        N_lead = int(torch.prod(torch.tensor(lead)).item()) if lead else 1
+
+        # Flatten leading dims for the GAT stack.
+        af = agent_feat.reshape(N_lead,  *agent_feat.shape[len(lead):])
+        am = agent_mask.reshape(N_lead,  *agent_mask.shape[len(lead):])
+        tf = target_feat.reshape(N_lead, *target_feat.shape[len(lead):])
+        tm = target_mask.reshape(N_lead, *target_mask.shape[len(lead):])
+        rf = radar_feat.reshape(N_lead,  *radar_feat.shape[len(lead):])
+        rm = radar_mask.reshape(N_lead,  *radar_mask.shape[len(lead):])
+        tfeat = time_feat.reshape(N_lead, time_feat.shape[-1])
+
         # ---- Encode + concat into a single node set ----
         nodes, mask, slices = self.encoder({
-            "agents":  (agent_feat,  agent_mask),
-            "targets": (target_feat, target_mask),
-            "radars":  (radar_feat,  radar_mask),
-        })  # nodes [B, N, D], mask [B, N]  (True = visible)
+            "agents":  (af, am),
+            "targets": (tf, tm),
+            "radars":  (rf, rm),
+        })  # nodes [N_lead, N, D], mask [N_lead, N]  (True = visible)
 
         # ---- GAT stack ----
         # Inversion to MHA convention + all-masked guard. The critic has no
@@ -774,10 +803,12 @@ class GATValueNet(nn.Module):
         }
 
         # ---- Global readout = masked maxpool over ALL nodes, then inject time ----
-        pooled = _masked_max_pool(nodes, mask)                              # [B, D]
-        x = torch.cat([pooled, time_feat], dim=-1)                          # [B, D+1]
+        pooled = _masked_max_pool(nodes, mask)                              # [N_lead, D]
+        x = torch.cat([pooled, tfeat], dim=-1)                              # [N_lead, D+1]
         x = self.post_pool_mlp(x)
-        return self.value_head(x).unsqueeze(-1)                             # [B, 1, 1]
+        out = self.value_head(x).unsqueeze(-1)                              # [N_lead, 1, 1]
+        # Restore the original leading shape.
+        return out.reshape(*lead, 1, 1)
 
 
 # ======================================================================
