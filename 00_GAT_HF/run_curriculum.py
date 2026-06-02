@@ -40,6 +40,7 @@ import torch
 import matplotlib.pyplot as plt
 
 from .config import (
+    DEFAULT_ENCODER_TYPE,
     DomainRandomization, EnvConfig, EnvExtensionsConfig, ExperimentConfig,
     FOFEConfig, GATConfig, NetworkConfig, PPOConfig,
 )
@@ -129,12 +130,10 @@ CURRICULUM: List[CurriculumSection] = [
 ]
 
 
-FOFE_CONFIG = FOFEConfig(use_fofe=True)
+FOFE_CONFIG = FOFEConfig()
 GAT_CONFIG = GATConfig()
-
-# Observation-encoder selector for the curriculum. One of "flat" / "fofe" /
-# "gat". Set to None to derive from FOFE_CONFIG.use_fofe (legacy behaviour).
-ENCODER_TYPE: Optional[str] = None
+# To switch encoders, edit USE_FLAT / USE_FOFE / USE_GAT at the top of
+# config.py — that selector applies here automatically.
 
 
 # =====================================================================
@@ -561,7 +560,7 @@ def main() -> None:
     print("\n" + "=" * 78)
     print("  CURRICULUM PLAN")
     print("=" * 78)
-    print(f"  Encoder type    : {ENCODER_TYPE.upper() if ENCODER_TYPE else ('FOFE' if fofe_cfg.use_fofe else 'FLAT')}")
+    print(f"  Encoder type    : {DEFAULT_ENCODER_TYPE.upper()}")
     print(f"  HF radar model  : {'ENABLED' if hf_radar_cfg is not None else 'DISABLED'}")
     print(f"  num_envs        : {args.num_envs}")
     print(f"  eval cadence    : every {args.log_every} iters (mirrors section DR)")
@@ -608,7 +607,7 @@ def main() -> None:
         exp_cfg = ExperimentConfig(
             env=env_cfg, ppo=ppo_cfg, net=net_cfg,
             fofe=fofe_cfg, gat=gat_cfg, ext=ext_cfg,
-            encoder_type=ENCODER_TYPE,
+            # encoder_type=None → picks up DEFAULT_ENCODER_TYPE from config.py
         ).finalize()
 
         print("\n" + "-" * 78)

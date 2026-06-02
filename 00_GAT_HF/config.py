@@ -15,6 +15,49 @@ from .rewards import RewardConfig
 EncoderType = Literal["flat", "fofe", "gat"]
 
 
+# ╔════════════════════════════════════════════════════════════════════╗
+# ║  OBSERVATION ENCODER — set exactly ONE of these to True            ║
+# ╠════════════════════════════════════════════════════════════════════╣
+# ║  This is THE knob for picking the observation encoder used by the  ║
+# ║  actor and the critic across the whole codebase.                   ║
+# ║                                                                    ║
+# ║      USE_FLAT — legacy flat top-K observation through MLP          ║
+# ║      USE_FOFE — Wang-style permutation-invariant set encoder       ║
+# ║      USE_GAT  — graph attention over self+agents+targets+radars    ║
+# ║                                                                    ║
+# ║  Overrides:                                                        ║
+# ║    • run.py            — `--encoder_type {flat,fofe,gat}` CLI flag ║
+# ║    • programmatic use  — `ExperimentConfig(encoder_type=...)`      ║
+# ║  If neither override is given, the choice below applies.           ║
+# ╚════════════════════════════════════════════════════════════════════╝
+
+USE_FLAT: bool = False
+USE_FOFE: bool = False
+USE_GAT:  bool = True
+
+
+def _resolve_default_encoder_type() -> EncoderType:
+    """Resolve the three USE_* booleans into a single encoder type.
+
+    Raises at import time if zero or more-than-one flag is True — fails loud
+    rather than silently picking one, so a typo can't quietly retrain on the
+    wrong encoder.
+    """
+    flags = {"flat": USE_FLAT, "fofe": USE_FOFE, "gat": USE_GAT}
+    chosen = [name for name, on in flags.items() if on]
+    if len(chosen) != 1:
+        raise RuntimeError(
+            "config.py: exactly one of USE_FLAT / USE_FOFE / USE_GAT must be "
+            f"True; currently True = {chosen or ['(none)']}"
+        )
+    return chosen[0]  # type: ignore[return-value]
+
+
+# Resolved at import time — propagated as the default everywhere downstream
+# (FOFEConfig.use_fofe, ExperimentConfig.encoder_type).
+DEFAULT_ENCODER_TYPE: EncoderType = _resolve_default_encoder_type()
+
+
 # ======================================================================
 # FOFE architecture configuration
 # ======================================================================
@@ -79,7 +122,11 @@ class FOFEConfig:
     critic_fusion_mlp_dims : tuple of int
         Fusion MLP dims for critic.
     """
-    use_fofe: bool = True
+    # Default tracks the top-of-file selector: True whenever the chosen
+    # encoder needs structured per-channel observations (fofe OR gat).
+    # Hand-overriding this on the dataclass is supported but discouraged —
+    # prefer flipping USE_FLAT / USE_FOFE / USE_GAT at the top of this file.
+    use_fofe: bool = (DEFAULT_ENCODER_TYPE in ("fofe", "gat"))
 
     # --- Actor FOFE dims ---
     agents_see_dims:   Tuple[int, ...] = (96,) # one SEE layer
@@ -657,11 +704,11 @@ class ExperimentConfig:
     gat: GATConfig = field(default_factory=GATConfig)
     ext: EnvExtensionsConfig = field(default_factory=EnvExtensionsConfig)
 
-    # Observation-encoder selector — the ONE place to choose between the three
-    # encoder paths. `None` means "derive from the legacy FOFEConfig.use_fofe
-    # flag for backward compatibility" (True → "fofe", False → "flat"); set
-    # explicitly to override. Resolved into `self.encoder_type` (str) by
-    # finalize() and propagated everywhere downstream.
+    # Observation-encoder selector. `None` means "use the top-of-file
+    # DEFAULT_ENCODER_TYPE (driven by USE_FLAT / USE_FOFE / USE_GAT)";
+    # set to "flat" / "fofe" / "gat" explicitly to override for a single
+    # run (e.g. from the run.py CLI). Resolved into `self.encoder_type`
+    # (a plain str) by finalize() and propagated everywhere downstream.
     encoder_type: Optional[EncoderType] = None
 
     def finalize(self):
@@ -669,23 +716,19 @@ class ExperimentConfig:
             self.ppo.frames_per_batch = int(self.ppo.num_envs * self.env.max_steps)
 
         # ── Resolve encoder_type ──────────────────────────────────────────
-        # Precedence: explicit encoder_type wins; otherwise fall back to the
-        # legacy FOFEConfig.use_fofe boolean. After resolution, `fofe.use_fofe`
-        # is re-synced so that consumers which still read it (the env's
-        # structured-obs gate, trainer.py's structured-path branch) see True
-        # for BOTH "fofe" and "gat" — these two encoders share the same env
-        # observation channels.
+        # Precedence: explicit override > top-of-file DEFAULT_ENCODER_TYPE.
+        # After resolution, `fofe.use_fofe` and `env._use_fofe` are re-synced
+        # so that consumers which still read them (the env's structured-obs
+        # gate, trainer.py's structured-path branch) see True for BOTH "fofe"
+        # and "gat" — these two encoders share the same env channels.
         if self.encoder_type is None:
-            self.encoder_type = "fofe" if self.fofe.use_fofe else "flat"
+            self.encoder_type = DEFAULT_ENCODER_TYPE
         if self.encoder_type not in ("flat", "fofe", "gat"):
             raise ValueError(
                 f"ExperimentConfig.encoder_type must be one of "
                 f"{{'flat','fofe','gat'}}, got {self.encoder_type!r}"
             )
-        # Keep the legacy flag consistent with the resolved selector.
         self.fofe.use_fofe = self.encoder_type in ("fofe", "gat")
-        # Propagate to the env so it emits structured per-channel obs for
-        # both fofe and gat (and flat-only obs otherwise).
         self.env._use_fofe = self.fofe.use_fofe
         return self
 
