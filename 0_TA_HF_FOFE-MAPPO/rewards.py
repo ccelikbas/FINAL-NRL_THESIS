@@ -76,9 +76,9 @@ class RewardConfig:
     # This shaping does not switch with live jamming state; it always uses
     # the jammed effective range as the avoidance boundary.
     # Agents inside lethal radar range are still handled by agent_destroyed.
-    radar_avoid_w_lin:  float = 0.05  # reduced so approach reward dominates
+    radar_avoid_w_lin:  float = 0  # reduced so approach reward dominates
     radar_avoid_w_exp:  float = 0
-    radar_avoid_d_max:  float = 0.1   # penalty starts 200 km outside zone edge
+    radar_avoid_d_max:  float = 0   # penalty starts 200 km outside zone edge
     radar_avoid_d_knee: float = 0   # 30 km from zone → exponential
     radar_avoid_alpha:  float = 0
 
@@ -153,7 +153,7 @@ class RewardConfig:
     # stack on top of the smooth alignment shaping below.
     # No effect in the legacy (non-HF) jammer model, which has no cone.
     # Set to 0.0 to disable.
-    jammer_beam_on_radar_bonus: float = 0.01
+    jammer_beam_on_radar_bonus: float = 0.010
 
     # ─── JAMMER BEAM ALIGNMENT SHAPING  (HF directional-jammer model only) ───
     # Smooth angular shaping toward the *physically nearest* alive radar.
@@ -166,7 +166,7 @@ class RewardConfig:
     # discontinuity of a binary in/out-of-cone bonus.
     # Applied unconditionally every step (no in-cone gate).
     # Set to 0.0 to disable.
-    jammer_beam_alignment_scale: float = 0.015 # deze kleiner maken
+    jammer_beam_alignment_scale: float = 0.015 # deze kleiner maken xxx
 
     # ─── JAMMER COALITION COVERAGE  (HF directional-jammer model only) ───────
     # Encourages pairs of nearby jammers to point their beams in different
@@ -221,11 +221,11 @@ class RewardConfig:
     # and reducing mutual interference. Set all parameters to 0.0 to disable.
     # Typical d_max: 0.2–0.3 (map units, e.g., 2–3× typical agent spacing).
     # Typical w_lin, w_exp: 0.01–0.05 (gentle penalty relative to approach rewards).
-    striker_sep_d_max:  float = 0.1
-    striker_sep_d_knee: float = 0.0
-    striker_sep_w_lin:  float = 0.1
-    striker_sep_w_exp:  float = 0.0
-    striker_sep_alpha:  float = 0.0
+    striker_sep_d_max:  float = 0
+    striker_sep_d_knee: float = 0
+    striker_sep_w_lin:  float = 0
+    striker_sep_w_exp:  float = 0
+    striker_sep_alpha:  float = 0
 
     jammer_sep_d_max:  float = 0
     jammer_sep_d_knee: float = 0
@@ -245,7 +245,7 @@ class RewardConfig:
     # Applied only to jammers, on action dim 2 (beam angular acceleration).
     # Penalty = −beam_accel_effort_scale × beam_accel² (per alive jammer).
     # Set to 0.0 to disable.
-    beam_accel_effort_scale: float = 0.01
+    beam_accel_effort_scale: float = 0.005
 
 
 '''
@@ -394,5 +394,6 @@ def plot_reward_functions(reward_config: RewardConfig, distance_range: Tuple[flo
 
 if __name__ == "__main__":
     reward_config = RewardConfig()
+    print('printing rewards')
     plot_reward_functions(reward_config, distance_range=(0, 0.5))
 
