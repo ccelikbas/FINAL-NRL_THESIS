@@ -41,7 +41,7 @@ import matplotlib.pyplot as plt
 
 from .config import (
     DomainRandomization, EnvConfig, EnvExtensionsConfig, ExperimentConfig,
-    FOFEConfig, NetworkConfig, PPOConfig,
+    FOFEConfig, GATConfig, NetworkConfig, PPOConfig,
 )
 from .nlr_style import (
     apply_nlr_style,
@@ -130,6 +130,11 @@ CURRICULUM: List[CurriculumSection] = [
 
 
 FOFE_CONFIG = FOFEConfig(use_fofe=True)
+GAT_CONFIG = GATConfig()
+
+# Observation-encoder selector for the curriculum. One of "flat" / "fofe" /
+# "gat". Set to None to derive from FOFE_CONFIG.use_fofe (legacy behaviour).
+ENCODER_TYPE: Optional[str] = None
 
 
 # =====================================================================
@@ -525,6 +530,7 @@ def main() -> None:
             raise ValueError(f"Section '{sec.name}' has n_iters={sec.n_iters} (must be > 0).")
 
     fofe_cfg = FOFE_CONFIG
+    gat_cfg = GAT_CONFIG
     ext_cfg = EnvExtensionsConfig()                       # defaults from config.py
     hf_radar_cfg = ext_cfg.hf_radar if ext_cfg.use_hf_radar else None
     env_defaults = EnvConfig()                            # config.py leading values
@@ -555,7 +561,7 @@ def main() -> None:
     print("\n" + "=" * 78)
     print("  CURRICULUM PLAN")
     print("=" * 78)
-    print(f"  FOFE encoding   : {'ENABLED' if fofe_cfg.use_fofe else 'DISABLED'}")
+    print(f"  Encoder type    : {ENCODER_TYPE.upper() if ENCODER_TYPE else ('FOFE' if fofe_cfg.use_fofe else 'FLAT')}")
     print(f"  HF radar model  : {'ENABLED' if hf_radar_cfg is not None else 'DISABLED'}")
     print(f"  num_envs        : {args.num_envs}")
     print(f"  eval cadence    : every {args.log_every} iters (mirrors section DR)")
@@ -600,7 +606,9 @@ def main() -> None:
         ppo_cfg.iteration_offset = global_iter
 
         exp_cfg = ExperimentConfig(
-            env=env_cfg, ppo=ppo_cfg, net=net_cfg, fofe=fofe_cfg, ext=ext_cfg,
+            env=env_cfg, ppo=ppo_cfg, net=net_cfg,
+            fofe=fofe_cfg, gat=gat_cfg, ext=ext_cfg,
+            encoder_type=ENCODER_TYPE,
         ).finalize()
 
         print("\n" + "-" * 78)
@@ -611,6 +619,7 @@ def main() -> None:
         base_env, policy, critic, logs, reward_normalizer = train_mappo(
             exp_cfg.env, exp_cfg.ppo, exp_cfg.net, fofe_cfg, checkpoint,
             hf_radar_cfg=hf_radar_cfg,
+            gat_cfg=gat_cfg, encoder_type=exp_cfg.encoder_type,
         )
 
         _merge_logs(all_logs, logs)

@@ -225,7 +225,7 @@ from torchrl.envs import TransformedEnv
 from torchrl.envs.transforms import RewardSum
 from torchrl.envs.utils import check_env_specs
 
-from .config import EnvConfig, FOFEConfig, HFRadarConfig, NetworkConfig, PPOConfig
+from .config import EnvConfig, FOFEConfig, GATConfig, HFRadarConfig, NetworkConfig, PPOConfig
 from .environment import StrikeEA2DEnv
 from .HF_environment import HFStrikeEA2DEnv
 from .models import (
@@ -733,10 +733,16 @@ def train_mappo(
     fofe_cfg: Optional[FOFEConfig] = None,
     checkpoint: Optional[Dict[str, Any]] = None,
     hf_radar_cfg: Optional[HFRadarConfig] = None,
+    gat_cfg: Optional[GATConfig] = None,
+    encoder_type: Optional[str] = None,
 ) -> Tuple[StrikeEA2DEnv, CombinedPolicy, CombinedCritic, Dict[str, List[float]], Optional[RewardNormalizer]]:
     device = ppo_cfg.device
     ns = env_cfg.n_strikers
     nj = env_cfg.n_jammers
+    # `use_fofe` here is the "structured-obs path" flag — True for both
+    # encoder_type='fofe' and 'gat'. ExperimentConfig.finalize() syncs
+    # fofe_cfg.use_fofe to this meaning, so the historical derivation below
+    # still gives the right answer for all three encoder types.
     use_fofe = fofe_cfg is not None and fofe_cfg.use_fofe
 
     # ── Hardware optimization flags (set once, before any GPU work) ──
@@ -795,11 +801,13 @@ def train_mappo(
     )
     _safe_check(env)
 
-    # ── Build networks (FOFE or legacy depending on fofe_cfg) ────────
+    # ── Build networks (flat / FOFE / GAT depending on encoder_type) ──
     policy = make_combined_policy(base_env, hidden=net_cfg.actor_hidden,
-                                  depth=net_cfg.depth, fofe_cfg=fofe_cfg)
+                                  depth=net_cfg.depth, fofe_cfg=fofe_cfg,
+                                  gat_cfg=gat_cfg, encoder_type=encoder_type)
     critic = make_combined_critic(base_env, hidden=net_cfg.critic_hidden,
-                                  depth=net_cfg.depth, fofe_cfg=fofe_cfg)
+                                  depth=net_cfg.depth, fofe_cfg=fofe_cfg,
+                                  gat_cfg=gat_cfg, encoder_type=encoder_type)
 
     # ── Reward normalizer ────────────────────────────────────────────
     reward_normalizer: Optional[RewardNormalizer] = None

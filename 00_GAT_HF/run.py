@@ -29,7 +29,7 @@ if __package__ in (None, ""):
     sys.modules[_pkg_name] = _pkg
     __package__ = _pkg_name
 
-from .config import EnvConfig, EnvExtensionsConfig, ExperimentConfig, FOFEConfig, NetworkConfig, PPOConfig
+from .config import EnvConfig, EnvExtensionsConfig, ExperimentConfig, FOFEConfig, GATConfig, NetworkConfig, PPOConfig
 from .trainer import train_mappo
 from .rewards import RewardConfig
 from .visualization import TestRunner, animate_rollout, plot_training
@@ -78,12 +78,21 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--actor_hidden", type=int, default=net_defaults.actor_hidden)
     p.add_argument("--critic_hidden", type=int, default=net_defaults.critic_hidden)
     p.add_argument("--depth", type=int, default=net_defaults.depth)
-    # FOFE toggle (default follows FOFEConfig)
+    # Observation-encoder selector — single source of truth. When omitted,
+    # falls back to the legacy --use_fofe flag for back-compat (True→'fofe',
+    # False→'flat'); when set explicitly, --encoder_type wins.
+    p.add_argument(
+        "--encoder_type",
+        type=str,
+        choices=("flat", "fofe", "gat"),
+        default=None,
+        help="Observation-encoder selector. If unset, derived from --use_fofe.",
+    )
     p.add_argument(
         "--use_fofe",
         action=argparse.BooleanOptionalAction,
         default=fofe_defaults.use_fofe,
-        help="Enable/disable FOFE observation encoding (default from FOFEConfig.use_fofe)",
+        help="(Legacy) Enable/disable FOFE encoder. Ignored if --encoder_type is given.",
     )
     # Reward weights
     p.add_argument("--target_destroyed", type=float, default=reward_defaults.target_destroyed)
@@ -151,13 +160,15 @@ def main() -> None:
         depth=args.depth,
     )
     fofe_cfg = FOFEConfig(use_fofe=args.use_fofe)
+    gat_cfg = GATConfig()
     ext_cfg = EnvExtensionsConfig(use_hf_radar=args.use_hf_radar)
-    cfg = ExperimentConfig(env=env_cfg, ppo=ppo_cfg, net=net_cfg, fofe=fofe_cfg, ext=ext_cfg).finalize()
+    cfg = ExperimentConfig(
+        env=env_cfg, ppo=ppo_cfg, net=net_cfg,
+        fofe=fofe_cfg, gat=gat_cfg, ext=ext_cfg,
+        encoder_type=args.encoder_type,
+    ).finalize()
 
-    if cfg.fofe.use_fofe:
-        print("FOFE observation encoding: ENABLED")
-    else:
-        print("FOFE observation encoding: DISABLED (legacy flat MLP)")
+    print(f"Observation encoder: {cfg.encoder_type.upper()}")
 
     hf_radar_cfg = cfg.ext.hf_radar if cfg.ext.use_hf_radar else None
     if cfg.ext.use_hf_radar:
@@ -180,6 +191,8 @@ def main() -> None:
     base_env, policy, critic, logs, reward_normalizer = train_mappo(
         cfg.env, cfg.ppo, cfg.net,
         fofe_cfg=cfg.fofe,
+        gat_cfg=cfg.gat,
+        encoder_type=cfg.encoder_type,
         checkpoint=checkpoint,
         hf_radar_cfg=hf_radar_cfg,
     )
@@ -196,6 +209,8 @@ def main() -> None:
             "ppo_cfg": cfg.ppo,
             "net_cfg": cfg.net,
             "fofe_cfg": cfg.fofe,
+            "gat_cfg": cfg.gat,
+            "encoder_type": cfg.encoder_type,
             "ext_cfg": cfg.ext,
             "logs": logs,
             "reward_normalizer_state_dict": (

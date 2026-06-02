@@ -1,13 +1,21 @@
 """
-Dual-MAPPO model architecture with optional FOFE observation encoder.
+Dual-MAPPO model architecture with three switchable observation encoders.
 
-FOFE mode (use_fofe=True):
-  Actor receives structured per-channel observations → FOFE encoder → action.
-  Critic receives global state as entity sets         → FOFE encoder → value.
+Selector — `encoder_type` on ExperimentConfig — picks the path:
 
-Legacy mode (use_fofe=False):
-  Actor: flat top-K observation → MultiAgentMLP → action.
-  Critic: flat global state vector → MLP → value.
+  "flat"   Actor: flat top-K observation → MultiAgentMLP → action.
+           Critic: flat global state vector → MLP → value.
+
+  "fofe"   Actor receives structured per-channel observations → FOFE encoder → action.
+           Critic receives global state as entity sets         → FOFE encoder → value.
+           FOFE collapses each channel to a single vector BEFORE the channels
+           interact, so inter-channel correlations are invisible to fusion.
+
+  "gat"    Same per-channel obs as FOFE, but every entity (self, each agent,
+           each target, each radar) becomes a node in a single fully-connected
+           graph. L masked multi-head self-attention layers let any node attend
+           to any other before the global maxpool readout — inter-channel
+           correlations are structurally representable.
 
 FOFE Actor pipeline:
   ┌─ o_self   [B,A,6]     → SelfMLP      → [D_self_out]
@@ -22,6 +30,20 @@ FOFE Critic pipeline (same structure, different weights & entity dims):
   ├─ {targets} [B,T,3]        → FOFE_targets → [D_fofe]
   └─ {radars}  [B,R,4]        → FOFE_radars  → [D_fofe]
        → Concat → FusionMLP → ValueHead → [B,n_role,1]
+
+GAT Actor pipeline (same inputs as FOFE):
+  ┌─ o_self   [B,A,6]     → Linear(6→D)   + type_embed[Self]   → [B*A, 1,   D]
+  ├─ {agents} [B,A,E_a,4] → Linear(4→D)   + type_embed[Agent]  → [B*A, E_a, D]
+  ├─ {targets}[B,A,E_t,3] → Linear(3→D)   + type_embed[Target] → [B*A, E_t, D]
+  └─ {radars} [B,A,E_r,3] → Linear(3→D)   + type_embed[Radar]  → [B*A, E_r, D]
+       → concat over entity axis                                → [B*A, N, D]
+       → L × GraphAttnLayer (pre-norm masked MHA + FFN, residual)
+       → masked global maxpool over N                           → [B*A, D]
+       → PostPoolMLP → ActionHead                               → [B,A,act_dim,n_choices]
+
+GAT Critic pipeline (same inputs as FOFE critic):
+  Same shape as GAT actor but no self node, and after the masked maxpool the
+  scalar time_feat is concatenated before the post-pool MLP.
 """
 
 from __future__ import annotations
@@ -33,7 +55,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torchrl.modules import MultiAgentMLP
 
-from .config import FOFEConfig
+from .config import FOFEConfig, GATConfig
 from .environment import StrikeEA2DEnv
 
 
@@ -382,6 +404,383 @@ class FOFEValueNet(nn.Module):
 
 
 # ======================================================================
+# GAT building blocks
+# ======================================================================
+
+# Codebase mask convention is True = VISIBLE; nn.MultiheadAttention's
+# key_padding_mask convention is True = IGNORE. Anywhere we hand a mask to
+# MHA we explicitly invert it and comment the inversion at the call site.
+
+class GraphObsEncoder(nn.Module):
+    """Per-channel linear input encoder + per-type embedding.
+
+    Maps a dict of (feat, mask) channel tensors to a single packed node
+    tensor + visibility mask suitable for masked self-attention.
+
+    Each channel passes through its own nn.Linear(d_c → D); a learned
+    per-type embedding (one row per channel index) is added so that nodes
+    of different types remain distinguishable after sharing dimensions.
+
+    Parameters
+    ----------
+    channel_dims : dict[str, int]
+        Insertion-ordered mapping of channel name → raw feature dim.
+        The type embedding indexes channels in this order.
+    node_dim : int
+        Common output dim D.
+    """
+
+    def __init__(self, channel_dims: Dict[str, int], node_dim: int):
+        super().__init__()
+        self.channel_names: Tuple[str, ...] = tuple(channel_dims.keys())
+        self.node_dim = node_dim
+        self.projs = nn.ModuleDict({
+            name: nn.Linear(d, node_dim) for name, d in channel_dims.items()
+        })
+        self.type_embed = nn.Embedding(len(self.channel_names), node_dim)
+
+    def forward(self, channels: Dict[str, Tuple[torch.Tensor, torch.Tensor]]
+                ) -> Tuple[torch.Tensor, torch.Tensor, Tuple[Tuple[int, int], ...]]:
+        """
+        channels : dict name → (feat [*, n_c, d_c], mask [*, n_c]).
+                   The caller is responsible for adding the singleton entity
+                   axis to the self channel ([*, 1, d_self]) and an all-True
+                   [*, 1] mask.
+        Returns:
+            nodes      : [*, N, D]
+            mask       : [*, N]                True = visible (codebase convention)
+            type_slices: per-channel (start, end) index ranges along the N axis
+                         (in the same order as channel_names) — used by callers
+                         that want per-type pooled readouts for diagnostics.
+        """
+        node_list: list = []
+        mask_list: list = []
+        slices: list = []
+        cursor = 0
+        for type_id, name in enumerate(self.channel_names):
+            feat, m = channels[name]
+            x = self.projs[name](feat)                              # [*, n_c, D]
+            # Broadcast-add the per-type embedding to every node of this type.
+            x = x + self.type_embed.weight[type_id]                 # [*, n_c, D]
+            # Zero out masked rows so downstream layers can't leak garbage
+            # through the type-embedding addition.
+            x = torch.where(m.unsqueeze(-1), x, torch.zeros_like(x))
+            n_c = x.shape[-2]
+            slices.append((cursor, cursor + n_c))
+            cursor += n_c
+            node_list.append(x)
+            mask_list.append(m)
+        nodes = torch.cat(node_list, dim=-2)                        # [*, N, D]
+        mask = torch.cat(mask_list, dim=-1)                         # [*, N]
+        return nodes, mask, tuple(slices)
+
+
+class GraphAttnLayer(nn.Module):
+    """One pre-norm masked multi-head self-attention layer + FFN, with residuals.
+
+    A "GAT layer" over a fully-connected graph: every visible node attends to
+    every other visible node. Edges are implicit — silenced purely via
+    `key_padding_mask`. N is tiny (~a dozen nodes), so dense attention is
+    faster and far simpler than a sparse edge_index implementation.
+
+    Forward:
+        h  = LayerNorm(x)
+        h  = MHA(h, h, h, key_padding_mask)
+        x  = x + h
+        h  = LayerNorm(x)
+        x  = x + FFN(h)            FFN = Linear(D → ff_mult*D) → ReLU → Linear(→ D)
+    """
+
+    def __init__(self, node_dim: int, n_heads: int, ff_mult: int):
+        super().__init__()
+        self.ln_attn = nn.LayerNorm(node_dim)
+        self.attn = nn.MultiheadAttention(node_dim, n_heads, batch_first=True)
+        self.ln_ff = nn.LayerNorm(node_dim)
+        self.ff = nn.Sequential(
+            nn.Linear(node_dim, ff_mult * node_dim),
+            nn.ReLU(),
+            nn.Linear(ff_mult * node_dim, node_dim),
+        )
+
+    def forward(self, x: torch.Tensor, mha_key_padding_mask: torch.Tensor) -> torch.Tensor:
+        """
+        x : [B*, N, D]
+        mha_key_padding_mask : [B*, N]   MHA convention — True = IGNORE.
+            (Inversion from the codebase's True=visible happens at the call
+            site that constructs the mask; this layer receives the
+            MHA-convention mask directly so the rename is unambiguous.)
+        """
+        h = self.ln_attn(x)
+        h, _ = self.attn(h, h, h, key_padding_mask=mha_key_padding_mask,
+                         need_weights=False)
+        x = x + h
+        h = self.ln_ff(x)
+        x = x + self.ff(h)
+        return x
+
+
+def _masked_max_pool(x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    """Mask-aware global maxpool over the entity (second-to-last) axis.
+
+    x    : [*, n, D]
+    mask : [*, n]    True = visible
+    Returns [*, D]; rows whose mask is entirely False produce zeros (mirroring
+    FOFEBlock's all-masked guard — never emits -inf or NaN).
+    """
+    x_masked = x.masked_fill(~mask.unsqueeze(-1), float("-inf"))
+    out = x_masked.max(dim=-2).values
+    all_masked = ~mask.any(dim=-1, keepdim=True)
+    return out.masked_fill(all_masked, 0.0)
+
+
+def _build_mha_key_padding_mask(visible_mask: torch.Tensor) -> torch.Tensor:
+    """Translate the codebase's True=visible mask into MHA's True=ignore mask.
+
+    Also guards rows whose visible_mask is entirely False: MHA softmax over an
+    all-masked row would NaN. We force at least one key per row to be
+    "visible" to MHA — the readout (`_masked_max_pool`) keeps using the
+    original True=visible mask, so those rows still produce zero outputs and
+    no real information leaks from the synthetic unmask.
+    """
+    # Standard inversion.
+    kpm = ~visible_mask                                         # True = ignore
+    # All-masked guard: rows where every position is ignore would NaN softmax.
+    all_masked_rows = kpm.all(dim=-1, keepdim=True)             # [*, 1]
+    if all_masked_rows.any():
+        # Un-mask position 0 for those rows ONLY. The readout still sees the
+        # original visibility mask, so this synthetic node never enters the
+        # post-attention max.
+        unmask_first = torch.zeros_like(kpm)
+        unmask_first[..., 0] = True
+        kpm = torch.where(all_masked_rows.expand_as(kpm) & unmask_first,
+                          torch.zeros_like(kpm), kpm)
+    return kpm
+
+
+# ======================================================================
+# GAT-based actor (one per role)
+# ======================================================================
+
+class GATPolicyNet(nn.Module):
+    """GAT-based decentralized actor for one role.
+
+    Processes the SAME 4 observation channels as FOFEPolicyNet, but treats
+    each entity (self + each visible agent / target / radar) as a node in a
+    fully-connected graph. L layers of masked multi-head self-attention mix
+    information across nodes — and thus across channels — before the global
+    maxpool readout.
+
+    All agents of the same role share these weights (parameter sharing).
+
+    Diagnostic cache populated each forward (detached):
+        x_agents, x_targets, x_radars  — per-type masked-max readout of the
+        post-attention node states. Same keys as FOFEPolicyNet so the existing
+        FOFE KPI snapshot in trainer.py works unchanged as a fair cross-encoder
+        comparison.
+    """
+
+    # Type slot ordering — fixes the per-type slice layout. The same order
+    # is consumed by GraphObsEncoder.type_embed's index.
+    _CHANNEL_ORDER = ("self", "agents", "targets", "radars")
+
+    def __init__(self, gat_cfg: GATConfig, n_agents: int,
+                 act_dim: int, n_choices: int,
+                 d_self: int = 6, d_agents: int = 5,
+                 d_targets: int = 4, d_radars: int = 4):
+        super().__init__()
+        self.act_dim = act_dim
+        self.n_choices = n_choices
+        self.n_agents = n_agents
+
+        # ---- Per-channel input encoder + per-type embedding ----
+        self.encoder = GraphObsEncoder(
+            channel_dims={
+                "self":    d_self,
+                "agents":  d_agents,
+                "targets": d_targets,
+                "radars":  d_radars,
+            },
+            node_dim=gat_cfg.node_dim,
+        )
+
+        # ---- L stacked GAT layers ----
+        self.layers = nn.ModuleList([
+            GraphAttnLayer(gat_cfg.node_dim, gat_cfg.n_heads, gat_cfg.ff_mult)
+            for _ in range(gat_cfg.n_layers)
+        ])
+
+        # ---- Post-pool MLP ----
+        post_layers = []
+        cur = gat_cfg.node_dim
+        for dim in gat_cfg.post_pool_mlp_dims:
+            post_layers.extend([nn.Linear(cur, dim), nn.ReLU()])
+            cur = dim
+        self.post_pool_mlp = nn.Sequential(*post_layers)
+
+        # ---- Action head ----
+        self.action_head = nn.Linear(cur, act_dim * n_choices)
+
+        # Diagnostic cache (populated each forward, detached, zero cost when unused)
+        self._diag_cache: Dict[str, torch.Tensor] = {}
+
+    def forward(self, obs_self, agents_feat, agents_mask,
+                targets_feat, targets_mask, radars_feat, radars_mask):
+        """
+        Same signature as FOFEPolicyNet.forward.
+        All inputs: [B, n_role, ...].
+        Returns logits [B, n_role, act_dim, n_choices].
+        """
+        B, A = obs_self.shape[:2]
+        # Flatten B×A for shared-weight processing.
+        sf = obs_self.reshape(B * A, -1)                                    # [B*A, d_self]
+        af = agents_feat.reshape(B * A, *agents_feat.shape[2:])             # [B*A, n_a, d_a]
+        am = agents_mask.reshape(B * A, *agents_mask.shape[2:])             # [B*A, n_a]
+        tf = targets_feat.reshape(B * A, *targets_feat.shape[2:])
+        tm = targets_mask.reshape(B * A, *targets_mask.shape[2:])
+        rf = radars_feat.reshape(B * A, *radars_feat.shape[2:])
+        rm = radars_mask.reshape(B * A, *radars_mask.shape[2:])
+
+        # Self channel needs an entity axis (singleton) and an always-True mask
+        # so it can be packed into the node tensor like the other channels.
+        self_feat = sf.unsqueeze(-2)                                        # [B*A, 1, d_self]
+        self_mask = torch.ones(self_feat.shape[:-1],
+                               dtype=torch.bool, device=self_feat.device)   # [B*A, 1]
+
+        # ---- Encode + concat into a single node set ----
+        nodes, mask, slices = self.encoder({
+            "self":    (self_feat, self_mask),
+            "agents":  (af, am),
+            "targets": (tf, tm),
+            "radars":  (rf, rm),
+        })  # nodes [B*A, N, D], mask [B*A, N]  (True = visible)
+
+        # ---- GAT stack ----
+        # Build MHA-convention key_padding_mask once (True = ignore). Self
+        # node is always visible, so the all-masked guard is a no-op here,
+        # but it costs nothing and keeps the helper consistent with the critic.
+        kpm = _build_mha_key_padding_mask(mask)
+        for layer in self.layers:
+            nodes = layer(nodes, kpm)
+
+        # ---- Per-type readouts for diagnostics (detached, FOFE-compatible) ----
+        # Slice ordering matches _CHANNEL_ORDER == ("self","agents","targets","radars").
+        (s0, s1), (a0, a1), (t0, t1), (r0, r1) = slices
+        x_agents  = _masked_max_pool(nodes[..., a0:a1, :], mask[..., a0:a1])
+        x_targets = _masked_max_pool(nodes[..., t0:t1, :], mask[..., t0:t1])
+        x_radars  = _masked_max_pool(nodes[..., r0:r1, :], mask[..., r0:r1])
+        self._diag_cache = {
+            "x_agents": x_agents.detach(),
+            "x_targets": x_targets.detach(),
+            "x_radars": x_radars.detach(),
+        }
+
+        # ---- Global readout = masked maxpool over ALL nodes ----
+        pooled = _masked_max_pool(nodes, mask)                              # [B*A, D]
+
+        # ---- Post-pool MLP → action head ----
+        x = self.post_pool_mlp(pooled)
+        logits = self.action_head(x)
+        return logits.reshape(B, A, self.act_dim, self.n_choices)
+
+
+# ======================================================================
+# GAT-based critic (one per role)
+# ======================================================================
+
+class GATValueNet(nn.Module):
+    """GAT-based centralized critic for one role.
+
+    Same global state inputs as FOFEValueNet (agents/targets/radars as entity
+    sets plus a scalar time feature), but with cross-channel attention before
+    aggregation. No self node — the critic is fully observable. The scalar
+    time_feat is concatenated AFTER the masked maxpool and BEFORE the
+    post-pool MLP, mirroring how FOFEValueNet injects time.
+
+    Diagnostic cache uses the same x_agents/x_targets/x_radars keys as
+    FOFEValueNet so trainer.py's FOFE KPI snapshot keeps working.
+    """
+
+    # No self channel here — three node types only.
+    _CHANNEL_ORDER = ("agents", "targets", "radars")
+
+    def __init__(self, gat_cfg: GATConfig, n_role_agents: int,
+                 d_agents: int = 7, d_targets: int = 3, d_radars: int = 3):
+        super().__init__()
+        self.n_role_agents = n_role_agents
+
+        # ---- Per-channel input encoder + per-type embedding ----
+        self.encoder = GraphObsEncoder(
+            channel_dims={
+                "agents":  d_agents,
+                "targets": d_targets,
+                "radars":  d_radars,
+            },
+            node_dim=gat_cfg.critic_node_dim,
+        )
+
+        # ---- L stacked GAT layers ----
+        self.layers = nn.ModuleList([
+            GraphAttnLayer(gat_cfg.critic_node_dim,
+                           gat_cfg.critic_n_heads,
+                           gat_cfg.critic_ff_mult)
+            for _ in range(gat_cfg.critic_n_layers)
+        ])
+
+        # ---- Post-pool MLP: input = D + 1 (time concatenated post-pool) ----
+        post_layers = []
+        cur = gat_cfg.critic_node_dim + 1
+        for dim in gat_cfg.critic_post_pool_mlp_dims:
+            post_layers.extend([nn.Linear(cur, dim), nn.ReLU()])
+            cur = dim
+        self.post_pool_mlp = nn.Sequential(*post_layers)
+
+        # ---- Value head: one scalar per role (shared baseline) ----
+        self.value_head = nn.Linear(cur, 1)
+
+        # Diagnostic cache (populated each forward, detached, zero cost when unused)
+        self._diag_cache: Dict[str, torch.Tensor] = {}
+
+    def forward(self, agent_feat, agent_mask, target_feat, target_mask,
+                radar_feat, radar_mask, time_feat):
+        """
+        Same signature as FOFEValueNet.forward.
+        Entity inputs: [B, E, d]. Masks: [B, E] bool. time_feat: [B, 1].
+        Returns [B, 1, 1].
+        """
+        # ---- Encode + concat into a single node set ----
+        nodes, mask, slices = self.encoder({
+            "agents":  (agent_feat,  agent_mask),
+            "targets": (target_feat, target_mask),
+            "radars":  (radar_feat,  radar_mask),
+        })  # nodes [B, N, D], mask [B, N]  (True = visible)
+
+        # ---- GAT stack ----
+        # Inversion to MHA convention + all-masked guard. The critic has no
+        # always-on self node, so the guard is load-bearing here in edge
+        # cases (e.g. all entities of every type masked simultaneously).
+        kpm = _build_mha_key_padding_mask(mask)
+        for layer in self.layers:
+            nodes = layer(nodes, kpm)
+
+        # ---- Per-type readouts for diagnostics ----
+        (a0, a1), (t0, t1), (r0, r1) = slices
+        x_agents  = _masked_max_pool(nodes[..., a0:a1, :], mask[..., a0:a1])
+        x_targets = _masked_max_pool(nodes[..., t0:t1, :], mask[..., t0:t1])
+        x_radars  = _masked_max_pool(nodes[..., r0:r1, :], mask[..., r0:r1])
+        self._diag_cache = {
+            "x_agents": x_agents.detach(),
+            "x_targets": x_targets.detach(),
+            "x_radars": x_radars.detach(),
+        }
+
+        # ---- Global readout = masked maxpool over ALL nodes, then inject time ----
+        pooled = _masked_max_pool(nodes, mask)                              # [B, D]
+        x = torch.cat([pooled, time_feat], dim=-1)                          # [B, D+1]
+        x = self.post_pool_mlp(x)
+        return self.value_head(x).unsqueeze(-1)                             # [B, 1, 1]
+
+
+# ======================================================================
 # Legacy networks (unchanged, for use_fofe=False)
 # ======================================================================
 
@@ -634,9 +1033,31 @@ class CombinedCritic(nn.Module):
 # Factory helpers
 # ======================================================================
 
+def _resolve_encoder_type(encoder_type, fofe_cfg) -> str:
+    """Resolve the effective encoder type at factory call time.
+
+    Mirrors ExperimentConfig.finalize()'s precedence: explicit `encoder_type`
+    wins; otherwise derive from the legacy `FOFEConfig.use_fofe` flag.
+    Returns one of "flat", "fofe", "gat".
+    """
+    if encoder_type is not None:
+        if encoder_type not in ("flat", "fofe", "gat"):
+            raise ValueError(
+                f"encoder_type must be one of {{'flat','fofe','gat'}}, "
+                f"got {encoder_type!r}"
+            )
+        return encoder_type
+    return "fofe" if (fofe_cfg is not None and fofe_cfg.use_fofe) else "flat"
+
+
 def make_combined_policy(env: StrikeEA2DEnv, hidden=256, depth=3,
-                         fofe_cfg: FOFEConfig | None = None) -> CombinedPolicy:
-    use_fofe = fofe_cfg is not None and fofe_cfg.use_fofe
+                         fofe_cfg: FOFEConfig | None = None,
+                         gat_cfg: GATConfig | None = None,
+                         encoder_type: str | None = None) -> CombinedPolicy:
+    et = _resolve_encoder_type(encoder_type, fofe_cfg)
+    # CombinedPolicy's `use_fofe` flag actually means "use structured-obs
+    # path" — true for both fofe AND gat (they share the env's channels).
+    use_structured = et in ("fofe", "gat")
 
     d_self = int(getattr(env, "d_self", 6))
     # Per-channel actor feature dims (must match env._build_fofe_obs output).
@@ -645,7 +1066,9 @@ def make_combined_policy(env: StrikeEA2DEnv, hidden=256, depth=3,
     d_targets_actor = 4
     d_radars_actor  = 4 + int(getattr(env, "_radar_extra_dim", lambda: 0)())
 
-    if use_fofe:
+    if et == "fofe":
+        if fofe_cfg is None:
+            raise ValueError("encoder_type='fofe' requires fofe_cfg to be set")
         striker_net = FOFEPolicyNet(
             fofe_cfg, env.n_strikers, env.act_dim, env.n_choices,
             d_self=d_self,
@@ -660,7 +1083,24 @@ def make_combined_policy(env: StrikeEA2DEnv, hidden=256, depth=3,
             d_targets=d_targets_actor,
             d_radars=d_radars_actor,
         ).to(env.device)
-    else:
+    elif et == "gat":
+        if gat_cfg is None:
+            raise ValueError("encoder_type='gat' requires gat_cfg to be set")
+        striker_net = GATPolicyNet(
+            gat_cfg, env.n_strikers, env.act_dim, env.n_choices,
+            d_self=d_self,
+            d_agents=d_agents_actor,
+            d_targets=d_targets_actor,
+            d_radars=d_radars_actor,
+        ).to(env.device)
+        jammer_net = GATPolicyNet(
+            gat_cfg, env.n_jammers, env.act_dim, env.n_choices,
+            d_self=d_self,
+            d_agents=d_agents_actor,
+            d_targets=d_targets_actor,
+            d_radars=d_radars_actor,
+        ).to(env.device)
+    else:  # "flat"
         striker_net = RolePolicyNet(env.obs_dim, env.act_dim, env.n_choices, env.n_strikers, hidden, depth).to(env.device)
         jammer_net = RolePolicyNet(env.obs_dim, env.act_dim, env.n_choices, env.n_jammers, hidden, depth).to(env.device)
 
@@ -673,7 +1113,7 @@ def make_combined_policy(env: StrikeEA2DEnv, hidden=256, depth=3,
 
     return CombinedPolicy(
         striker_net, jammer_net, env.n_strikers, env.n_jammers,
-        use_fofe=use_fofe, obs_key=env._obs_key, action_key=env._action_key,
+        use_fofe=use_structured, obs_key=env._obs_key, action_key=env._action_key,
         n_motion_choices=n_motion,
         n_beam_choices=n_beam,
         beam_zero_idx=beam_zero,
@@ -681,10 +1121,13 @@ def make_combined_policy(env: StrikeEA2DEnv, hidden=256, depth=3,
 
 
 def make_combined_critic(env: StrikeEA2DEnv, hidden=256, depth=3,
-                         fofe_cfg: FOFEConfig | None = None) -> CombinedCritic:
-    use_fofe = fofe_cfg is not None and fofe_cfg.use_fofe
+                         fofe_cfg: FOFEConfig | None = None,
+                         gat_cfg: GATConfig | None = None,
+                         encoder_type: str | None = None) -> CombinedCritic:
+    et = _resolve_encoder_type(encoder_type, fofe_cfg)
+    use_structured = et in ("fofe", "gat")
 
-    if use_fofe:
+    if use_structured:
         # Critic entity dims match _build_fofe_critic_state output:
         #   agents: 7 (x,y,v,ψ,ω,role,alive) + _critic_agent_extra_dim()
         #           (HF env appends 2 cols: jammer_bearing/π, beam_rate/beam_dpsi_max)
@@ -693,13 +1136,22 @@ def make_combined_critic(env: StrikeEA2DEnv, hidden=256, depth=3,
         #            (HF env appends 2 cols: sin/cos of cone centre axis)
         d_agents_critic = 7 + int(getattr(env, "_critic_agent_extra_dim", lambda: 0)())
         d_radars_critic = 3 + int(getattr(env, "_critic_radar_extra_dim", lambda: 0)())
+
+    if et == "fofe":
+        if fofe_cfg is None:
+            raise ValueError("encoder_type='fofe' requires fofe_cfg to be set")
         striker_critic = FOFEValueNet(fofe_cfg, env.n_strikers, d_agents=d_agents_critic, d_targets=3, d_radars=d_radars_critic).to(env.device)
         jammer_critic = FOFEValueNet(fofe_cfg, env.n_jammers, d_agents=d_agents_critic, d_targets=3, d_radars=d_radars_critic).to(env.device)
-    else:
+    elif et == "gat":
+        if gat_cfg is None:
+            raise ValueError("encoder_type='gat' requires gat_cfg to be set")
+        striker_critic = GATValueNet(gat_cfg, env.n_strikers, d_agents=d_agents_critic, d_targets=3, d_radars=d_radars_critic).to(env.device)
+        jammer_critic = GATValueNet(gat_cfg, env.n_jammers, d_agents=d_agents_critic, d_targets=3, d_radars=d_radars_critic).to(env.device)
+    else:  # "flat"
         striker_critic = RoleValueNet(env.state_dim, env.n_strikers, hidden, depth).to(env.device)
         jammer_critic = RoleValueNet(env.state_dim, env.n_jammers, hidden, depth).to(env.device)
 
     return CombinedCritic(
         striker_critic, jammer_critic, env.n_strikers, env.n_jammers,
-        use_fofe=use_fofe,
+        use_fofe=use_structured,
     ).to(env.device)

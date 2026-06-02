@@ -2,11 +2,17 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Optional, Tuple
+from typing import Literal, Optional, Tuple
 
 import torch
 
 from .rewards import RewardConfig
+
+
+# Single source of truth for the observation encoder selector. Defined here so
+# it can be imported by config consumers (run scripts, trainer) without pulling
+# in models.py.
+EncoderType = Literal["flat", "fofe", "gat"]
 
 
 # ======================================================================
@@ -89,6 +95,124 @@ class FOFEConfig:
     critic_radars_see_dims:   Tuple[int, ...] = (96,)
     critic_fofe_mlp_dims:     Tuple[int, ...] = (128, 64)
     critic_fusion_mlp_dims:   Tuple[int, ...] = (256, 256) # reduced from 256
+
+
+# ======================================================================
+# GAT architecture configuration
+# ======================================================================
+
+@dataclass
+class GATConfig:
+    """Configuration for the Graph-Attention observation encoder.
+
+    The GAT consumes the same per-channel (feat, mask) tensors FOFE consumes,
+    but — unlike FOFE, which collapses each channel to one vector BEFORE the
+    channels ever interact — every entity (self, each agent, each target,
+    each radar) becomes a node in a single fully-connected graph. L layers of
+    masked multi-head self-attention let any node attend to any other before
+    aggregation, so inter-channel correlations (e.g. "this target sits behind
+    that radar") become structurally representable.
+
+    Pipeline for both actor and critic:
+
+        per-channel raw features
+          → per-channel Linear(d_c → D)           (one nn.Linear per channel)
+          → + learned per-type embedding[D]       (Self / Agent / Target / Radar)
+          → concat over the entity axis            → nodes [B*A, N, D]
+          → L × GraphAttnLayer (pre-norm + MHA + FFN, residual)
+          → masked global maxpool over nodes       → [B*A, D]
+          → (critic only) concat scalar time_feat after the pool
+          → post-pool MLP → action / value head
+
+    Dimension trace (node_dim=64, n_heads=4, n_layers=2, ff_mult=2):
+
+        Actor channels (4 types):
+            self    [B*A, 1, 6]   → Linear(6→64)  → [B*A, 1, 64]
+            agents  [B*A, n_a, 4] → Linear(4→64)  → [B*A, n_a, 64]
+            targets [B*A, n_t, 3] → Linear(3→64)  → [B*A, n_t, 64]
+            radars  [B*A, n_r, 3] → Linear(3→64)  → [B*A, n_r, 64]
+            + type_embed[0..3] broadcast over the entity axis
+            concat                                → [B*A, N, 64]   N = 1+n_a+n_t+n_r
+            GAT layer 1 (MHA d=64, h=4 → FFN 64→128→64)  → [B*A, N, 64]
+            GAT layer 2 (same)                                       → [B*A, N, 64]
+            Masked maxpool over N                                    → [B*A, 64]
+            Post-pool MLP (default = FOFE fusion_mlp_dims, (256,256))→ [B*A, 256]
+            Action head Linear(256, act_dim*n_choices)
+
+        Critic channels (3 types — no self node):
+            agents  [B, n_a, 7] → Linear(7→64) → [B, n_a, 64]
+            targets [B, n_t, 3] → Linear(3→64) → [B, n_t, 64]
+            radars  [B, n_r, 4] → Linear(4→64) → [B, n_r, 64]
+            + type_embed[0..2]; concat                → [B, N, 64]   N = n_a+n_t+n_r
+            L × GAT layers                            → [B, N, 64]
+            Masked maxpool over N                     → [B, 64]
+            concat time_feat                          → [B, 65]
+            Post-pool MLP (default critic_fusion_mlp_dims, (256,256)) → [B, 256]
+            Value head Linear(256, 1)
+
+    Parameters
+    ----------
+    node_dim : int
+        Common node embedding dim D. All per-channel input encoders project
+        to this dim so that the attention is well-defined. Must be divisible
+        by n_heads.
+
+    n_heads : int
+        Number of attention heads in each GraphAttnLayer. Must divide
+        node_dim.
+
+    n_layers : int
+        Number of stacked GraphAttnLayer blocks. Each layer is pre-norm MHA +
+        residual + pre-norm FFN + residual.
+
+    ff_mult : int
+        Feed-forward expansion inside each GraphAttnLayer; the FFN hidden dim
+        is ff_mult * node_dim.
+
+    post_pool_mlp_dims : tuple of int
+        Actor MLP between the global maxpool and the action head. Default
+        matches FOFEConfig.fusion_mlp_dims so the capacity downstream of the
+        encoder is identical to the FOFE path — making the A/B/C comparison
+        depend only on the encoder choice, not the head.
+
+    critic_node_dim, critic_n_heads, critic_n_layers, critic_ff_mult :
+        Same parameters but for the critic GAT. Default to the actor values;
+        override to give the critic asymmetric capacity (mirrors FOFEConfig's
+        actor/critic split).
+
+    critic_post_pool_mlp_dims : tuple of int
+        Critic MLP between the (masked maxpool, time_feat) concat and the
+        value head. Defaults to FOFEConfig.critic_fusion_mlp_dims.
+    """
+    # --- Actor GAT dims ---
+    node_dim:           int               = 64
+    n_heads:            int               = 4
+    n_layers:           int               = 2
+    ff_mult:            int               = 2
+    post_pool_mlp_dims: Tuple[int, ...]   = (256, 256)  # mirror FOFEConfig.fusion_mlp_dims
+
+    # --- Critic GAT dims (default = same as actor) ---
+    critic_node_dim:           int               = 64
+    critic_n_heads:            int               = 4
+    critic_n_layers:           int               = 2
+    critic_ff_mult:            int               = 2
+    critic_post_pool_mlp_dims: Tuple[int, ...]   = (256, 256)  # mirror FOFEConfig.critic_fusion_mlp_dims
+
+    def __post_init__(self):
+        if self.node_dim % self.n_heads != 0:
+            raise ValueError(
+                f"GATConfig: node_dim ({self.node_dim}) must be divisible by "
+                f"n_heads ({self.n_heads})"
+            )
+        if self.critic_node_dim % self.critic_n_heads != 0:
+            raise ValueError(
+                f"GATConfig: critic_node_dim ({self.critic_node_dim}) must be "
+                f"divisible by critic_n_heads ({self.critic_n_heads})"
+            )
+        if self.n_layers < 1 or self.critic_n_layers < 1:
+            raise ValueError("GATConfig: n_layers and critic_n_layers must be >= 1")
+        if self.ff_mult < 1 or self.critic_ff_mult < 1:
+            raise ValueError("GATConfig: ff_mult and critic_ff_mult must be >= 1")
 
 
 # ======================================================================
@@ -530,12 +654,38 @@ class ExperimentConfig:
     ppo: PPOConfig = field(default_factory=PPOConfig)
     net: NetworkConfig = field(default_factory=NetworkConfig)
     fofe: FOFEConfig = field(default_factory=FOFEConfig)
+    gat: GATConfig = field(default_factory=GATConfig)
     ext: EnvExtensionsConfig = field(default_factory=EnvExtensionsConfig)
+
+    # Observation-encoder selector — the ONE place to choose between the three
+    # encoder paths. `None` means "derive from the legacy FOFEConfig.use_fofe
+    # flag for backward compatibility" (True → "fofe", False → "flat"); set
+    # explicitly to override. Resolved into `self.encoder_type` (str) by
+    # finalize() and propagated everywhere downstream.
+    encoder_type: Optional[EncoderType] = None
 
     def finalize(self):
         if self.ppo.frames_per_batch is None:
             self.ppo.frames_per_batch = int(self.ppo.num_envs * self.env.max_steps)
-        # Propagate FOFE flag into EnvConfig so the env knows to emit FOFE obs
+
+        # ── Resolve encoder_type ──────────────────────────────────────────
+        # Precedence: explicit encoder_type wins; otherwise fall back to the
+        # legacy FOFEConfig.use_fofe boolean. After resolution, `fofe.use_fofe`
+        # is re-synced so that consumers which still read it (the env's
+        # structured-obs gate, trainer.py's structured-path branch) see True
+        # for BOTH "fofe" and "gat" — these two encoders share the same env
+        # observation channels.
+        if self.encoder_type is None:
+            self.encoder_type = "fofe" if self.fofe.use_fofe else "flat"
+        if self.encoder_type not in ("flat", "fofe", "gat"):
+            raise ValueError(
+                f"ExperimentConfig.encoder_type must be one of "
+                f"{{'flat','fofe','gat'}}, got {self.encoder_type!r}"
+            )
+        # Keep the legacy flag consistent with the resolved selector.
+        self.fofe.use_fofe = self.encoder_type in ("fofe", "gat")
+        # Propagate to the env so it emits structured per-channel obs for
+        # both fofe and gat (and flat-only obs otherwise).
         self.env._use_fofe = self.fofe.use_fofe
         return self
 
