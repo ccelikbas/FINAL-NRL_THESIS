@@ -533,6 +533,40 @@ def _masked_max_pool(x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     return out.masked_fill(all_masked, 0.0)
 
 
+# Maximum batch axis nn.MultiheadAttention can launch in a single CUDA kernel.
+# Several SDPA/MHA kernel implementations bin the leading batch dim into a
+# CUDA grid dimension whose hard limit is 65,535. Above that the kernel
+# launch fails with "invalid configuration argument". We chunk the GAT stack
+# over the leading batch axis to stay safely under it. 32,768 is well below
+# the limit AND large enough that chunk overhead is negligible — the inner
+# GAT N (~10 nodes) is tiny, so per-chunk work is bounded.
+_GAT_MAX_BATCH: int = 32_768
+
+
+def _run_gat_chunked(layers: nn.ModuleList,
+                     nodes: torch.Tensor,
+                     mha_kpm: torch.Tensor) -> torch.Tensor:
+    """Run the GAT layer stack with batch-axis chunking.
+
+    nodes   : [N_lead, N, D]
+    mha_kpm : [N_lead, N]      MHA convention (True = ignore)
+    """
+    n_lead = nodes.shape[0]
+    if n_lead <= _GAT_MAX_BATCH:
+        for layer in layers:
+            nodes = layer(nodes, mha_kpm)
+        return nodes
+    out_chunks = []
+    for start in range(0, n_lead, _GAT_MAX_BATCH):
+        end = start + _GAT_MAX_BATCH
+        x = nodes[start:end]
+        m = mha_kpm[start:end]
+        for layer in layers:
+            x = layer(x, m)
+        out_chunks.append(x)
+    return torch.cat(out_chunks, dim=0)
+
+
 def _build_mha_key_padding_mask(visible_mask: torch.Tensor) -> torch.Tensor:
     """Translate the codebase's True=visible mask into MHA's True=ignore mask.
 
@@ -667,9 +701,10 @@ class GATPolicyNet(nn.Module):
         # Build MHA-convention key_padding_mask once (True = ignore). Self
         # node is always visible, so the all-masked guard is a no-op here,
         # but it costs nothing and keeps the helper consistent with the critic.
+        # Chunked over N_lead to stay under CUDA grid dim limits when the
+        # critic is called on full rollouts (B × T can be ~150k).
         kpm = _build_mha_key_padding_mask(mask)
-        for layer in self.layers:
-            nodes = layer(nodes, kpm)
+        nodes = _run_gat_chunked(self.layers, nodes, kpm)
 
         # ---- Per-type readouts for diagnostics (detached, FOFE-compatible) ----
         # Slice ordering matches _CHANNEL_ORDER == ("self","agents","targets","radars").
@@ -787,9 +822,10 @@ class GATValueNet(nn.Module):
         # Inversion to MHA convention + all-masked guard. The critic has no
         # always-on self node, so the guard is load-bearing here in edge
         # cases (e.g. all entities of every type masked simultaneously).
+        # Chunked over N_lead to stay under CUDA grid dim limits when the
+        # critic is called on full rollouts (B × T can be ~150k).
         kpm = _build_mha_key_padding_mask(mask)
-        for layer in self.layers:
-            nodes = layer(nodes, kpm)
+        nodes = _run_gat_chunked(self.layers, nodes, kpm)
 
         # ---- Per-type readouts for diagnostics ----
         (a0, a1), (t0, t1), (r0, r1) = slices
