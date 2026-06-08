@@ -179,12 +179,12 @@ class RewardConfig:
     #
     # Per-pair reward as a function of the smallest angle Δ ∈ [0, π] between
     # the two jammers' beam directions (jammer_pointing = heading + bearing):
-    #     r_pair(Δ) = R_min + (−R_min / main_lobe_rad) · Δ
+    #     r_pair(Δ) = min(R_min, (R_min / main_lobe_rad) · Δ)
     # where main_lobe_rad = radians(HFRadarConfig.jammer_main_lobe_deg).
     # Properties:
-    #   Δ = 0                   → r = R_min                  (beams co-aligned, penalty)
-    #   Δ = main_lobe_rad       → r = 0                       (beams just stop overlapping)
-    #   Δ = π                   → r = R_min · (1 − π/main_lobe_rad)  (continues linearly)
+    #   Δ = 0                   → r = 0       (beams co-aligned, redundant → no reward)
+    #   Δ = main_lobe_rad       → r = R_min   (beams just stop overlapping → full reward)
+    #   Δ > main_lobe_rad       → r = R_min   (clamped; no extra pay for pointing apart)
     # Aggregation: each jammer receives the SUM of r_pair over all coalition
     # partners (symmetric, so both jammers in a pair receive the same term).
     # Dead jammers receive 0 and do not form coalitions.

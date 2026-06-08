@@ -1281,9 +1281,11 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
                 # Smallest signed angle between every jammer pair, then |·| ∈ [0, π].
                 delta = beam_world[:, :, None] - beam_world[:, None, :]             # [B, J, J]
                 delta = torch.atan2(torch.sin(delta), torch.cos(delta)).abs()
-                # Linear shaping: r = R_min + slope · |Δ|, slope = −R_min / main_lobe_rad.
-                slope = -coalition_R_min / main_lobe_rad
-                r_pair = coalition_R_min + slope * delta                            # [B, J, J]
+                # Linear shaping: r = slope · |Δ|, capped at R_min. 0 when beams are
+                # aligned (|Δ|=0), rising to R_min once separated by one main-lobe
+                # width and plateauing thereafter — rewards angular diversity.
+                slope = coalition_R_min / main_lobe_rad
+                r_pair = (slope * delta).clamp(max=coalition_R_min)                 # [B, J, J]
                 # Coalition + alive + non-self mask.
                 jammer_alive_c = self.agent_alive[:, ns:]                           # [B, J]
                 eye_jj_c = torch.eye(nj, dtype=torch.bool, device=self.device).unsqueeze(0)
