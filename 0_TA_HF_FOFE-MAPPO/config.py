@@ -142,11 +142,11 @@ class DomainRandomization:
 @dataclass
 class EnvConfig:
     # Team composition
-    n_strikers: int = 2
+    n_strikers: int = 1
     n_jammers: int = 2
-    n_known_targets: int = 2
+    n_known_targets: int = 3
     n_unknown_targets: int = 0
-    n_known_radars: int = 2
+    n_known_radars: int = 6
     n_unknown_radars: int = 0
     n_targets: int = 0
     n_radars: int = 0
@@ -173,11 +173,16 @@ class EnvConfig:
     #         form a defensive line between agents and targets.
     # The radar layout pool is still pre-generated at env init for both
     # scenarios; only the sampling bounds + min-sep differ.
-    scenario: str = "S1"
+    scenario: str = "S2"
     # Minimum pairwise radar separation when scenario == "S2". S2's radar
     # band is much thinner than S1's, so the default is lower to keep
     # rejection sampling tractable.
     s2_radar_min_sep: float = 0.2
+    # Minimum pairwise target separation when scenario == "S2". S2 targets are
+    # drawn uniformly in the top band; this enforces a floor on how close any
+    # two targets may spawn (rejection-sampled per env, see
+    # _spawn_targets_uniform_box). 0 disables the constraint.
+    s2_target_min_sep: float = 0.2
 
     # Kinematics
     v_max: float = 0.02
@@ -202,7 +207,7 @@ class EnvConfig:
 
     # Threats
     radar_range: float = 0.20
-    radar_kill_probability: float = 0.1
+    radar_kill_probability: float = 0.01
 
     # Rewards
     border_thresh: float = 0.05
@@ -229,6 +234,7 @@ class EnvConfig:
         self.n_unknown_radars = int(self.n_unknown_radars)
         self.radar_min_sep = float(self.radar_min_sep)
         self.s2_radar_min_sep = float(self.s2_radar_min_sep)
+        self.s2_target_min_sep = float(self.s2_target_min_sep)
         self.scenario = str(self.scenario).upper()
 
         if self.n_known_targets < 0 or self.n_unknown_targets < 0:
@@ -239,6 +245,8 @@ class EnvConfig:
             raise ValueError("radar_min_sep must be >= 0")
         if self.s2_radar_min_sep < 0:
             raise ValueError("s2_radar_min_sep must be >= 0")
+        if self.s2_target_min_sep < 0:
+            raise ValueError("s2_target_min_sep must be >= 0")
         if self.scenario not in ("S1", "S2"):
             raise ValueError(f"scenario must be 'S1' or 'S2', got {self.scenario!r}")
 
@@ -260,11 +268,11 @@ class EnvConfig:
 @dataclass
 class PPOConfig:
     """Shared PPO hyperparameters for both striker and jammer MAPPO."""
-    num_envs: int = 1048  #1048 (local) or 2048 (remote)
+    num_envs: int = 2048  #1048 (local) or 2048 (remote)
     n_iters: int = 100
     frames_per_batch: Optional[int] = None
     num_epochs: int = 6
-    minibatch_size: int = 8192  #8192 (local) or 16384 (remote)
+    minibatch_size: int = 16384  #8192 (local) or 16384 (remote)
 
     gamma: float = 0.99
     lmbda: float = 0.95

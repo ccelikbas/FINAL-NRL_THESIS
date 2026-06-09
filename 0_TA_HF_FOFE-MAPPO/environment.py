@@ -86,6 +86,7 @@ class StrikeEA2DEnv(EnvBase):
         # --- scenario selection ---
         scenario: str = "S1",
         s2_radar_min_sep: float = 0.2,
+        s2_target_min_sep: float = 0.2,
         # --- FOFE mode ---
         use_fofe: bool = False,
         # --- per-environment domain randomization (None = disabled) ---
@@ -185,10 +186,13 @@ class StrikeEA2DEnv(EnvBase):
         self.n_env_layouts = n_env_layouts
         self.radar_min_sep = float(radar_min_sep)
         self.s2_radar_min_sep = float(s2_radar_min_sep)
+        self.s2_target_min_sep = float(s2_target_min_sep)
         if self.radar_min_sep < 0.0:
             raise ValueError("radar_min_sep must be >= 0")
         if self.s2_radar_min_sep < 0.0:
             raise ValueError("s2_radar_min_sep must be >= 0")
+        if self.s2_target_min_sep < 0.0:
+            raise ValueError("s2_target_min_sep must be >= 0")
 
         # Scenario selection (see EnvConfig docstring):
         #   "S1" = protected targets — radars in top band, targets clustered
@@ -211,7 +215,7 @@ class StrikeEA2DEnv(EnvBase):
             self._radar_box = (0.1, 0.9, 0.4, 0.9)
             self._radar_min_sep_active = self.s2_radar_min_sep
         # S2 target box (unused when scenario == "S1").
-        self._s2_target_box = (0.1, 0.9, 0.7, 0.9)
+        self._s2_target_box = (0.1, 0.9, 0.6, 0.9)
         # S2 per-radar boxes: pin radars 0 and 1 to the left/right map edges
         # so they form bookends to the defensive line — preventing the agents
         # from going around the borders. Remaining radars fill the wider band.
@@ -732,20 +736,55 @@ class StrikeEA2DEnv(EnvBase):
         B: int,
         T: int,
         box: Tuple[float, float, float, float],
+        min_sep: Optional[float] = None,
+        max_tries: int = 100,
     ) -> torch.Tensor:
         """S2 target sampler: uniform random positions inside an axis-aligned box.
 
-        Fully vectorised — one batched torch.rand call, no Python loops, no
-        rejection sampling. Targets are independent of radar positions and of
-        each other (overlap permitted).
+        Targets are independent of radar positions. When ``min_sep > 0`` a
+        minimum pairwise separation between targets is enforced via batched
+        rejection sampling: only the environments whose closest target pair is
+        below ``min_sep`` are redrawn, up to ``max_tries`` rounds. If a few
+        environments still violate the constraint after the retry budget is
+        exhausted (e.g. the box is too small to fit ``T`` targets at
+        ``min_sep``), the last draw is accepted rather than crashing.
+
+        ``min_sep=None`` reads ``self.s2_target_min_sep``; pass ``0.0`` to skip
+        the constraint and recover the original single-shot vectorised draw.
         """
         if T == 0:
             return torch.zeros(B, 0, 2, device=self.device)
         x_lo, x_hi, y_lo, y_hi = box
-        u = torch.rand(B, T, 2, device=self.device)
         scale = torch.tensor([x_hi - x_lo, y_hi - y_lo], device=self.device)
         offset = torch.tensor([x_lo, y_lo], device=self.device)
-        return (u * scale + offset).clamp(self.low, self.high)
+
+        def _draw(n: int) -> torch.Tensor:
+            u = torch.rand(n, T, 2, device=self.device)
+            return (u * scale + offset).clamp(self.low, self.high)
+
+        pos = _draw(B)
+
+        if min_sep is None:
+            min_sep = self.s2_target_min_sep
+        # No constraint possible / requested: keep the cheap single-shot draw.
+        if min_sep <= 0.0 or T < 2:
+            return pos
+
+        def _violates(p: torch.Tensor) -> torch.Tensor:
+            # p: [n, T, 2] -> [n] bool, True where any pair is closer than min_sep.
+            d = torch.cdist(p, p)                                  # [n, T, T]
+            eye = torch.eye(T, dtype=torch.bool, device=self.device)
+            d = d.masked_fill(eye, float("inf"))                   # ignore self-distance
+            return d.amin(dim=(-2, -1)) < min_sep
+
+        bad = _violates(pos)
+        tries = 0
+        while bool(bad.any()) and tries < max_tries:
+            idx = bad.nonzero(as_tuple=True)[0]
+            pos[idx] = _draw(idx.numel())
+            bad = _violates(pos)
+            tries += 1
+        return pos
 
     # ------------------------------------------------------------------
     # Specs

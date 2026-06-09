@@ -62,6 +62,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="S1=protected targets (radars guard targets); S2=defensive line (radars between agents and targets)",
     )
     p.add_argument("--s2_radar_min_sep", type=float, default=env_defaults.s2_radar_min_sep)
+    p.add_argument("--s2_target_min_sep", type=float, default=env_defaults.s2_target_min_sep)
     # PPO
     p.add_argument("--num_envs", type=int, default=ppo_defaults.num_envs)
     p.add_argument("--max_steps", type=int, default=env_defaults.max_steps)
@@ -130,6 +131,7 @@ def main() -> None:
         radar_min_sep=args.radar_min_sep,
         scenario=args.scenario,
         s2_radar_min_sep=args.s2_radar_min_sep,
+        s2_target_min_sep=args.s2_target_min_sep,
         max_steps=args.max_steps,
         reward_config=reward_cfg,
     )

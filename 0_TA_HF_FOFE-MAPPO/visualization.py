@@ -413,6 +413,7 @@ class TestRunner:
             radar_min_sep=getattr(env_cfg, 'radar_min_sep', 0.5),
             scenario=getattr(env_cfg, 'scenario', 'S1'),
             s2_radar_min_sep=getattr(env_cfg, 's2_radar_min_sep', 0.2),
+            s2_target_min_sep=getattr(env_cfg, 's2_target_min_sep', 0.2),
             use_fofe=getattr(env_cfg, 'use_fofe', False),
         )
 
