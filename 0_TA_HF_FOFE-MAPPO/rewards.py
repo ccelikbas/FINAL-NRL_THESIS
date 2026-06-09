@@ -138,8 +138,8 @@ class RewardConfig:
     # Defaults are 0.0 so existing training runs are unaffected unless these
     # weights are explicitly set. Suggested starting magnitudes when enabling:
     # exposed=-0.05, protected=-0.005, outside=0.001.
-    hf_margin_exposed_penalty:   float = -0.01
-    hf_margin_protected_penalty: float = -0.005
+    hf_margin_exposed_penalty:   float = -0.005
+    hf_margin_protected_penalty: float = -0.001
     hf_margin_outside_bonus:     float = 0
 
     # ─── JAMMER ACTIVE-JAMMING BONUS  (deactivated by default) ───────────────
@@ -169,28 +169,36 @@ class RewardConfig:
     jammer_beam_alignment_scale: float = 0.010 # deze kleiner maken xxx
 
     # ─── JAMMER COALITION COVERAGE  (HF directional-jammer model only) ───────
-    # Encourages pairs of nearby jammers to point their beams in different
-    # directions, maximising joint angular coverage.
+    # Penalises pairs of nearby jammers whose beams overlap too much, so the
+    # coalition is pushed toward spatial diversity (joint angular coverage).
+    # A small overlap is tolerated (jamming is not perfectly additive, so a
+    # little beam overlap is acceptable / even beneficial at the seams).
     #
     # Coalition: any pair of *alive* jammers whose Euclidean distance is
     # ≤ jammer_coalition_d_max are considered to be in the same coalition.
     # Uses the cached pairwise agent-distance tensor (_c_dist_aa), so the
     # coalition test is essentially free.
     #
-    # Per-pair reward as a function of the smallest angle Δ ∈ [0, π] between
-    # the two jammers' beam directions (jammer_pointing = heading + bearing):
-    #     r_pair(Δ) = min(R_min, (R_min / main_lobe_rad) · Δ)
-    # where main_lobe_rad = radians(HFRadarConfig.jammer_main_lobe_deg).
+    # Geometry: each beam has half-width main_lobe_rad/2, so two beams stop
+    # overlapping once their separation Δ ∈ [0, π] reaches main_lobe_rad.
+    # The overlap angle is therefore (main_lobe_rad − Δ). A margin of
+    # jammer_coalition_overlap_margin_deg of overlap is tolerated for free;
+    # excess overlap below the onset Δ_on = main_lobe_rad − margin is penalised.
+    #
+    # Per-pair shaping (penalty-only, symmetric to R_min):
+    #     r_pair(Δ) = −R_min · clamp((Δ_on − Δ) / Δ_on, 0, 1)
     # Properties:
-    #   Δ = 0                   → r = 0       (beams co-aligned, redundant → no reward)
-    #   Δ = main_lobe_rad       → r = R_min   (beams just stop overlapping → full reward)
-    #   Δ > main_lobe_rad       → r = R_min   (clamped; no extra pay for pointing apart)
+    #   Δ ≥ Δ_on  (overlap ≤ margin) → r = 0       (tolerated, no penalty)
+    #   Δ < Δ_on                     → r < 0       (excess-overlap penalty)
+    #   Δ = 0     (fully co-aligned) → r = −R_min  (max penalty)
     # Aggregation: each jammer receives the SUM of r_pair over all coalition
     # partners (symmetric, so both jammers in a pair receive the same term).
     # Dead jammers receive 0 and do not form coalitions.
-    # Set jammer_coalition_R_min = 0.0 to disable.
-    jammer_coalition_d_max: float = 0.2
-    jammer_coalition_R_min: float = 0.01
+    # Set jammer_coalition_R_min = 0.0 to disable. Setting the margin ≥ the
+    # full main lobe also disables the penalty (Δ_on ≤ 0 → no penalty region).
+    jammer_coalition_d_max: float = 0
+    jammer_coalition_R_min: float = 0
+    jammer_coalition_overlap_margin_deg: float = 0
 
     # ─── FORMATION COHESION  (striker ↔ jammer cross-role proximity) ──────────
     # Each striker/jammer receives a distance penalty for being far from the

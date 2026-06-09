@@ -1263,15 +1263,21 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
             separation_pen_full[:, ns:] += jammer_sep
 
         # 11b. Jammer coalition coverage (HF directional model only)
-        # Reward pairs of nearby jammers for pointing their beams in
-        # different directions. Linear in |Δbeam|: R_min at 0°, 0 at
-        # jammer_main_lobe_deg, continues with the same slope to 180°.
+        # Penalise pairs of nearby jammers whose beams overlap too much,
+        # pushing the coalition toward angular diversity. A small overlap
+        # (jammer_coalition_overlap_margin_deg) is tolerated for free; below
+        # the onset Δ_on = main_lobe_rad − margin the penalty ramps linearly
+        # from 0 down to −R_min at full alignment (Δ=0).
         coalition_full = torch.zeros(B, A, device=self.device)
         coalition_R_min = float(getattr(rp, "jammer_coalition_R_min", 0.0))
         if nj > 1 and coalition_R_min != 0.0:
             coalition_d_max = float(getattr(rp, "jammer_coalition_d_max", 0.0))
             main_lobe_rad = 2.0 * float(self._jammer_main_lobe_half)
-            if coalition_d_max > 0.0 and main_lobe_rad > 0.0:
+            overlap_margin_rad = radians(
+                float(getattr(rp, "jammer_coalition_overlap_margin_deg", 0.0))
+            )
+            onset = main_lobe_rad - overlap_margin_rad   # Δ below which overlap is penalised
+            if coalition_d_max > 0.0 and onset > 0.0:
                 # Pairwise jammer distances (reuse cached agent-agent dist).
                 d_jj = self._c_dist_aa[:, ns:, ns:]                                 # [B, J, J]
                 # Absolute beam direction in world frame.
@@ -1281,11 +1287,10 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
                 # Smallest signed angle between every jammer pair, then |·| ∈ [0, π].
                 delta = beam_world[:, :, None] - beam_world[:, None, :]             # [B, J, J]
                 delta = torch.atan2(torch.sin(delta), torch.cos(delta)).abs()
-                # Linear shaping: r = slope · |Δ|, capped at R_min. 0 when beams are
-                # aligned (|Δ|=0), rising to R_min once separated by one main-lobe
-                # width and plateauing thereafter — rewards angular diversity.
-                slope = coalition_R_min / main_lobe_rad
-                r_pair = (slope * delta).clamp(max=coalition_R_min)                 # [B, J, J]
+                # Penalty-only shaping: 0 when Δ ≥ Δ_on (overlap within margin),
+                # ramping to −R_min at Δ=0 (fully co-aligned beams).
+                excess = (onset - delta).clamp(min=0.0)                             # [B, J, J]
+                r_pair = -coalition_R_min * (excess / onset)                        # [B, J, J]
                 # Coalition + alive + non-self mask.
                 jammer_alive_c = self.agent_alive[:, ns:]                           # [B, J]
                 eye_jj_c = torch.eye(nj, dtype=torch.bool, device=self.device).unsqueeze(0)
