@@ -214,6 +214,17 @@ class RewardConfig:
     jammer_formation_scale:     float = 0.05   # prev: 0.1 # reward to each jammer for being near a striker
     jammer_formation_ref_dist:  float = 0.5    # distance (map units) beyond which reward = 0
 
+    # Per-striker jammer capacity for the jammer formation reward.
+    # A jammer only earns proximity reward from a striker if it is among that
+    # striker's K nearest *alive* jammers. Redundant jammers fall through to the
+    # nearest striker that still has capacity; jammers beyond total capacity
+    # (nj > K * ns) earn 0 formation reward. This discourages more than K
+    # jammers escorting the same striker and pushes the coalition to spread
+    # across strikers. Set <= 0 to disable the cap (every jammer is pulled to
+    # its nearest striker — the legacy behaviour, equivalent to K >= nj).
+    # Only affects the jammer side; striker_formation is unchanged.
+    jammer_formation_k:         int   = 2
+
     # ─── OPTIONAL PAPER-STYLE MISSION REWARD ────────────────────────────────
     # R_mission = -Reward_fn(n_targets_alive, n_targets_initial)
     #             +Reward_fn(n_agents_alive, n_agents_initial)

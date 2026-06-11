@@ -1501,13 +1501,42 @@ class StrikeEA2DEnv(EnvBase):
             # --- Jammer formation: distance penalty toward nearest live striker ---
             #     Flipped: 0 at d=0, −scale at d ≥ ref_dist.
             if float(rp.jammer_formation_scale) > 0:
-                # Transpose to [B, nj, ns] then mask dead strikers
-                d_js   = d_sj.transpose(1, 2)                                          # [B, nj, ns]
-                dead_s = ~self.agent_alive[:, :ns].unsqueeze(1).expand(B, nj, ns)      # [B, nj, ns]
-                d_near_s = d_js.masked_fill(dead_s, float('inf')).min(dim=-1).values   # [B, nj]
+                # Per-striker jammer capacity (K): a jammer earns formation
+                # reward only from a striker for which it is among the K nearest
+                # *alive* jammers. Redundant jammers fall through to the nearest
+                # striker that still has capacity; jammers beyond total capacity
+                # (nj > K*ns) get 0. K = rp.jammer_formation_k (<=0 → unlimited).
+                d_js    = d_sj.transpose(1, 2)                                         # [B, nj, ns]
+                alive_j = alive[:, ns:]                                                # [B, nj]
+                alive_s = alive[:, :ns]                                                # [B, ns]
+
+                # Capacity-ranking distances: dead jammers / dead strikers are
+                # pushed to +inf so they never occupy a capacity slot.
+                d_cap = d_js.masked_fill(~alive_j.unsqueeze(-1), float('inf'))
+                d_cap = d_cap.masked_fill(~alive_s.unsqueeze(1), float('inf'))
+
+                k_cfg = int(getattr(rp, "jammer_formation_k", 0))
+                k_eff = nj if k_cfg <= 0 else min(k_cfg, nj)
+
+                # Top-K nearest jammers per striker (along the jammer axis).
+                topk_idx = torch.topk(d_cap, k_eff, dim=1, largest=False).indices     # [B, k_eff, ns]
+                eligible = torch.zeros_like(d_cap, dtype=torch.bool)                  # [B, nj, ns]
+                eligible.scatter_(1, topk_idx, True)
+                # Drop slots only filled because < K finite candidates existed
+                # (inf entries are dead-jammer / dead-striker padding).
+                eligible &= torch.isfinite(d_cap)
+
+                # Each jammer uses the nearest striker for which it is eligible;
+                # no eligible striker (overflow) → +inf → zeroed below.
+                d_eff   = d_js.masked_fill(~eligible, float('inf')).min(dim=-1).values # [B, nj]
+                has_cap = torch.isfinite(d_eff)
+
                 jammer_form = float(rp.jammer_formation_scale) * (
-                    (1.0 - d_near_s / float(rp.jammer_formation_ref_dist)).clamp(min=0.0) - 1.0
-                ) * alive[:, ns:].float()
+                    (1.0 - d_eff / float(rp.jammer_formation_ref_dist)).clamp(min=0.0) - 1.0
+                )
+                jammer_form = torch.where(
+                    has_cap & alive_j, jammer_form, torch.zeros_like(jammer_form)
+                )
                 reward[:, ns:]        += jammer_form
                 formation_full[:, ns:] = jammer_form
 
