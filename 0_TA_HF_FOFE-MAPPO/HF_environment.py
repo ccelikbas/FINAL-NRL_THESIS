@@ -1174,70 +1174,12 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
                 formation_full[:, :ns] = striker_form
 
             if float(rp.jammer_formation_scale) > 0:
-                # Jammers get a small *shaping* pull toward a striker (soft
-                # guidance, NOT a hard constraint — global-objective rewards can
-                # and should override it). Per-striker capacity K only caps how
-                # many jammers are pulled to the SAME striker: each jammer is
-                # matched to one striker (capacity K) by a greedy nearest-pair
-                # assignment, so the (K+1)-th jammer near an already-covered
-                # striker is redirected toward another striker that still has
-                # room — its gradient then points at that other striker.
-                #
-                # Greedy capacitated assignment (one jammer <-> one striker):
-                #   repeatedly take the globally nearest (jammer, striker) pair
-                #   among unassigned jammers and not-yet-full strikers; once a
-                #   striker holds K jammers it drops out, forcing the remainder
-                #   elsewhere. Genuine overflow (nj > K*ns) falls back to the
-                #   nearest alive striker so jammers escort rather than idle.
-                # K = rp.jammer_formation_k (<=0 -> unlimited == legacy nearest).
-                d_js    = d_sj.transpose(1, 2)                                        # [B, nj, ns]
-                alive_j = alive[:, ns:]                                               # [B, nj]
-                alive_s = alive[:, :ns]                                               # [B, ns]
-
-                # Assignment distances: dead jammers / dead strikers -> +inf.
-                d_work = d_js.masked_fill(~alive_j.unsqueeze(-1), float('inf'))
-                d_work = d_work.masked_fill(~alive_s.unsqueeze(1), float('inf'))
-                # Nearest alive striker per jammer (legacy pull + overflow fallback).
-                d_near_all = d_work.min(dim=-1).values                               # [B, nj]
-
-                k_cfg = int(getattr(rp, "jammer_formation_k", 0))
-                if k_cfg <= 0:
-                    # Unlimited capacity -> every jammer pulled to nearest striker.
-                    d_eff = d_near_all
-                else:
-                    k_eff = min(k_cfg, nj)
-                    cap = torch.where(
-                        alive_s,
-                        torch.full_like(alive_s, k_eff, dtype=torch.long),
-                        torch.zeros_like(alive_s, dtype=torch.long),
-                    )                                                                # [B, ns]
-                    assigned = torch.full((B, nj), -1, dtype=torch.long, device=self.device)
-                    done = (~alive_j).clone()         # dead jammers need no slot
-                    b_idx = torch.arange(B, device=self.device)
-                    # nj greedy steps: each assigns (at most) one jammer per env.
-                    for _ in range(nj):
-                        avail = (~done).unsqueeze(-1) & (cap > 0).unsqueeze(1)        # [B, nj, ns]
-                        dm = torch.where(avail, d_work, torch.full_like(d_work, float('inf')))
-                        minval, idx = dm.view(B, nj * ns).min(dim=1)                  # [B]
-                        has = torch.isfinite(minval)     # env still has an assignable pair
-                        j_sel = idx // ns
-                        s_sel = idx % ns
-                        # Apply only where a finite pair was found (guarded by `has`).
-                        assigned[b_idx, j_sel] = torch.where(has, s_sel, assigned[b_idx, j_sel])
-                        done[b_idx, j_sel]     = done[b_idx, j_sel] | has
-                        cap[b_idx, s_sel]      = cap[b_idx, s_sel] - has.long()
-                    # Assigned-striker distance; unassigned (overflow) -> nearest.
-                    has_assign = assigned >= 0
-                    d_assigned = d_js.gather(-1, assigned.clamp(min=0).unsqueeze(-1)).squeeze(-1)
-                    d_eff = torch.where(has_assign, d_assigned, d_near_all)           # [B, nj]
-
-                has_striker = torch.isfinite(d_eff)   # false only if no alive striker
+                d_js = d_sj.transpose(1, 2)
+                dead_s = ~self.agent_alive[:, :ns].unsqueeze(1).expand(B, nj, ns)
+                d_near_s = d_js.masked_fill(dead_s, float('inf')).min(dim=-1).values
                 jammer_form = float(rp.jammer_formation_scale) * (
-                    (1.0 - d_eff / float(rp.jammer_formation_ref_dist)).clamp(min=0.0) - 1.0
-                )
-                jammer_form = torch.where(
-                    has_striker & alive_j, jammer_form, torch.zeros_like(jammer_form)
-                )
+                    (1.0 - d_near_s / float(rp.jammer_formation_ref_dist)).clamp(min=0.0) - 1.0
+                ) * alive[:, ns:].float()
                 reward[:, ns:] += jammer_form
                 formation_full[:, ns:] = jammer_form
 
