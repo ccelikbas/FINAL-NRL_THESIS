@@ -215,13 +215,16 @@ class RewardConfig:
     jammer_formation_ref_dist:  float = 0.5    # distance (map units) beyond which reward = 0
 
     # Per-striker jammer capacity for the jammer formation reward.
-    # A jammer only earns proximity reward from a striker if it is among that
-    # striker's K nearest *alive* jammers. Redundant jammers fall through to the
-    # nearest striker that still has capacity; jammers beyond total capacity
-    # (nj > K * ns) earn 0 formation reward. This discourages more than K
-    # jammers escorting the same striker and pushes the coalition to spread
-    # across strikers. Set <= 0 to disable the cap (every jammer is pulled to
-    # its nearest striker — the legacy behaviour, equivalent to K >= nj).
+    # A jammer is assigned to (and pulled toward) the nearest striker for which
+    # it is among that striker's K nearest *alive* jammers. Redundant jammers
+    # are therefore redirected to an under-capacity striker, which spreads the
+    # coalition across strikers instead of piling onto one. The formation term
+    # is penalty-only (0 at d=0, -scale at d>=ref), so every alive jammer is
+    # ALWAYS given a distance pull toward some striker — there is no free 0 that
+    # would make idling/overflow optimal. Genuine overflow (nj > K*ns, no
+    # striker has spare capacity) falls back to the nearest alive striker so the
+    # jammer escorts the group rather than going idle.
+    # Set <= 0 to disable the cap (legacy behaviour, equivalent to K >= nj).
     # Only affects the jammer side; striker_formation is unchanged.
     jammer_formation_k:         int   = 2
 

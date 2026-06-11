@@ -268,11 +268,11 @@ class EnvConfig:
 @dataclass
 class PPOConfig:
     """Shared PPO hyperparameters for both striker and jammer MAPPO."""
-    num_envs: int = 2048  #1048 (local) or 2048 (remote)
-    n_iters: int = 100
+    num_envs: int = 1048  #1048 (local) or 2048 (remote)
+    n_iters: int = 1
     frames_per_batch: Optional[int] = None
     num_epochs: int = 6
-    minibatch_size: int = 16384  #8192 (local) or 16384 (remote)
+    minibatch_size: int = 8192  #8192 (local) or 16384 (remote)
 
     gamma: float = 0.99
     lmbda: float = 0.95
@@ -363,7 +363,7 @@ class HFRadarConfig:
         or by setting target_unconstrained_range_world directly.
     """
     # Radar SNR parameters
-    radar_tx_power: float = 1e6                 # P_t [W]
+    radar_tx_power: float = 2e6                 # P_t [W]
     radar_tx_gain: float = 38.0                 # G_t [dB]
     radar_rx_gain: Optional[float] = None       # G_r [dB], defaults to G_t
     wavelength: float = 0.03                    # lambda [m]

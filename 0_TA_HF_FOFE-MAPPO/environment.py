@@ -1501,11 +1501,17 @@ class StrikeEA2DEnv(EnvBase):
             # --- Jammer formation: distance penalty toward nearest live striker ---
             #     Flipped: 0 at d=0, −scale at d ≥ ref_dist.
             if float(rp.jammer_formation_scale) > 0:
-                # Per-striker jammer capacity (K): a jammer earns formation
-                # reward only from a striker for which it is among the K nearest
-                # *alive* jammers. Redundant jammers fall through to the nearest
-                # striker that still has capacity; jammers beyond total capacity
-                # (nj > K*ns) get 0. K = rp.jammer_formation_k (<=0 → unlimited).
+                # Per-striker jammer capacity (K): a jammer is *assigned* to the
+                # nearest striker for which it is among the K nearest *alive*
+                # jammers (its "spare-capacity" striker). Redundant jammers are
+                # therefore redirected to an under-capacity striker. The
+                # formation term is penalty-only (0 at d=0, -scale at d>=ref), so
+                # every alive jammer is ALWAYS given a distance-shaped pull
+                # toward some striker — there is no free 0 that would make going
+                # idle/overflow the optimal move. Genuine overflow (nj > K*ns,
+                # no striker has spare capacity) falls back to the nearest alive
+                # striker so the jammer escorts the group instead of idling.
+                # K = rp.jammer_formation_k (<=0 → unlimited, i.e. legacy).
                 d_js    = d_sj.transpose(1, 2)                                         # [B, nj, ns]
                 alive_j = alive[:, ns:]                                                # [B, nj]
                 alive_s = alive[:, :ns]                                                # [B, ns]
@@ -1526,16 +1532,22 @@ class StrikeEA2DEnv(EnvBase):
                 # (inf entries are dead-jammer / dead-striker padding).
                 eligible &= torch.isfinite(d_cap)
 
-                # Each jammer uses the nearest striker for which it is eligible;
-                # no eligible striker (overflow) → +inf → zeroed below.
-                d_eff   = d_js.masked_fill(~eligible, float('inf')).min(dim=-1).values # [B, nj]
-                has_cap = torch.isfinite(d_eff)
+                # Distance to the nearest striker that still has capacity for
+                # this jammer. +inf when the jammer is in no striker's top-K.
+                d_cap_striker = d_js.masked_fill(~eligible, float('inf')).min(dim=-1).values  # [B, nj]
+                # Genuine-overflow fallback: nearest alive striker, ungated.
+                d_near_all = d_js.masked_fill(
+                    ~alive_s.unsqueeze(1), float('inf')
+                ).min(dim=-1).values                                                   # [B, nj]
+                no_cap = ~torch.isfinite(d_cap_striker)
+                d_eff  = torch.where(no_cap, d_near_all, d_cap_striker)               # [B, nj]
+                has_striker = torch.isfinite(d_eff)   # false only if no alive striker
 
                 jammer_form = float(rp.jammer_formation_scale) * (
                     (1.0 - d_eff / float(rp.jammer_formation_ref_dist)).clamp(min=0.0) - 1.0
                 )
                 jammer_form = torch.where(
-                    has_cap & alive_j, jammer_form, torch.zeros_like(jammer_form)
+                    has_striker & alive_j, jammer_form, torch.zeros_like(jammer_form)
                 )
                 reward[:, ns:]        += jammer_form
                 formation_full[:, ns:] = jammer_form
