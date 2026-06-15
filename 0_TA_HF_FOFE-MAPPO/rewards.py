@@ -200,19 +200,68 @@ class RewardConfig:
     jammer_coalition_R_min: float = 0
     jammer_coalition_overlap_margin_deg: float = 0
 
-    # ─── FORMATION COHESION  (striker ↔ jammer cross-role proximity) ──────────
-    # Each striker/jammer receives a distance penalty for being far from the
-    # nearest alive cross-role teammate.  Flipped sign convention (same as
-    # striker approach): 0 at d=0, becomes more negative as distance grows.
-    # Penalty = scale × (max(0, 1 − d / ref_dist) − 1)
-    #         = 0 at d=0,  −scale at d ≥ ref_dist.
-    # Works for any ns × nj configuration (1+1, 1+2, 2+2, …).
-    # Set scale to 0.0 to disable for that role independently.
-    striker_formation_scale:    float = 0   # reward to each striker for being near a jammer
-    striker_formation_ref_dist: float = 0    # distance (map units) beyond which reward = 0
+    # ─── FORMATION COHESION  (DEPRECATED — superseded by JAMMER ESCORT below) ──
+    # Legacy cross-role proximity term. Kept only for backward compatibility
+    # with saved configs/checkpoints; defaults are 0 so the term is inert.
+    # The jammer-escort coverage reward below replaces its behaviour with a
+    # team-coverage formulation that does not reward jammers for crowding an
+    # already-escorted striker. Set a scale > 0 to re-enable the old term.
+    # Penalty = scale × (max(0, 1 − d / ref_dist) − 1)  (0 at d=0, −scale at d ≥ ref_dist).
+    striker_formation_scale:    float = 0      # DEPRECATED — use striker_escort_* below
+    striker_formation_ref_dist: float = 0
+    jammer_formation_scale:     float = 0      # DEPRECATED — use the escort coverage reward below
+    jammer_formation_ref_dist:  float = 0.5
 
-    jammer_formation_scale:     float = 0.05   # prev: 0.05, 0.1 before that # reward to each jammer for being near a striker
-    jammer_formation_ref_dist:  float = 0.5    # distance (map units) beyond which reward = 0
+    # ─── JAMMER ESCORT  (striker ↔ jammer coverage, GLOBAL, difference reward) ─
+    # Enforces the operational invariant that a striker should never operate
+    # without a nearby jammer escort — anywhere on the map, not only inside
+    # contested airspace. "Escort" is defined purely by proximity to the
+    # NEAREST alive jammer, so the term generalises across any ns × nj team.
+    #
+    # Per alive striker i, with m_i = distance to its nearest alive jammer, a
+    # bounded escort-deficit shaping function (flat "escorted" bubble of radius
+    # d_safe, saturating at d_max ≥ d_safe) is used:
+    #     g(d)  = clamp((d − d_safe) / (d_max − d_safe), 0, 1)
+    #     ψ(d)  = w_lin · g(d) + w_exp · (e^{α·g(d)} − 1)            ∈ [0, M]
+    #     φ_i   = ψ(m_i)            (0 when escorted, M = w_lin+w_exp(e^α−1) when abandoned)
+    # The global team coverage cost is Φ = Σ_i φ_i (minimise → every striker
+    # has a jammer within d_safe). Both roles are shaped with the DIFFERENCE
+    # REWARD of −Φ (Wolpert & Tumer, 2002):
+    #   • Striker i receives its own deficit         r_i = −scale · φ_i
+    #   • Jammer  j receives its marginal coverage    r_j = +scale · (Φ_{−j} − Φ)
+    #         = +scale · Σ_{i: nearest jammer is j} [ ψ(m_i^(2)) − ψ(m_i^(1)) ]
+    #     where m_i^(1) ≤ m_i^(2) are the two smallest striker→jammer distances
+    #     (m_i^(2) := d_max when only one jammer is alive). A redundant jammer
+    #     (its strikers are equally covered by another) earns ≈ 0; the sole
+    #     escort of an abandoned striker earns ≈ M — so jammers distribute
+    #     across strikers without any explicit assignment.
+    #
+    # Dead agents contribute 0; the striker term is 0 when no jammer is alive.
+    # Set escort_coverage_scale = 0.0 to disable both sides.
+    #
+    # Balance: w_lin (the maximum per-step deficit, reached at d_max) is kept at
+    # the border-penalty level (0.05) and BELOW the striker-approach magnitude
+    # (0.1) so the mission/safety gradients still dominate, while remaining
+    # several× the per-step timestep penalty (0.01) so the escort signal is not
+    # washed out. The jammer reward is ≈ 0 once every striker is escorted, so it
+    # yields to the radar-clearing terms in steady state and only grows when a
+    # striker is left uncovered.
+    # NOTE on d_max: it is set to ≈ the world diagonal (√2 for world_bounds
+    # (0, 1)) ON PURPOSE. Because the jammer term is a difference reward, a
+    # SATURATING deficit (small d_max) would leave a flat dead-zone beyond d_max
+    # in which no jammer feels any pull toward an abandoned striker. Spanning the
+    # full map keeps a (gentle) gradient everywhere, so a far-away naked striker
+    # still attracts a jammer. Raise w_lin (or w_exp/alpha) to make the pull
+    # firmer; lower d_safe to shrink the "free" escorted bubble.
+    striker_escort_d_safe: float = 0.25   # radius (map units) within which a striker counts as escorted (no penalty)
+    striker_escort_d_max:  float = 1.4    # distance at which the deficit saturates; ≈ world diagonal (must be > d_safe)
+    striker_escort_w_lin:  float = 0.05   # linear deficit magnitude at d_max (the maximum per-step penalty)
+    striker_escort_w_exp:  float = 0.0    # additional exponential deficit magnitude for deep excursions
+    striker_escort_alpha:  float = 0.0    # steepness of the exponential region
+
+    escort_coverage_scale:      float = 1.0    # shared weight κ on both escort terms (0 disables)
+    escort_coverage_difference: bool  = True   # True: per-jammer difference reward; False: broadcast −Φ to every jammer
+    escort_coverage_mean:       bool  = True   # normalise the jammer coverage signal by #alive strikers (size-invariant)
 
     # ─── OPTIONAL PAPER-STYLE MISSION REWARD ────────────────────────────────
     # R_mission = -Reward_fn(n_targets_alive, n_targets_initial)

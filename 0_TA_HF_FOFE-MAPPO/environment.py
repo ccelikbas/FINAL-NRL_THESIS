@@ -303,6 +303,7 @@ class StrikeEA2DEnv(EnvBase):
             "jammer_progress": torch.zeros(B, device=self.device),
             "jammer_jam_bonus": torch.zeros(B, device=self.device),
             "formation": torch.zeros(B, device=self.device),
+            "escort": torch.zeros(B, device=self.device),
             "agent_destroyed": torch.zeros(B, device=self.device),
             "paper_mission": torch.zeros(B, device=self.device),
             "separation_penalty": torch.zeros(B, device=self.device),
@@ -1512,6 +1513,67 @@ class StrikeEA2DEnv(EnvBase):
                 formation_full[:, ns:] = jammer_form
 
         # ------------------------------------------------------------------
+        # 8b. Jammer-escort coverage  (striker ↔ jammer, difference reward)
+        #     Striker i: penalty  −κ·φ_i   for straying from its nearest jammer.
+        #     Jammer  j: reward    +κ·(Φ_{−j} − Φ)  — its marginal coverage, so
+        #                jammers distribute across strikers and are NOT rewarded
+        #                for crowding an already-escorted one.
+        #     φ_i = ψ(nearest-jammer distance);  Φ = Σ_i φ_i  (global coverage).
+        # ------------------------------------------------------------------
+        escort_full = torch.zeros(B, A, device=self.device)
+        kappa = float(rp.escort_coverage_scale)
+        if kappa != 0.0 and ns > 0 and nj > 0:
+            striker_pos = self.agent_pos[:, :ns, :]                    # [B, ns, 2]
+            jammer_pos  = self.agent_pos[:, ns:, :]                    # [B, nj, 2]
+            s_alive_f   = alive[:, :ns].float()                        # [B, ns]
+            j_alive     = alive[:, ns:]                                # [B, nj]
+            any_j       = j_alive.any(dim=-1, keepdim=True)            # [B, 1]
+
+            # Striker→jammer distances; dead jammers pushed to +inf so they are
+            # never selected as an escort.
+            d_sj = torch.linalg.norm(
+                striker_pos[:, :, None, :] - jammer_pos[:, None, :, :], dim=-1
+            ).masked_fill(~j_alive[:, None, :], float('inf'))         # [B, ns, nj]
+
+            d_safe = float(rp.striker_escort_d_safe)
+            d_maxe = float(rp.striker_escort_d_max)
+            w_lin  = float(rp.striker_escort_w_lin)
+            w_exp  = float(rp.striker_escort_w_exp)
+            alpha  = float(rp.striker_escort_alpha)
+
+            # Two nearest jammers per striker (m_i^(1) ≤ m_i^(2)) and the index
+            # of the nearest. m^(2) = +inf when only one jammer is alive → ψ = M.
+            k = min(2, nj)
+            topk_d, topk_idx = torch.topk(d_sj, k, dim=-1, largest=False)  # [B, ns, k]
+            m1 = topk_d[..., 0]                                        # [B, ns]
+            m2 = topk_d[..., 1] if k == 2 else torch.full_like(m1, float('inf'))
+            j1 = topk_idx[..., 0]                                      # [B, ns] nearest jammer idx
+
+            phi1 = self._escort_falloff(m1, d_safe, d_maxe, w_lin, w_exp, alpha)  # φ_i
+            phi2 = self._escort_falloff(m2, d_safe, d_maxe, w_lin, w_exp, alpha)  # ψ(m_i^(2))
+
+            # --- Striker side: r_i = −κ·φ_i (own coverage deficit) ---
+            striker_escort = torch.where(any_j, -kappa * phi1, torch.zeros_like(phi1)) * s_alive_f
+            reward[:, :ns]      += striker_escort
+            escort_full[:, :ns]  = striker_escort
+
+            # --- Jammer side: difference reward (or plain broadcast of −Φ) ---
+            if bool(rp.escort_coverage_difference):
+                marginal = (phi2 - phi1) * s_alive_f               # [B, ns] ≥ 0, credited to nearest jammer
+                cover_j = torch.zeros(B, nj, device=self.device)
+                cover_j.scatter_add_(1, j1, marginal)              # Σ_{i: nearest is j} [ψ(m2)−ψ(m1)]
+                sign = 1.0
+            else:
+                cover_j = (phi1 * s_alive_f).sum(dim=-1, keepdim=True).expand(B, nj)  # Φ broadcast
+                sign = -1.0
+            if bool(rp.escort_coverage_mean):
+                n_s_alive = s_alive_f.sum(dim=-1, keepdim=True).clamp_min(1.0)
+                cover_j = cover_j / n_s_alive
+            jammer_escort = sign * kappa * cover_j * j_alive.float()
+            reward[:, ns:]      += jammer_escort
+            escort_full[:, ns:]  = jammer_escort
+
+        # ------------------------------------------------------------------
         # 9. Agent destruction penalty  (team_spirit blends team ↔ individual)
         # ------------------------------------------------------------------
         death_pen_full = torch.zeros(B, A, device=self.device)
@@ -1625,6 +1687,7 @@ class StrikeEA2DEnv(EnvBase):
             "jammer_progress":    jammer_progress_full.detach(),
             "jammer_jam_bonus":   jammer_jam_bonus_full.detach(),
             "formation":          formation_full.detach(),
+            "escort":             escort_full.detach(),
             "agent_destroyed":    death_pen_full.detach(),
             "paper_mission":      mission_reward_full.detach(),
             "separation_penalty": separation_pen_full.detach(),
@@ -1817,6 +1880,24 @@ class StrikeEA2DEnv(EnvBase):
         exp_val = w_exp * (torch.exp(alpha * t_exp) - 1.0)
 
         return lin_val + exp_val
+
+    @staticmethod
+    def _escort_falloff(d: torch.Tensor, d_safe: float, d_max: float,
+                        w_lin: float, w_exp: float, alpha: float) -> torch.Tensor:
+        """Bounded escort-deficit shaping ψ(d) for the jammer-escort reward.
+
+        Returns a **non-negative** deficit that is 0 inside the escorted
+        bubble (d ≤ d_safe) and saturates as d → d_max:
+
+            g(d) = clamp((d − d_safe) / (d_max − d_safe), 0, 1)
+            ψ(d) = w_lin · g(d) + w_exp · (e^{α·g(d)} − 1)        ∈ [0, M]
+
+        with M = w_lin + w_exp·(e^α − 1). Increases with distance from the
+        nearest escort (opposite sense to _piecewise_lin_exp). The caller
+        applies the sign (penalty for strikers, difference reward for jammers).
+        """
+        g = ((d - d_safe) / (d_max - d_safe + 1e-8)).clamp(0.0, 1.0)
+        return w_lin * g + w_exp * (torch.exp(alpha * g) - 1.0)
 
     def _relative_polar(self, agent_pos, agent_heading, entity_pos):
         """Compute (distance, relative_angle) from each agent to each entity.

@@ -1183,6 +1183,61 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
                 reward[:, ns:] += jammer_form
                 formation_full[:, ns:] = jammer_form
 
+        # 8b. Jammer-escort coverage  (striker ↔ jammer, difference reward)
+        #     Striker i: penalty  −κ·φ_i   for straying from its nearest jammer.
+        #     Jammer  j: reward    +κ·(Φ_{−j} − Φ)  — its marginal coverage, so
+        #                jammers distribute across strikers and are NOT rewarded
+        #                for crowding an already-escorted one. Pure proximity,
+        #                global (not threat-gated). See RewardConfig.
+        escort_full = torch.zeros(B, A, device=self.device)
+        kappa = float(rp.escort_coverage_scale)
+        if kappa != 0.0 and ns > 0 and nj > 0:
+            striker_pos = self.agent_pos[:, :ns, :]                    # [B, ns, 2]
+            jammer_pos  = self.agent_pos[:, ns:, :]                    # [B, nj, 2]
+            s_alive_f   = alive[:, :ns].float()                        # [B, ns]
+            j_alive     = alive[:, ns:]                                # [B, nj]
+            any_j       = j_alive.any(dim=-1, keepdim=True)            # [B, 1]
+
+            d_sj = torch.linalg.norm(
+                striker_pos[:, :, None, :] - jammer_pos[:, None, :, :], dim=-1
+            ).masked_fill(~j_alive[:, None, :], float('inf'))         # [B, ns, nj]
+
+            d_safe = float(rp.striker_escort_d_safe)
+            d_maxe = float(rp.striker_escort_d_max)
+            w_lin  = float(rp.striker_escort_w_lin)
+            w_exp  = float(rp.striker_escort_w_exp)
+            alpha  = float(rp.striker_escort_alpha)
+
+            k = min(2, nj)
+            topk_d, topk_idx = torch.topk(d_sj, k, dim=-1, largest=False)  # [B, ns, k]
+            m1 = topk_d[..., 0]                                        # [B, ns]
+            m2 = topk_d[..., 1] if k == 2 else torch.full_like(m1, float('inf'))
+            j1 = topk_idx[..., 0]                                      # [B, ns]
+
+            phi1 = self._escort_falloff(m1, d_safe, d_maxe, w_lin, w_exp, alpha)  # φ_i
+            phi2 = self._escort_falloff(m2, d_safe, d_maxe, w_lin, w_exp, alpha)  # ψ(m_i^(2))
+
+            # Striker side: r_i = −κ·φ_i (own coverage deficit)
+            striker_escort = torch.where(any_j, -kappa * phi1, torch.zeros_like(phi1)) * s_alive_f
+            reward[:, :ns]      += striker_escort
+            escort_full[:, :ns]  = striker_escort
+
+            # Jammer side: difference reward (or plain broadcast of −Φ)
+            if bool(rp.escort_coverage_difference):
+                marginal = (phi2 - phi1) * s_alive_f               # [B, ns] ≥ 0
+                cover_j = torch.zeros(B, nj, device=self.device)
+                cover_j.scatter_add_(1, j1, marginal)              # Σ_{i: nearest is j}[ψ(m2)−ψ(m1)]
+                sign = 1.0
+            else:
+                cover_j = (phi1 * s_alive_f).sum(dim=-1, keepdim=True).expand(B, nj)  # Φ broadcast
+                sign = -1.0
+            if bool(rp.escort_coverage_mean):
+                n_s_alive = s_alive_f.sum(dim=-1, keepdim=True).clamp_min(1.0)
+                cover_j = cover_j / n_s_alive
+            jammer_escort = sign * kappa * cover_j * j_alive.float()
+            reward[:, ns:]      += jammer_escort
+            escort_full[:, ns:]  = jammer_escort
+
         # 9. Agent destruction penalty
         death_pen_full = torch.zeros(B, A, device=self.device)
         n_killed_agents = killed.float().sum(dim=-1)
@@ -1340,6 +1395,7 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
             "jammer_beam_on_radar_bonus": jammer_beam_on_radar_full.detach(),
             "jammer_beam_alignment":      jammer_beam_alignment_full.detach(),
             "formation":                  formation_full.detach(),
+            "escort":                     escort_full.detach(),
             "agent_destroyed":            death_pen_full.detach(),
             "paper_mission":              mission_reward_full.detach(),
             "separation_penalty":         separation_pen_full.detach(),
