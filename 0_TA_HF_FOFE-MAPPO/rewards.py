@@ -219,7 +219,7 @@ class RewardConfig:
     #             +Reward_fn(n_agents_alive, n_agents_initial)
     # Reward is distributed to all currently alive agents each timestep.
     use_paper_mission_reward: bool = False
-    mission_reward_weigh float = 0.02
+    mission_reward_weigh: float = 0.02
 
     # ─── SAME-ROLE SEPARATION PENALTY  (piecewise lin-exp penalty, per agent) ──────────
     # d = distance from each agent to its nearest alive same-role teammate.
