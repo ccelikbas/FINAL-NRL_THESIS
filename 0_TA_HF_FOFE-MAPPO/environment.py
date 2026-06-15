@@ -1513,63 +1513,42 @@ class StrikeEA2DEnv(EnvBase):
                 formation_full[:, ns:] = jammer_form
 
         # ------------------------------------------------------------------
-        # 8b. Jammer-escort coverage  (striker ↔ jammer, difference reward)
-        #     Striker i: penalty  −κ·φ_i   for straying from its nearest jammer.
-        #     Jammer  j: reward    +κ·(Φ_{−j} − Φ)  — its marginal coverage, so
-        #                jammers distribute across strikers and are NOT rewarded
-        #                for crowding an already-escorted one.
-        #     φ_i = ψ(nearest-jammer distance);  Φ = Σ_i φ_i  (global coverage).
+        # 8b. Jammer-escort coverage field  (striker ↔ jammer, saturating)
+        #     Coverage cᵢ = Σ_j exp(−‖sᵢ−jⱼ‖ / ℓ)  (additive, long-range).
+        #     Team objective J = Σ_i min(cᵢ, κ)  (per-striker capacity κ).
+        #     Striker i:  r_i = −w_s · (κ − cᵢ)₊            (own unmet demand)
+        #     Jammer  j:  r_j = +w_j · (J − J_{−j})         (its useful coverage)
+        #                     = w_j · Σ_i [min(cᵢ,κ) − min(cᵢ−k_ij,κ)]
+        #     Additive coverage → non-vanishing gradient even when jammers are
+        #     clustered; the κ cap → no reward for crowding an already-covered
+        #     striker, so jammers distribute. See RewardConfig for the rationale.
         # ------------------------------------------------------------------
         escort_full = torch.zeros(B, A, device=self.device)
-        kappa = float(rp.escort_coverage_scale)
-        if kappa != 0.0 and ns > 0 and nj > 0:
-            striker_pos = self.agent_pos[:, :ns, :]                    # [B, ns, 2]
-            jammer_pos  = self.agent_pos[:, ns:, :]                    # [B, nj, 2]
-            s_alive_f   = alive[:, :ns].float()                        # [B, ns]
-            j_alive     = alive[:, ns:]                                # [B, nj]
-            any_j       = j_alive.any(dim=-1, keepdim=True)            # [B, 1]
+        w_s = float(rp.escort_striker_scale)
+        w_j = float(rp.escort_jammer_scale)
+        if (w_s != 0.0 or w_j != 0.0) and ns > 0 and nj > 0:
+            ell     = max(float(rp.escort_kernel_length), 1e-6)
+            kappa_c = float(rp.escort_capacity)
+            s_alive_f = alive[:, :ns].float()                          # [B, ns]
+            j_alive_f = alive[:, ns:].float()                          # [B, nj]
+            any_j     = (j_alive_f.sum(dim=-1, keepdim=True) > 0)      # [B, 1]
 
-            # Striker→jammer distances; dead jammers pushed to +inf so they are
-            # never selected as an escort.
-            d_sj = torch.linalg.norm(
-                striker_pos[:, :, None, :] - jammer_pos[:, None, :, :], dim=-1
-            ).masked_fill(~j_alive[:, None, :], float('inf'))         # [B, ns, nj]
+            d_sj = torch.cdist(self.agent_pos[:, :ns, :], self.agent_pos[:, ns:, :])  # [B, ns, nj]
+            k_sj = torch.exp(-d_sj / ell) * j_alive_f[:, None, :]      # dead jammers contribute 0
+            c_s  = k_sj.sum(dim=-1)                                    # [B, ns]  soft jammer count
 
-            d_safe = float(rp.striker_escort_d_safe)
-            d_maxe = float(rp.striker_escort_d_max)
-            w_lin  = float(rp.striker_escort_w_lin)
-            w_exp  = float(rp.striker_escort_w_exp)
-            alpha  = float(rp.striker_escort_alpha)
-
-            # Two nearest jammers per striker (m_i^(1) ≤ m_i^(2)) and the index
-            # of the nearest. m^(2) = +inf when only one jammer is alive → ψ = M.
-            k = min(2, nj)
-            topk_d, topk_idx = torch.topk(d_sj, k, dim=-1, largest=False)  # [B, ns, k]
-            m1 = topk_d[..., 0]                                        # [B, ns]
-            m2 = topk_d[..., 1] if k == 2 else torch.full_like(m1, float('inf'))
-            j1 = topk_idx[..., 0]                                      # [B, ns] nearest jammer idx
-
-            phi1 = self._escort_falloff(m1, d_safe, d_maxe, w_lin, w_exp, alpha)  # φ_i
-            phi2 = self._escort_falloff(m2, d_safe, d_maxe, w_lin, w_exp, alpha)  # ψ(m_i^(2))
-
-            # --- Striker side: r_i = −κ·φ_i (own coverage deficit) ---
-            striker_escort = torch.where(any_j, -kappa * phi1, torch.zeros_like(phi1)) * s_alive_f
+            # Striker side: penalty for unmet demand (0 when no jammer is alive).
+            striker_escort = -w_s * (kappa_c - c_s).clamp(min=0.0)
+            striker_escort = torch.where(any_j, striker_escort, torch.zeros_like(striker_escort)) * s_alive_f
             reward[:, :ns]      += striker_escort
             escort_full[:, :ns]  = striker_escort
 
-            # --- Jammer side: difference reward (or plain broadcast of −Φ) ---
-            if bool(rp.escort_coverage_difference):
-                marginal = (phi2 - phi1) * s_alive_f               # [B, ns] ≥ 0, credited to nearest jammer
-                cover_j = torch.zeros(B, nj, device=self.device)
-                cover_j.scatter_add_(1, j1, marginal)              # Σ_{i: nearest is j} [ψ(m2)−ψ(m1)]
-                sign = 1.0
-            else:
-                cover_j = (phi1 * s_alive_f).sum(dim=-1, keepdim=True).expand(B, nj)  # Φ broadcast
-                sign = -1.0
-            if bool(rp.escort_coverage_mean):
-                n_s_alive = s_alive_f.sum(dim=-1, keepdim=True).clamp_min(1.0)
-                cover_j = cover_j / n_s_alive
-            jammer_escort = sign * kappa * cover_j * j_alive.float()
+            # Jammer side: useful (saturating) coverage each jammer provides.
+            sat_with    = c_s.clamp(max=kappa_c)                       # min(cᵢ, κ)            [B, ns]
+            c_without   = (c_s[:, :, None] - k_sj).clamp(min=0.0)      # cᵢ without jammer j   [B, ns, nj]
+            sat_without = c_without.clamp(max=kappa_c)                 # min(cᵢ−k_ij, κ)
+            marginal    = (sat_with[:, :, None] - sat_without) * s_alive_f[:, :, None]  # ≥ 0  [B, ns, nj]
+            jammer_escort = w_j * marginal.sum(dim=1) * j_alive_f      # [B, nj]
             reward[:, ns:]      += jammer_escort
             escort_full[:, ns:]  = jammer_escort
 
@@ -1880,24 +1859,6 @@ class StrikeEA2DEnv(EnvBase):
         exp_val = w_exp * (torch.exp(alpha * t_exp) - 1.0)
 
         return lin_val + exp_val
-
-    @staticmethod
-    def _escort_falloff(d: torch.Tensor, d_safe: float, d_max: float,
-                        w_lin: float, w_exp: float, alpha: float) -> torch.Tensor:
-        """Bounded escort-deficit shaping ψ(d) for the jammer-escort reward.
-
-        Returns a **non-negative** deficit that is 0 inside the escorted
-        bubble (d ≤ d_safe) and saturates as d → d_max:
-
-            g(d) = clamp((d − d_safe) / (d_max − d_safe), 0, 1)
-            ψ(d) = w_lin · g(d) + w_exp · (e^{α·g(d)} − 1)        ∈ [0, M]
-
-        with M = w_lin + w_exp·(e^α − 1). Increases with distance from the
-        nearest escort (opposite sense to _piecewise_lin_exp). The caller
-        applies the sign (penalty for strikers, difference reward for jammers).
-        """
-        g = ((d - d_safe) / (d_max - d_safe + 1e-8)).clamp(0.0, 1.0)
-        return w_lin * g + w_exp * (torch.exp(alpha * g) - 1.0)
 
     def _relative_polar(self, agent_pos, agent_heading, entity_pos):
         """Compute (distance, relative_angle) from each agent to each entity.
