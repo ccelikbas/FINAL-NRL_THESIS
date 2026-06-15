@@ -211,7 +211,7 @@ class RewardConfig:
     striker_formation_scale:    float = 0   # reward to each striker for being near a jammer
     striker_formation_ref_dist: float = 0    # distance (map units) beyond which reward = 0
 
-    jammer_formation_scale:     float = 0.05   # prev: 0.1 # reward to each jammer for being near a striker
+    jammer_formation_scale:     float = 0.05   # prev: 0.05, 0.1 before that # reward to each jammer for being near a striker
     jammer_formation_ref_dist:  float = 0.5    # distance (map units) beyond which reward = 0
 
     # ─── OPTIONAL PAPER-STYLE MISSION REWARD ────────────────────────────────
@@ -219,7 +219,7 @@ class RewardConfig:
     #             +Reward_fn(n_agents_alive, n_agents_initial)
     # Reward is distributed to all currently alive agents each timestep.
     use_paper_mission_reward: bool = False
-    mission_reward_weight: float = 0.02
+    mission_reward_weigh float = 0.02
 
     # ─── SAME-ROLE SEPARATION PENALTY  (piecewise lin-exp penalty, per agent) ──────────
     # d = distance from each agent to its nearest alive same-role teammate.
