@@ -153,7 +153,7 @@ class RewardConfig:
     # stack on top of the smooth alignment shaping below.
     # No effect in the legacy (non-HF) jammer model, which has no cone.
     # Set to 0.0 to disable.
-    jammer_beam_on_radar_bonus: float = 0.005
+    jammer_beam_on_radar_bonus: float = 0.001
 
     # ─── JAMMER BEAM ALIGNMENT SHAPING  (HF directional-jammer model only) ───
     # Smooth angular shaping toward the *physically nearest* alive radar.
@@ -209,7 +209,7 @@ class RewardConfig:
     # Penalty = scale × (max(0, 1 − d / ref_dist) − 1)  (0 at d=0, −scale at d ≥ ref_dist).
     striker_formation_scale:    float = 0      # DEPRECATED — use striker_escort_* below
     striker_formation_ref_dist: float = 0
-    jammer_formation_scale:     float = 0      # DEPRECATED — use the escort coverage reward below
+    jammer_formation_scale:     float = 0.1      # DEPRECATED — use the escort coverage reward below
     jammer_formation_ref_dist:  float = 0.5
 
     # ─── JAMMER ESCORT  (striker ↔ jammer saturating coverage field) ──────────
@@ -260,10 +260,10 @@ class RewardConfig:
     # κ cap so it cannot dominate. escort_jammer_scale sets the strength of the
     # (non-vanishing) translational pull on the jammers; raise it if the jammers
     # are sluggish relative to the per-step control-effort cost (0.01).
-    escort_kernel_length: float = 0.3    # ℓ — escort kernel length scale (map units); larger = longer-range pull
-    escort_capacity:      float = 2.0    # κ — desired jammers per striker (soft count); also sets emergent team size
-    escort_striker_scale: float = 0.04   # w_s — striker penalty per unit unmet demand (max penalty = w_s·κ)
-    escort_jammer_scale:  float = 0.06   # w_j — jammer reward per unit of useful coverage provided
+    escort_kernel_length: float = 0    # ℓ — escort kernel length scale (map units); larger = longer-range pull
+    escort_capacity:      float = 0    # κ — desired jammers per striker (soft count); also sets emergent team size
+    escort_striker_scale: float = 0   # w_s — striker penalty per unit unmet demand (max penalty = w_s·κ)
+    escort_jammer_scale:  float = 0   # w_j — jammer reward per unit of useful coverage provided
 
     # ─── OPTIONAL PAPER-STYLE MISSION REWARD ────────────────────────────────
     # R_mission = -Reward_fn(n_targets_alive, n_targets_initial)
@@ -297,8 +297,8 @@ class RewardConfig:
     # Penalty = −accel_effort_scale × accel² − angular_effort_scale × angular_accel²
     # where accel and angular_accel are the discrete multipliers in [-1, 1].
     # Set both scales to 0.0 to disable.
-    accel_effort_scale:   float = 0.005    # (was 0.01) weight on velocity-acceleration squared
-    angular_effort_scale: float = 0.005   # weight on angular-acceleration squared
+    accel_effort_scale:   float = 0.01    # (was 0.01) weight on velocity-acceleration squared
+    angular_effort_scale: float = 0.01   # weight on angular-acceleration squared
 
     # ─── BEAM CONTROL EFFORT PENALTY  (HF directional-jammer model only) ────
     # Applied only to jammers, on action dim 2 (beam angular acceleration).

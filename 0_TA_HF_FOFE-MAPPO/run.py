@@ -17,6 +17,11 @@ from pathlib import Path
 # raises `KeyError: 'cubin'` during the first PPO update.
 os.environ.setdefault("TORCHINDUCTOR_COMPILE_THREADS", "1")
 
+# Reduce CUDA memory fragmentation so reserved-but-unallocated blocks can be
+# reused. Lets training fit on smaller GPUs (e.g. 8 GB laptop cards) without
+# changing any hyperparameters or results. No-op / harmless on large GPUs.
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
 if __package__ in (None, ""):
     import types
     _this_dir = Path(__file__).resolve().parent

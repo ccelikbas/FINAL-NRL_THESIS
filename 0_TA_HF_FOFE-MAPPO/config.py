@@ -142,8 +142,8 @@ class DomainRandomization:
 @dataclass
 class EnvConfig:
     # Team composition
-    n_strikers: int = 2
-    n_jammers: int = 4
+    n_strikers: int = 1
+    n_jammers: int = 2
     n_known_targets: int = 3
     n_unknown_targets: int = 0
     n_known_radars: int = 6
@@ -268,11 +268,11 @@ class EnvConfig:
 @dataclass
 class PPOConfig:
     """Shared PPO hyperparameters for both striker and jammer MAPPO."""
-    num_envs: int = 2048  #1048 (local) or 2048 (remote)
+    num_envs: int = 1048  #1048 (local) or 2048 (remote)
     n_iters: int = 50
     frames_per_batch: Optional[int] = None
     num_epochs: int = 6
-    minibatch_size: int = 16384  #8192 (local) or 16384 (remote)
+    minibatch_size: int = 8192  #8192 (local) or 16384 (remote)
 
     gamma: float = 0.99
     lmbda: float = 0.95
