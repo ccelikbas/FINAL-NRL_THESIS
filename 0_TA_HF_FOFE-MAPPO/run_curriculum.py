@@ -573,7 +573,7 @@ def main() -> None:
     checkpoint: Optional[Dict[str, Any]] = None
     if args.load_checkpoint:
         device = PPOConfig().device
-        checkpoint = torch.load(args.load_checkpoint, map_location=device)
+        checkpoint = torch.load(args.load_checkpoint, map_location=device, weights_only=False)
         print(f"Loaded initial checkpoint: {args.load_checkpoint}")
 
     # ── run sections ─────────────────────────────────────────────────
