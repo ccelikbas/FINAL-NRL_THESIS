@@ -175,6 +175,7 @@ def _build_env_cfg(
         min_turn_radius=base_cfg.min_turn_radius,
         R_obs=base_cfg.R_obs,
         R_comm=base_cfg.R_comm,
+        communicate=getattr(base_cfg, "communicate", True),
         striker_engage_range=base_cfg.striker_engage_range,
         striker_engage_fov=base_cfg.striker_engage_fov,
         striker_v_min=base_cfg.striker_v_min,

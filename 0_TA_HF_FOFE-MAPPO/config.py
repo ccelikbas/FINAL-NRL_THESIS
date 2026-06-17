@@ -194,6 +194,11 @@ class EnvConfig:
     # Sensors
     R_obs: float = 0.4
     R_comm: float = 0.4
+    # Inter-agent communication. When True, agents within a connected R_comm
+    # subgroup share observations (multi-hop). When False, each agent forms its
+    # own singleton subgroup and only senses entities within its own R_obs.
+    # Independent of the observation encoder, so works with both FOFE and flat MLP.
+    communicate: bool = True
 
     # Strikers
     striker_engage_range: float = 0.10

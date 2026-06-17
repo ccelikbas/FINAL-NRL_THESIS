@@ -62,6 +62,7 @@ class StrikeEA2DEnv(EnvBase):
         # --- sensors ---
         R_obs:        float = 0.50,
         R_comm:       float = 0.50,
+        communicate:  bool = True,
         # --- striker capabilities ---
         striker_engage_range: float = 0.12,
         striker_engage_fov: float = 60.0,
@@ -136,6 +137,7 @@ class StrikeEA2DEnv(EnvBase):
         # sensors
         self.R_obs       = float(R_obs)
         self.R_comm      = float(R_comm)
+        self.communicate = bool(communicate)
         self.radar_range = float(radar_range)
 
         # shaping
@@ -2047,6 +2049,12 @@ class StrikeEA2DEnv(EnvBase):
         A = self.n_agents
         B = self.num_envs
         eye = torch.eye(A, dtype=torch.bool, device=self.device).unsqueeze(0).expand(B, -1, -1)
+        if not self.communicate:
+            # Communication disabled: every agent is its own singleton subgroup,
+            # so the shared-observation union (comm_reach @ local_obs) collapses to
+            # each agent's own local R_obs sensing for agents, targets and radars.
+            self._c_comm_reach = eye.clone()
+            return
         comm_adj = (
             (self._c_dist_aa <= self.R_comm)
             & self.agent_alive[:, :, None]

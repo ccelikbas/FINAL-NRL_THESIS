@@ -182,6 +182,7 @@ def _build_eval_env_cfg(base: EnvConfig, cfg: Dict[str, Any]) -> EnvConfig:
         # ── Sensors (from checkpoint) ─────────────────────────────────
         R_obs=base.R_obs,
         R_comm=base.R_comm,
+        communicate=getattr(base, "communicate", True),
         # ── Agent capabilities (from checkpoint) ──────────────────────
         striker_engage_range=base.striker_engage_range,
         striker_engage_fov=base.striker_engage_fov,

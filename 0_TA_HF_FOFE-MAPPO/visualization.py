@@ -398,6 +398,7 @@ class TestRunner:
             min_turn_radius=env_cfg.min_turn_radius,
             R_obs=env_cfg.R_obs,
             R_comm=env_cfg.R_comm,
+            communicate=getattr(env_cfg, "communicate", True),
             striker_engage_range=env_cfg.striker_engage_range,
             striker_engage_fov=env_cfg.striker_engage_fov,
             striker_v_min=env_cfg.striker_v_min,
@@ -709,6 +710,8 @@ def animate_rollout(
             na = alive_idx.numel()
             dmat = torch.cdist(alive_pos_world, alive_pos_world)
             adj = dmat <= env.R_comm
+            if not getattr(env, "communicate", True):
+                adj = torch.zeros_like(adj)  # no comm links when comm disabled
 
             visited = torch.zeros(na, dtype=torch.bool)
             components = []
@@ -1112,6 +1115,8 @@ def _draw_world_panel(ax, env, frames, title):
             na = alive_idx.numel()
             dmat = torch.cdist(alive_pos_w, alive_pos_w)
             adj = dmat <= env.R_comm
+            if not getattr(env, "communicate", True):
+                adj = torch.zeros_like(adj)  # no comm links when comm disabled
             visited = torch.zeros(na, dtype=torch.bool)
             components = []
             for start in range(na):

@@ -353,6 +353,7 @@ def _env_kwargs(env_cfg: EnvConfig, ppo_cfg: PPOConfig) -> dict:
         min_turn_radius=env_cfg.min_turn_radius,
         R_obs=env_cfg.R_obs,
         R_comm=env_cfg.R_comm,
+        communicate=getattr(env_cfg, "communicate", True),
         striker_engage_range=env_cfg.striker_engage_range,
         striker_engage_fov=env_cfg.striker_engage_fov,
         striker_v_min=env_cfg.striker_v_min,
