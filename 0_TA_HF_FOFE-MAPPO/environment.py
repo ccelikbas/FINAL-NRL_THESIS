@@ -707,12 +707,12 @@ class StrikeEA2DEnv(EnvBase):
         radar_assignments = torch.empty(B, T, dtype=torch.long, device=self.device)
         if known_target_count > 0:
             perm_k = torch.argsort(
-                torch.rand(B, known_target_count, device=self.device), dim=-1
+                torch.rand(B, known_target_count, device=self.device, generator=self._rng), dim=-1
             )                                                              # [B, k]
             radar_assignments[:, :known_target_count] = base[:known_target_count][perm_k]
         if unknown_target_count > 0:
             perm_u = torch.argsort(
-                torch.rand(B, unknown_target_count, device=self.device), dim=-1
+                torch.rand(B, unknown_target_count, device=self.device, generator=self._rng), dim=-1
             )                                                              # [B, u]
             radar_assignments[:, known_target_count:] = base[known_target_count:][perm_u]
 
@@ -722,7 +722,7 @@ class StrikeEA2DEnv(EnvBase):
         span = (hi - lo) % (2.0 * math.pi)
         if span == 0.0:
             span = 2.0 * math.pi
-        angles = lo + span * torch.rand(B, T, device=self.device)          # [B, T]
+        angles = lo + span * torch.rand(B, T, device=self.device, generator=self._rng)          # [B, T]
         offsets = spawn_distance * torch.stack(
             (torch.cos(angles), torch.sin(angles)), dim=-1
         )                                                                   # [B, T, 2]
@@ -762,7 +762,7 @@ class StrikeEA2DEnv(EnvBase):
         offset = torch.tensor([x_lo, y_lo], device=self.device)
 
         def _draw(n: int) -> torch.Tensor:
-            u = torch.rand(n, T, 2, device=self.device)
+            u = torch.rand(n, T, 2, device=self.device, generator=self._rng)
             return (u * scale + offset).clamp(self.low, self.high)
 
         pos = _draw(B)

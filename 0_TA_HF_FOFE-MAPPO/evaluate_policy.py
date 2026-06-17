@@ -110,15 +110,26 @@ from .run_curriculum import CurriculumSection, _section_to_env_cfg, _section_lab
 # =====================================================================
 
 EVAL_SCENARIOS: List[CurriculumSection] = [
-    # CurriculumSection(
-    #     name="S1 - Known",
-    #     n_iters=200,                       # ignored during evaluation
-    #     n_strikers=2, n_jammers=(2, 4),
-    #     n_known_targets=3, n_unknown_targets=0,
-    #     n_known_radars=6, n_unknown_radars=0,
-    #     radar_kill_probability=0.05,
-    #     scenario="S2",
-    # ),
+    CurriculumSection(
+        name="S1 - Known - Comm",
+        n_iters=200,                       # ignored during evaluation
+        n_strikers=2, n_jammers=(2, 4),
+        n_known_targets=3, n_unknown_targets=0,
+        n_known_radars=6, n_unknown_radars=0,
+        radar_kill_probability=0.05,
+        scenario="S2",
+        communicate=True,
+    ),
+    CurriculumSection(
+        name="S1 - Known",
+        n_iters=200,                       # ignored during evaluation
+        n_strikers=2, n_jammers=(2, 4),
+        n_known_targets=3, n_unknown_targets=0,
+        n_known_radars=6, n_unknown_radars=0,
+        radar_kill_probability=0.05,
+        scenario="S2",
+        communicate=False,
+    ),
     # CurriculumSection(
     #     name="2sx2j - Known",
     #     n_iters=200,                       # ignored during evaluation
@@ -147,7 +158,7 @@ EVAL_SCENARIOS: List[CurriculumSection] = [
     #     scenario="S2",
     # ),
         CurriculumSection(
-        name="S2 - Pop-UP",
+        name="S2 - Pop-UP - Comm",
         n_iters=200,                       # ignored during evaluation
         n_strikers=2, n_jammers=(2, 4),
         n_known_targets=2, n_unknown_targets=1,
@@ -162,6 +173,26 @@ EVAL_SCENARIOS: List[CurriculumSection] = [
         n_strikers=2, n_jammers=(2, 4),
         n_known_targets=2, n_unknown_targets=1,
         n_known_radars=4, n_unknown_radars=2,
+        radar_kill_probability=0.05,
+        scenario="S2",
+        communicate=False,
+    ),
+            CurriculumSection(
+        name="S2 - Unknown - Comm",
+        n_iters=200,                       # ignored during evaluation
+        n_strikers=2, n_jammers=(2, 4),
+        n_known_targets=2, n_unknown_targets=1,
+        n_known_radars=2, n_unknown_radars=4,
+        radar_kill_probability=0.05,
+        scenario="S2",
+        communicate=True,
+    ),
+        CurriculumSection(
+        name="S2 - Unknown Large",
+        n_iters=200,                       # ignored during evaluation
+        n_strikers=2, n_jammers=(2, 4),
+        n_known_targets=1, n_unknown_targets=2,
+        n_known_radars=2, n_unknown_radars=4,
         radar_kill_probability=0.05,
         scenario="S2",
         communicate=False,
@@ -218,8 +249,8 @@ EVAL_SCENARIOS: List[CurriculumSection] = [
 #  >>>  EVALUATION CONFIG (the "n" you asked about)  <<<
 # =====================================================================
 
-N_EVAL_EPISODES = 100      # domain randomised episodes (enviernments) per repeat (run in parallel)
-N_REPEATS       = 5        # independent repeats per scenario → mean ± std
+N_EVAL_EPISODES = 300      # domain randomised episodes (enviernments) per repeat (run in parallel)
+N_REPEATS       = 10        # independent repeats per scenario → mean ± std
 BASE_SEED       = 42       # repeat r uses BASE_SEED + r * 1000
 
 
