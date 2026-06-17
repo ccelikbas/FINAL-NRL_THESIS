@@ -1,7 +1,8 @@
 """Curriculum runner for FOFE-MAPPO with per-environment domain randomization.
 
 To run from prev checkpoint: 
-python -m fofe_mappo.run_curriculum --load_checkpoint runs/curriculum_mappo.pt
+cd "0_TA_HF_FOFE-MAPPO"
+python run_curriculum.py --load_checkpoint runs/curriculum_mappo.pt
 """
 
 from __future__ import annotations

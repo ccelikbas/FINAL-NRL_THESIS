@@ -23,7 +23,7 @@ Run it as a direct script with the project's venv python (there is no `python`
 on PATH, and the package folder isn't importable as `-m ...`):
 
     # from the repo root:
-    .\.venv\Scripts\python.exe 0_TA_HF_FOFE-MAPPO\evaluate_policy.py --checkpoint 0_TA_HF_FOFE-MAPPO\runs\curriculum_mappo.pt
+    .\.venv\Scripts\python.exe 0_TA_HF_FOFE-MAPPO\evaluate_policy.py --checkpoint 0_TA_HF_FOFE-MAPPO\runs\2s2-4j.pt
 
     # or after `cd 0_TA_HF_FOFE-MAPPO`:
     ..\.venv\Scripts\python.exe evaluate_policy.py --checkpoint runs\fofe_mappo.pt --n_episodes 200 --n_repeats 5
@@ -111,41 +111,95 @@ from .run_curriculum import CurriculumSection, _section_to_env_cfg, _section_lab
 
 EVAL_SCENARIOS: List[CurriculumSection] = [
     CurriculumSection(
-        name="Trainig 1sx2j",
+        name="S1 - Known",
         n_iters=200,                       # ignored during evaluation
-        n_strikers=1, n_jammers=2,
+        n_strikers=2, n_jammers=(2, 4),
         n_known_targets=3, n_unknown_targets=0,
         n_known_radars=6, n_unknown_radars=0,
         radar_kill_probability=0.05,
         scenario="S2",
     ),
-    CurriculumSection(
-        name="Pop-Up 1sx2j",
+    # CurriculumSection(
+    #     name="2sx2j - Known",
+    #     n_iters=200,                       # ignored during evaluation
+    #     n_strikers=2, n_jammers=2,
+    #     n_known_targets=3, n_unknown_targets=0,
+    #     n_known_radars=6, n_unknown_radars=0,
+    #     radar_kill_probability=0.05,
+    #     scenario="S2",
+    # ),
+    # CurriculumSection(
+    #     name="2sx3j - Known",
+    #     n_iters=200,                       # ignored during evaluation
+    #     n_strikers=2, n_jammers=3,
+    #     n_known_targets=3, n_unknown_targets=0,
+    #     n_known_radars=6, n_unknown_radars=0,
+    #     radar_kill_probability=0.05,
+    #     scenario="S2",
+    # ),
+    # CurriculumSection(
+    #     name="2sx4j - Known",
+    #     n_iters=200,                       # ignored during evaluation
+    #     n_strikers=2, n_jammers=4,
+    #     n_known_targets=3, n_unknown_targets=0,
+    #     n_known_radars=6, n_unknown_radars=0,
+    #     radar_kill_probability=0.05,
+    #     scenario="S2",
+    # ),
+        CurriculumSection(
+        name="S2 - Pop-UP",
         n_iters=200,                       # ignored during evaluation
-        n_strikers=1, n_jammers=2,
+        n_strikers=2, n_jammers=(2, 4),
         n_known_targets=2, n_unknown_targets=1,
         n_known_radars=4, n_unknown_radars=2,
         radar_kill_probability=0.05,
         scenario="S2",
     ),
+    # CurriculumSection(
+    #     name="2sx2j Pop-Up",
+    #     n_iters=200,                       # ignored during evaluation
+    #     n_strikers=2, n_jammers=2,
+    #     n_known_targets=2, n_unknown_targets=1,
+    #     n_known_radars=4, n_unknown_radars=2,
+    #     radar_kill_probability=0.05,
+    #     scenario="S2",
+    # ),
+    # CurriculumSection(
+    #     name="2sx3j Pop-Up",
+    #     n_iters=200,                       # ignored during evaluation
+    #     n_strikers=2, n_jammers=3,
+    #     n_known_targets=2, n_unknown_targets=1,
+    #     n_known_radars=4, n_unknown_radars=2,
+    #     radar_kill_probability=0.05,
+    #     scenario="S2",
+    # ),
+    # CurriculumSection(
+    #     name="2sx4j Pop-Up",
+    #     n_iters=200,                       # ignored during evaluation
+    #     n_strikers=2, n_jammers=4,
+    #     n_known_targets=2, n_unknown_targets=1,
+    #     n_known_radars=4, n_unknown_radars=2,
+    #     radar_kill_probability=0.05,
+    #     scenario="S2",
+    # ),
     CurriculumSection(
-        name="2sx2j",
+        name="S3 - Team Size Sweep",
         n_iters=200,                       # ignored during evaluation
-        n_strikers=2, n_jammers=2,
-        n_known_targets=3, n_unknown_targets=0,
-        n_known_radars=6, n_unknown_radars=0,
+        n_strikers=(1,3), n_jammers=(2,6),
+        n_known_targets=2, n_unknown_targets=1,
+        n_known_radars=4, n_unknown_radars=2,
         radar_kill_probability=0.05,
         scenario="S2",
-    ),
+    ), 
     CurriculumSection(
-        name="2sx4j",
+        name="S3 - Environment Size Sweep",
         n_iters=200,                       # ignored during evaluation
-        n_strikers=2, n_jammers=4,
-        n_known_targets=3, n_unknown_targets=0,
-        n_known_radars=6, n_unknown_radars=0,
+        n_strikers=2, n_jammers=(2,4),
+        n_known_targets=(1,5), n_unknown_targets=0,
+        n_known_radars=(4,8), n_unknown_radars=0,
         radar_kill_probability=0.05,
         scenario="S2",
-    ),
+    )
 ]
 
 
@@ -153,7 +207,7 @@ EVAL_SCENARIOS: List[CurriculumSection] = [
 #  >>>  EVALUATION CONFIG (the "n" you asked about)  <<<
 # =====================================================================
 
-N_EVAL_EPISODES = 100      # episodes per repeat (run in parallel)
+N_EVAL_EPISODES = 100      # domain randomised episodes (enviernments) per repeat (run in parallel)
 N_REPEATS       = 5        # independent repeats per scenario → mean ± std
 BASE_SEED       = 42       # repeat r uses BASE_SEED + r * 1000
 
