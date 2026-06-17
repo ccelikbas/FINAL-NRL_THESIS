@@ -73,7 +73,7 @@ class FOFEConfig:
     critic_fusion_mlp_dims : tuple of int
         Fusion MLP dims for critic.
     """
-    use_fofe: bool = True
+    use_fofe: bool = False
 
     # --- Actor FOFE dims ---
     agents_see_dims:   Tuple[int, ...] = (96,) # one SEE layer
@@ -81,14 +81,14 @@ class FOFEConfig:
     radars_see_dims:   Tuple[int, ...] = (96,)
     fofe_mlp_dims:     Tuple[int, ...] = (128, 64)
     self_mlp_dims:     Tuple[int, ...] = (64, 64)
-    fusion_mlp_dims:   Tuple[int, ...] = (256, 256) # reduced from 256
+    fusion_mlp_dims:   Tuple[int, ...] = (256, 256, 256) # increased to 3 layers 
 
     # --- Critic FOFE dims (default = same as actor) ---
     critic_agents_see_dims:   Tuple[int, ...] = (96,)
     critic_targets_see_dims:  Tuple[int, ...] = (96,)
     critic_radars_see_dims:   Tuple[int, ...] = (96,)
     critic_fofe_mlp_dims:     Tuple[int, ...] = (128, 64)
-    critic_fusion_mlp_dims:   Tuple[int, ...] = (256, 256) # reduced from 256
+    critic_fusion_mlp_dims:   Tuple[int, ...] = (256, 256, 256) # increased to 3 layers
 
 
 # ======================================================================
@@ -198,7 +198,7 @@ class EnvConfig:
     # subgroup share observations (multi-hop). When False, each agent forms its
     # own singleton subgroup and only senses entities within its own R_obs.
     # Independent of the observation encoder, so works with both FOFE and flat MLP.
-    communicate: bool = True
+    communicate: bool = False
 
     # ── Flat-MLP observation slots (use_fofe=False only) ────────────
     # Number of nearest VISIBLE entities of each type encoded per agent in the
@@ -207,9 +207,9 @@ class EnvConfig:
     # are dropped. These set the flat actor's obs_dim (see _compute_obs_dim);
     # the critic's global state is unaffected. Ignored when use_fofe=True (FOFE
     # encodes the full variable-size set). 0 disables that channel entirely.
-    n_other_agent_obs_slots: int = 3
-    n_radar_obs_slots: int = 2
-    n_target_obs_slots: int = 2
+    n_other_agent_obs_slots: int = 6
+    n_radar_obs_slots: int = 8
+    n_target_obs_slots: int = 4
 
     # Strikers
     striker_engage_range: float = 0.10
@@ -340,10 +340,11 @@ class PPOConfig:
         self.minibatch_size = int(self.minibatch_size)
 
 
+# Flat MLP paramter network configuration
 @dataclass
 class NetworkConfig:
-    actor_hidden: int = 256
-    critic_hidden: int = 256
+    actor_hidden: int = 336 # to match FOFE paramters 
+    critic_hidden: int = 320 # to match FOFE parameters
     depth: int = 3
 
 
