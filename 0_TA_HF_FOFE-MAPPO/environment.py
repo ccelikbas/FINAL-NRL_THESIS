@@ -2145,8 +2145,21 @@ class StrikeEA2DEnv(EnvBase):
         dx_aa_b = cos_h[:, :, None] * rel_aa_w[..., 0] + sin_h[:, :, None] * rel_aa_w[..., 1]
         dy_aa_b = -sin_h[:, :, None] * rel_aa_w[..., 0] + cos_h[:, :, None] * rel_aa_w[..., 1]
 
-        # Visibility mask: within R_obs AND alive
-        visible = (dist_aa <= self.R_obs) & self.agent_alive[:, None, :]  # [B,A,A]
+        # Visibility mask: an agent m is observable to i if ANY member j of i's
+        # communication subgroup senses m within R_obs (multi-hop shared obs),
+        # mirroring the radar/target channels. _c_dist_aa has a ~0 diagonal, so
+        # every alive subgroup member trivially "senses itself" and is therefore
+        # shared to the whole subgroup. The observer's own self-row is excluded
+        # (it lives in the obs_self / own channel instead).
+        local_agent_obs = (
+            (self._c_dist_aa <= self.R_obs)
+            & self.agent_alive[:, :, None]
+            & self.agent_alive[:, None, :]
+        )  # [B,A,A]  local_agent_obs[b,j,m] = j senses m
+        shared_agent_obs = torch.matmul(
+            self._c_comm_reach.float(), local_agent_obs.float()
+        ) > 0
+        visible = shared_agent_obs & self.agent_alive[:, None, :] & ~eye  # [B,A,A]
 
         # Normalised features
         dx_aa_n       = dx_aa_b / max_dist                                          # [B,A,A]
@@ -2325,7 +2338,17 @@ class StrikeEA2DEnv(EnvBase):
         rel_aa_w = self._c_rel_aa                                              # [B, A, A, 2]
         dx_aa_b = cos_h[:, :, None] * rel_aa_w[..., 0] + sin_h[:, :, None] * rel_aa_w[..., 1]
         dy_aa_b = -sin_h[:, :, None] * rel_aa_w[..., 0] + cos_h[:, :, None] * rel_aa_w[..., 1]
-        agents_visible = (dist_aa <= self.R_obs) & self.agent_alive[:, None, :] & ~eye
+        # Agent m is visible to i if any member j of i's comm subgroup senses m
+        # within R_obs (multi-hop shared observation), mirroring the radar/target
+        # channels. _c_dist_aa has a ~0 diagonal so alive subgroup members share
+        # themselves; the observer's own row is removed via ~eye.
+        local_agent_obs = (
+            (self._c_dist_aa <= self.R_obs)
+            & self.agent_alive[:, :, None]
+            & self.agent_alive[:, None, :]
+        )  # [B,A,A]  local_agent_obs[b,j,m] = j senses m
+        shared_agent_obs = torch.matmul(comm_reach.float(), local_agent_obs.float()) > 0
+        agents_visible = shared_agent_obs & self.agent_alive[:, None, :] & ~eye
 
         agents_base = torch.stack([
             dx_aa_b / max_dist,
