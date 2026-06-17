@@ -63,6 +63,10 @@ class StrikeEA2DEnv(EnvBase):
         R_obs:        float = 0.50,
         R_comm:       float = 0.50,
         communicate:  bool = True,
+        # --- flat-MLP observation slots (use_fofe=False only) ---
+        n_other_agent_obs_slots: int = 3,
+        n_radar_obs_slots: int = 2,
+        n_target_obs_slots: int = 2,
         # --- striker capabilities ---
         striker_engage_range: float = 0.12,
         striker_engage_fov: float = 60.0,
@@ -244,9 +248,14 @@ class StrikeEA2DEnv(EnvBase):
         self._act_table = torch.tensor(
             [-1.0, -0.5, -0.1, 0.0, 0.1, 0.5, 1.0], device=self._device
         )  # maps discrete index → continuous multiplier
-        self.n_other_agent_obs_slots = 3
-        self.n_radar_obs_slots = 2
-        self.n_target_obs_slots = 2
+        # Flat-MLP top-K observation slots (configurable; used only when
+        # use_fofe=False — see _compute_obs_dim / _build_local_obs).
+        self.n_other_agent_obs_slots = int(n_other_agent_obs_slots)
+        self.n_radar_obs_slots = int(n_radar_obs_slots)
+        self.n_target_obs_slots = int(n_target_obs_slots)
+        if (self.n_other_agent_obs_slots < 0 or self.n_radar_obs_slots < 0
+                or self.n_target_obs_slots < 0):
+            raise ValueError("*_obs_slots must be >= 0")
         # Self-observation dimensionality. Base self block is 6 floats
         # (x, y, speed, heading, heading_rate, t_norm). Subclasses can
         # append role-specific features by overriding _self_extra_dim and
@@ -2068,11 +2077,12 @@ class StrikeEA2DEnv(EnvBase):
     def _build_local_obs(self) -> torch.Tensor:
         """Ego-centric body-frame observation per agent with fixed slot counts.
 
-        Layout (per agent):
+        Layout (per agent). Slot counts K_a/K_r/K_t are configurable via
+        n_other_agent_obs_slots / n_radar_obs_slots / n_target_obs_slots:
           own:     [x, y, speed, heading, heading_rate, t_norm, *self_extra]      (d_self)
-          agents:  3 nearest visible others [dx, dy, dist, heading, role, *agent_extra]  (3×(5+E_a))
-          radars:  2 nearest visible radars [dx, dy, dist, jammed, *radar_extra]  (2×(4+E))
-          targets: 2 nearest visible alive targets [dx, dy, dist, alive]            (2×4)
+          agents:  K_a nearest visible others [dx, dy, dist, heading, role, *agent_extra]  (K_a×(5+E_a))
+          radars:  K_r nearest visible radars [dx, dy, dist, jammed, *radar_extra]  (K_r×(4+E))
+          targets: K_t nearest visible alive targets [dx, dy, dist, alive]            (K_t×4)
 
         All (dx, dy) are expressed in the OBSERVING agent's body frame
         (rotated by -heading). All position-like scalars are normalised

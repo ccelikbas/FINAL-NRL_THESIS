@@ -212,6 +212,12 @@ def _section_to_env_cfg(
         max_steps=ms, scenario=scenario,
         radar_kill_probability=kp,
         communicate=communicate,
+        # Flat-MLP obs slots are constant across sections (obs_dim must match
+        # for the carried policy/critic to transfer), so carry them from the
+        # leading config defaults rather than per-section overrides.
+        n_other_agent_obs_slots=getattr(defaults, "n_other_agent_obs_slots", 3),
+        n_radar_obs_slots=getattr(defaults, "n_radar_obs_slots", 2),
+        n_target_obs_slots=getattr(defaults, "n_target_obs_slots", 2),
         reward_config=copy.deepcopy(reward_cfg),
         dr=dr,
     )

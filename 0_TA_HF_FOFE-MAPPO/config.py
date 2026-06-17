@@ -144,10 +144,10 @@ class EnvConfig:
     # Team composition
     n_strikers: int = 1
     n_jammers: int = 2
-    n_known_targets: int = 3
-    n_unknown_targets: int = 0
-    n_known_radars: int = 6
-    n_unknown_radars: int = 0
+    n_known_targets: int = 2
+    n_unknown_targets: int = 1
+    n_known_radars: int = 4
+    n_unknown_radars: int = 2
     n_targets: int = 0
     n_radars: int = 0
 
@@ -200,6 +200,17 @@ class EnvConfig:
     # Independent of the observation encoder, so works with both FOFE and flat MLP.
     communicate: bool = True
 
+    # ── Flat-MLP observation slots (use_fofe=False only) ────────────
+    # Number of nearest VISIBLE entities of each type encoded per agent in the
+    # flat top-K observation. Entities are sorted by distance; the K nearest fill
+    # the slots, unseen/absent slots are zero-padded, and any entities beyond K
+    # are dropped. These set the flat actor's obs_dim (see _compute_obs_dim);
+    # the critic's global state is unaffected. Ignored when use_fofe=True (FOFE
+    # encodes the full variable-size set). 0 disables that channel entirely.
+    n_other_agent_obs_slots: int = 3
+    n_radar_obs_slots: int = 2
+    n_target_obs_slots: int = 2
+
     # Strikers
     striker_engage_range: float = 0.10
     striker_engage_fov: float = 60.0
@@ -237,6 +248,9 @@ class EnvConfig:
         self.n_unknown_targets = int(self.n_unknown_targets)
         self.n_known_radars = int(self.n_known_radars)
         self.n_unknown_radars = int(self.n_unknown_radars)
+        self.n_other_agent_obs_slots = int(self.n_other_agent_obs_slots)
+        self.n_radar_obs_slots = int(self.n_radar_obs_slots)
+        self.n_target_obs_slots = int(self.n_target_obs_slots)
         self.radar_min_sep = float(self.radar_min_sep)
         self.s2_radar_min_sep = float(self.s2_radar_min_sep)
         self.s2_target_min_sep = float(self.s2_target_min_sep)
@@ -246,6 +260,12 @@ class EnvConfig:
             raise ValueError("n_known_targets and n_unknown_targets must be >= 0")
         if self.n_known_radars < 0 or self.n_unknown_radars < 0:
             raise ValueError("n_known_radars and n_unknown_radars must be >= 0")
+        if (self.n_other_agent_obs_slots < 0 or self.n_radar_obs_slots < 0
+                or self.n_target_obs_slots < 0):
+            raise ValueError(
+                "n_other_agent_obs_slots, n_radar_obs_slots and "
+                "n_target_obs_slots must be >= 0"
+            )
         if self.radar_min_sep < 0:
             raise ValueError("radar_min_sep must be >= 0")
         if self.s2_radar_min_sep < 0:
@@ -273,11 +293,11 @@ class EnvConfig:
 @dataclass
 class PPOConfig:
     """Shared PPO hyperparameters for both striker and jammer MAPPO."""
-    num_envs: int = 1048  #1048 (local) or 2048 (remote)
+    num_envs: int = 2048  #1048 (local) or 2048 (remote)
     n_iters: int = 50
     frames_per_batch: Optional[int] = None
     num_epochs: int = 6
-    minibatch_size: int = 8192  #8192 (local) or 16384 (remote)
+    minibatch_size: int = 16384  #8192 (local) or 16384 (remote)
 
     gamma: float = 0.99
     lmbda: float = 0.95
