@@ -149,8 +149,8 @@ CURRICULUM: List[CurriculumSection] = [
     )
 ]
 
-
-FOFE_CONFIG = FOFEConfig(use_fofe=True)
+# check if this is configured correctly. 
+FOFE_CONFIG = FOFEConfig(use_fofe=False)
 
 
 # =====================================================================

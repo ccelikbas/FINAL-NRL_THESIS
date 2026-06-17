@@ -6,7 +6,7 @@ FOFE mode (use_fofe=True):
   Critic receives global state as entity sets         → FOFE encoder → value.
 
 Legacy mode (use_fofe=False):
-  Actor: flat top-K observation → MultiAgentMLP → action.
+  Actor: flat top-K observation → shared per-agent MLP → action.
   Critic: flat global state vector → MLP → value.
 
 FOFE Actor pipeline:
@@ -31,7 +31,6 @@ from typing import Dict, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torchrl.modules import MultiAgentMLP
 
 from .config import FOFEConfig
 from .environment import StrikeEA2DEnv
@@ -386,16 +385,22 @@ class FOFEValueNet(nn.Module):
 # ======================================================================
 
 class RolePolicyNet(nn.Module):
-    """Legacy flat-obs actor with MultiAgentMLP."""
+    """Legacy flat-obs actor.
+
+    Uses a plain shared MLP applied per-agent over the last obs dimension.
+    This is mathematically identical to a ``MultiAgentMLP(centralized=False,
+    share_params=True)`` — every agent is processed independently with the
+    same weights, and ``nn.Linear`` broadcasts over the ``[B, A]`` leading
+    dims — but it keeps all weights on the real device instead of applying
+    meta-device params via vmap. The vmap path is incompatible with
+    ``torch.compile`` (aten.bmm "two different devices cuda:0, meta"); the
+    plain MLP compiles cleanly. ``n_agents`` is unused (kept for signature
+    compatibility with the call sites)."""
     def __init__(self, obs_dim, act_dim, n_choices, n_agents, hidden=256, depth=3):
         super().__init__()
         self.act_dim = act_dim
         self.n_choices = n_choices
-        self.net = MultiAgentMLP(
-            n_agent_inputs=obs_dim, n_agent_outputs=act_dim * n_choices,
-            n_agents=n_agents, centralized=False, share_params=True,
-            depth=depth, num_cells=hidden, activation_class=nn.ReLU,
-        )
+        self.net = MLP(obs_dim, act_dim * n_choices, hidden, depth)
 
     def forward(self, obs):
         raw = self.net(obs)
