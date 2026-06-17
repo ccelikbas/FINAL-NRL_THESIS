@@ -110,15 +110,15 @@ from .run_curriculum import CurriculumSection, _section_to_env_cfg, _section_lab
 # =====================================================================
 
 EVAL_SCENARIOS: List[CurriculumSection] = [
-    CurriculumSection(
-        name="S1 - Known",
-        n_iters=200,                       # ignored during evaluation
-        n_strikers=2, n_jammers=(2, 4),
-        n_known_targets=3, n_unknown_targets=0,
-        n_known_radars=6, n_unknown_radars=0,
-        radar_kill_probability=0.05,
-        scenario="S2",
-    ),
+    # CurriculumSection(
+    #     name="S1 - Known",
+    #     n_iters=200,                       # ignored during evaluation
+    #     n_strikers=2, n_jammers=(2, 4),
+    #     n_known_targets=3, n_unknown_targets=0,
+    #     n_known_radars=6, n_unknown_radars=0,
+    #     radar_kill_probability=0.05,
+    #     scenario="S2",
+    # ),
     # CurriculumSection(
     #     name="2sx2j - Known",
     #     n_iters=200,                       # ignored during evaluation
@@ -154,6 +154,17 @@ EVAL_SCENARIOS: List[CurriculumSection] = [
         n_known_radars=4, n_unknown_radars=2,
         radar_kill_probability=0.05,
         scenario="S2",
+        communicate=True,
+    ),
+        CurriculumSection(
+        name="S2 - Pop-UP",
+        n_iters=200,                       # ignored during evaluation
+        n_strikers=2, n_jammers=(2, 4),
+        n_known_targets=2, n_unknown_targets=1,
+        n_known_radars=4, n_unknown_radars=2,
+        radar_kill_probability=0.05,
+        scenario="S2",
+        communicate=False,
     ),
     # CurriculumSection(
     #     name="2sx2j Pop-Up",
@@ -182,24 +193,24 @@ EVAL_SCENARIOS: List[CurriculumSection] = [
     #     radar_kill_probability=0.05,
     #     scenario="S2",
     # ),
-    CurriculumSection(
-        name="S3 - Team Size Sweep",
-        n_iters=200,                       # ignored during evaluation
-        n_strikers=(1,3), n_jammers=(2,6),
-        n_known_targets=2, n_unknown_targets=1,
-        n_known_radars=4, n_unknown_radars=2,
-        radar_kill_probability=0.05,
-        scenario="S2",
-    ), 
-    CurriculumSection(
-        name="S3 - Environment Size Sweep",
-        n_iters=200,                       # ignored during evaluation
-        n_strikers=2, n_jammers=(2,4),
-        n_known_targets=(1,5), n_unknown_targets=0,
-        n_known_radars=(4,8), n_unknown_radars=0,
-        radar_kill_probability=0.05,
-        scenario="S2",
-    )
+    # CurriculumSection(
+    #     name="S3 - Team Size Sweep",
+    #     n_iters=200,                       # ignored during evaluation
+    #     n_strikers=(1,3), n_jammers=(2,6),
+    #     n_known_targets=2, n_unknown_targets=1,
+    #     n_known_radars=4, n_unknown_radars=2,
+    #     radar_kill_probability=0.05,
+    #     scenario="S2",
+    # ), 
+    # CurriculumSection(
+    #     name="S3 - Environment Size Sweep",
+    #     n_iters=200,                       # ignored during evaluation
+    #     n_strikers=2, n_jammers=(2,4),
+    #     n_known_targets=(1,5), n_unknown_targets=0,
+    #     n_known_radars=(4,8), n_unknown_radars=0,
+    #     radar_kill_probability=0.05,
+    #     scenario="S2",
+    # )
 ]
 
 
@@ -360,6 +371,7 @@ def evaluate_scenarios(
             "scenario": env_cfg.scenario,
             "S": env_cfg.n_strikers, "J": env_cfg.n_jammers,
             "T": env_cfg.n_targets, "R": env_cfg.n_radars,
+            "comm": bool(getattr(env_cfg, "communicate", True)),
             "dr": env_cfg.dr is not None,
         }
         for key, *_ in KPI_COLUMNS:
@@ -379,7 +391,7 @@ def _print_table(rows: List[Dict[str, Any]], n_episodes: int, n_repeats: int,
                  producer: str) -> None:
     """Print the KPI table: one row per scenario, mean ± std per KPI."""
     # Context columns + one cell per KPI ("0.923 ± 0.031").
-    ctx_headers = ["Scenario", "Scn", "S", "J", "T", "R"]
+    ctx_headers = ["Scenario", "Scn", "S", "J", "T", "R", "Comm"]
 
     def _cell(row, key, fmt):
         mean, std = row[f"{key}_mean"], row[f"{key}_std"]
@@ -392,7 +404,7 @@ def _print_table(rows: List[Dict[str, Any]], n_episodes: int, n_repeats: int,
     for row in rows:
         name = row["name"] + ("*" if row["dr"] else "")
         ctx = [name, row["scenario"], str(row["S"]), str(row["J"]),
-               str(row["T"]), str(row["R"])]
+               str(row["T"]), str(row["R"]), "on" if row["comm"] else "off"]
         kpis = [_cell(row, key, fmt) for key, _, _, fmt in KPI_COLUMNS]
         table_rows.append(ctx + kpis)
 
@@ -435,7 +447,7 @@ def _write_csv(rows: List[Dict[str, Any]], out_dir: Path, n_episodes: int,
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     out_path = out_dir / f"policy_eval_{stamp}.csv"
 
-    fieldnames = ["name", "scenario", "S", "J", "T", "R", "dr",
+    fieldnames = ["name", "scenario", "S", "J", "T", "R", "comm", "dr",
                   "n_episodes", "n_repeats"]
     for key, *_ in KPI_COLUMNS:
         fieldnames += [f"{key}_mean", f"{key}_std"]
@@ -444,7 +456,7 @@ def _write_csv(rows: List[Dict[str, Any]], out_dir: Path, n_episodes: int,
         writer = csv.DictWriter(fh, fieldnames=fieldnames)
         writer.writeheader()
         for row in rows:
-            out = {k: row[k] for k in ("name", "scenario", "S", "J", "T", "R", "dr")}
+            out = {k: row[k] for k in ("name", "scenario", "S", "J", "T", "R", "comm", "dr")}
             out["n_episodes"] = n_episodes
             out["n_repeats"] = n_repeats
             for key, *_ in KPI_COLUMNS:

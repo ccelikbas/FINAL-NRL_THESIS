@@ -94,6 +94,9 @@ class CurriculumSection:
     scenario:               Optional[str]   = None     # None | "S1" | "S2"  (fixed, not DR)
     radar_kill_probability: FloatField      = None
 
+    # Inter-agent communication: None → inherit from config.py, True/False → fixed.
+    communicate:            Optional[bool]  = None
+
 
 CURRICULUM: List[CurriculumSection] = [
     # ── Stage 1: the simplest possible case, fixed, to bootstrap behaviour ──
@@ -188,6 +191,10 @@ def _section_to_env_cfg(
     kp,  dr_kp  = _resolve_float(section.radar_kill_probability, defaults.radar_kill_probability)
 
     scenario = section.scenario if section.scenario is not None else defaults.scenario
+    communicate = (
+        section.communicate if section.communicate is not None
+        else getattr(defaults, "communicate", True)
+    )
 
     dr = DomainRandomization(
         n_strikers=dr_ns, n_jammers=dr_nj,
@@ -204,6 +211,7 @@ def _section_to_env_cfg(
         n_known_radars=nkr, n_unknown_radars=nur,
         max_steps=ms, scenario=scenario,
         radar_kill_probability=kp,
+        communicate=communicate,
         reward_config=copy.deepcopy(reward_cfg),
         dr=dr,
     )
