@@ -73,7 +73,7 @@ class FOFEConfig:
     critic_fusion_mlp_dims : tuple of int
         Fusion MLP dims for critic.
     """
-    use_fofe: bool = True
+    use_fofe: bool = False
 
     # --- Actor FOFE dims ---
     agents_see_dims:   Tuple[int, ...] = (96,) # one SEE layer
@@ -142,12 +142,12 @@ class DomainRandomization:
 @dataclass
 class EnvConfig:
     # Team composition
-    n_strikers: int = 1
+    n_strikers: int = 2
     n_jammers: int = 2
     n_known_targets: int = 2
-    n_unknown_targets: int = 1
-    n_known_radars: int = 4
-    n_unknown_radars: int = 2
+    n_unknown_targets: int = 0
+    n_known_radars: int = 2
+    n_unknown_radars: int = 0
     n_targets: int = 0
     n_radars: int = 0
 
@@ -173,7 +173,7 @@ class EnvConfig:
     #         form a defensive line between agents and targets.
     # The radar layout pool is still pre-generated at env init for both
     # scenarios; only the sampling bounds + min-sep differ.
-    scenario: str = "S2"
+    scenario: str = "S1"
     # Minimum pairwise radar separation when scenario == "S2". S2's radar
     # band is much thinner than S1's, so the default is lower to keep
     # rejection sampling tractable.
@@ -305,7 +305,7 @@ class EnvConfig:
 class PPOConfig:
     """Shared PPO hyperparameters for both striker and jammer MAPPO."""
     num_envs: int = 2048  #1048 (local) or 2048 (remote)
-    n_iters: int = 100
+    n_iters: int = 200
     frames_per_batch: Optional[int] = None
     num_epochs: int = 6
     minibatch_size: int = 16384  #8192 (local) or 16384 (remote)

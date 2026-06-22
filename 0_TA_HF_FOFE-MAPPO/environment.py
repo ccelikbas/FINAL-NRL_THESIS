@@ -1139,9 +1139,25 @@ class StrikeEA2DEnv(EnvBase):
             bottom_y = self.low + 0.05  # 50 km from bottom edge
             spacing = 0.02  # 20 km between agents
 
+            # Slot ordering along x: jammers centred, strikers on the outer
+            # borders (e.g. SJJS, SJJJJS). Strikers are split between the two
+            # sides; if the striker count is odd the spare one goes to a
+            # randomly chosen side (per reset batch) so the pattern still
+            # holds (e.g. SSJJS or SJJSS). Agent *identity* is unchanged —
+            # strikers remain indices [0, n_strikers), jammers [n_strikers, A);
+            # only their left-to-right slot position is remapped here.
+            n_s = self.n_strikers
+            left_s = n_s // 2
+            if n_s % 2 == 1:
+                left_s += int(torch.randint(
+                    0, 2, (1,), generator=self._rng, device=self.device).item())
+            striker_ids = list(range(n_s))
+            jammer_ids  = list(range(n_s, A))
+            slot_order  = striker_ids[:left_s] + jammer_ids + striker_ids[left_s:]
+
             agent_pos_reset = torch.zeros(n_reset, A, 2, device=self.device)
-            for a in range(A):
-                offset_x = (a - (A - 1) / 2.0) * spacing
+            for slot, a in enumerate(slot_order):
+                offset_x = (slot - (A - 1) / 2.0) * spacing
                 agent_pos_reset[:, a, 0] = center_x + offset_x
                 agent_pos_reset[:, a, 1] = bottom_y
             self.agent_pos[reset_idx] = agent_pos_reset

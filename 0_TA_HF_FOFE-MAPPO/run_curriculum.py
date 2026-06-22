@@ -102,23 +102,23 @@ CURRICULUM: List[CurriculumSection] = [
     # ── Stage 1: the simplest possible case, fixed, to bootstrap behaviour ──
     CurriculumSection(
         name="Baseline 2sx4j 0.01k",
-        n_iters=500,
+        n_iters=50,
         n_strikers=1, n_jammers=2,
         n_known_targets=2, n_unknown_targets=0,
         n_known_radars=6, n_unknown_radars=0,
-        radar_kill_probability=0.05,
-        scenario="S2"
-    ),
-    # ── Stage 2: randomize the threat field per-env (targets + radars vary) ──
-    CurriculumSection(
-        name="Baseline 2sx4j 0.025k",
-        n_iters=500,
-        n_strikers=1, n_jammers=2,
-        n_known_targets=2, n_unknown_targets=0,
-        n_known_radars=6, n_unknown_radars=0,
-        radar_kill_probability=0.1,
+        radar_kill_probability=0.01,
         scenario="S2"
     )
+    # ── Stage 2: randomize the threat field per-env (targets + radars vary) ──
+    # CurriculumSection(
+    #     name="Baseline 2sx4j 0.025k",
+    #     n_iters=0,
+    #     n_strikers=1, n_jammers=2,
+    #     n_known_targets=2, n_unknown_targets=0,
+    #     n_known_radars=6, n_unknown_radars=0,
+    #     radar_kill_probability=0.1,
+    #     scenario="S2"
+    # )
     # ── Stage 3: full per-env DR including team size + softer kills ──────────
 #     CurriculumSection(
 #         name="Baseline 2sx4j 0.05k",
