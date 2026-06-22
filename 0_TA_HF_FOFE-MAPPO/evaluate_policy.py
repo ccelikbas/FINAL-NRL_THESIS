@@ -113,23 +113,23 @@ EVAL_SCENARIOS: List[CurriculumSection] = [
     CurriculumSection(
         name="S1 - Known - Comm",
         n_iters=200,                       # ignored during evaluation
-        n_strikers=2, n_jammers=(2, 4),
+        n_strikers=2, n_jammers=2,
         n_known_targets=3, n_unknown_targets=0,
         n_known_radars=6, n_unknown_radars=0,
         radar_kill_probability=0.05,
         scenario="S2",
         communicate=True,
-    ),
-    CurriculumSection(
-        name="S1 - Known",
-        n_iters=200,                       # ignored during evaluation
-        n_strikers=2, n_jammers=(2, 4),
-        n_known_targets=3, n_unknown_targets=0,
-        n_known_radars=6, n_unknown_radars=0,
-        radar_kill_probability=0.05,
-        scenario="S2",
-        communicate=False,
-    ),
+    )
+    # CurriculumSection(
+    #     name="S1 - Known",
+    #     n_iters=200,                       # ignored during evaluation
+    #     n_strikers=2, n_jammers=(2, 4),
+    #     n_known_targets=3, n_unknown_targets=0,
+    #     n_known_radars=6, n_unknown_radars=0,
+    #     radar_kill_probability=0.05,
+    #     scenario="S2",
+    #     communicate=False,
+    # ),
     # CurriculumSection(
     #     name="2sx2j - Known",
     #     n_iters=200,                       # ignored during evaluation
@@ -157,46 +157,46 @@ EVAL_SCENARIOS: List[CurriculumSection] = [
     #     radar_kill_probability=0.05,
     #     scenario="S2",
     # ),
-        CurriculumSection(
-        name="S2 - Pop-UP - Comm",
-        n_iters=200,                       # ignored during evaluation
-        n_strikers=2, n_jammers=(2, 4),
-        n_known_targets=2, n_unknown_targets=1,
-        n_known_radars=4, n_unknown_radars=2,
-        radar_kill_probability=0.05,
-        scenario="S2",
-        communicate=True,
-    ),
-        CurriculumSection(
-        name="S2 - Pop-UP",
-        n_iters=200,                       # ignored during evaluation
-        n_strikers=2, n_jammers=(2, 4),
-        n_known_targets=2, n_unknown_targets=1,
-        n_known_radars=4, n_unknown_radars=2,
-        radar_kill_probability=0.05,
-        scenario="S2",
-        communicate=False,
-    ),
-            CurriculumSection(
-        name="S2 - Unknown - Comm",
-        n_iters=200,                       # ignored during evaluation
-        n_strikers=2, n_jammers=(2, 4),
-        n_known_targets=2, n_unknown_targets=1,
-        n_known_radars=2, n_unknown_radars=4,
-        radar_kill_probability=0.05,
-        scenario="S2",
-        communicate=True,
-    ),
-        CurriculumSection(
-        name="S2 - Unknown Large",
-        n_iters=200,                       # ignored during evaluation
-        n_strikers=2, n_jammers=(2, 4),
-        n_known_targets=1, n_unknown_targets=2,
-        n_known_radars=2, n_unknown_radars=4,
-        radar_kill_probability=0.05,
-        scenario="S2",
-        communicate=False,
-    ),
+    #     CurriculumSection(
+    #     name="S2 - Pop-UP - Comm",
+    #     n_iters=200,                       # ignored during evaluation
+    #     n_strikers=2, n_jammers=(2, 4),
+    #     n_known_targets=2, n_unknown_targets=1,
+    #     n_known_radars=4, n_unknown_radars=2,
+    #     radar_kill_probability=0.05,
+    #     scenario="S2",
+    #     communicate=True,
+    # ),
+    #     CurriculumSection(
+    #     name="S2 - Pop-UP",
+    #     n_iters=200,                       # ignored during evaluation
+    #     n_strikers=2, n_jammers=(2, 4),
+    #     n_known_targets=2, n_unknown_targets=1,
+    #     n_known_radars=4, n_unknown_radars=2,
+    #     radar_kill_probability=0.05,
+    #     scenario="S2",
+    #     communicate=False,
+    # ),
+    #         CurriculumSection(
+    #     name="S2 - Unknown - Comm",
+    #     n_iters=200,                       # ignored during evaluation
+    #     n_strikers=2, n_jammers=(2, 4),
+    #     n_known_targets=2, n_unknown_targets=1,
+    #     n_known_radars=2, n_unknown_radars=4,
+    #     radar_kill_probability=0.05,
+    #     scenario="S2",
+    #     communicate=True,
+    # ),
+    #     CurriculumSection(
+    #     name="S2 - Unknown Large",
+    #     n_iters=200,                       # ignored during evaluation
+    #     n_strikers=2, n_jammers=(2, 4),
+    #     n_known_targets=1, n_unknown_targets=2,
+    #     n_known_radars=2, n_unknown_radars=4,
+    #     radar_kill_probability=0.05,
+    #     scenario="S2",
+    #     communicate=False,
+    # ),
     # CurriculumSection(
     #     name="2sx2j Pop-Up",
     #     n_iters=200,                       # ignored during evaluation
@@ -262,6 +262,7 @@ KPI_COLUMNS = [
     ("completion", "eval_task_completion_rate",       "Completion", "{:.3f}"),
     ("targets",    "eval_targets_destroyed_rate",     "Targets",    "{:.3f}"),
     ("survival",   "eval_survival_rate",              "Survival",   "{:.3f}"),
+    ("fragmentation", "eval_coalition_fragmentation", "Coalition Frag", "{:.3f}"),
     ("duration",   "eval_mean_duration",              "Duration",   "{:.1f}"),
     ("reward",     "eval_mean_episode_total_reward",  "Reward",     "{:.2f}"),
 ]

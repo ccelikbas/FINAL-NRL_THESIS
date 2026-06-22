@@ -32,6 +32,101 @@ from .agents import JammerAgent, RadarAgent, StrikerAgent
 from .rewards import RewardConfig
 
 
+# ======================================================================
+# Coalition-fragmentation KPI
+# ======================================================================
+
+def coalition_fragmentation(
+    agent_pos: torch.Tensor,
+    radius: float,
+    alive_mask: Optional[torch.Tensor] = None,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Per-step coalition-fragmentation KPI from agent positions.
+
+    Builds an undirected proximity graph in which agents ``i`` and ``j`` are
+    linked when their Euclidean distance ``d_ij <= radius`` (self-links
+    excluded), finds its connected components (connectivity is transitive),
+    and returns, for every batch element:
+
+        F = 1 - (sum_c n_c (n_c - 1)) / (N (N - 1))
+
+    where ``n_c`` are the connected-component (coalition) sizes over the ``N``
+    participating agents. ``F = 0`` means all agents form a single coalition;
+    ``F = 1`` means every agent is isolated; ``F`` is the fraction of unique
+    agent pairs that fall in different coalitions. ``F`` is defined as ``0``
+    when fewer than two agents participate (no pairs to fragment).
+
+    Connected components are found by boolean transitive closure of the
+    adjacency matrix (repeated squaring, ``O(log A)`` rounds) — no external
+    graph library is needed. Component sizes are read straight off the closure:
+    for any participating node ``i`` the number of reachable nodes equals its
+    coalition size ``n_c``, and ``sum_c n_c (n_c - 1) = sum_i (n_{c(i)} - 1)``.
+
+    Parameters
+    ----------
+    agent_pos : torch.Tensor
+        Agent positions, shape ``[..., A, d]`` (any leading batch dims).
+    radius : float
+        Coalition radius ``r > 0``.
+    alive_mask : torch.Tensor, optional
+        Boolean ``[..., A]`` mask; ``False`` agents are excluded from the graph
+        and from ``N``. Defaults to all agents participating.
+
+    Returns
+    -------
+    fragmentation : torch.Tensor
+        ``[...]`` float tensor in ``[0, 1]``.
+    n_coalitions : torch.Tensor
+        ``[...]`` long tensor: number of connected components over the
+        participating agents (isolated agents count as singleton coalitions).
+    """
+    if agent_pos.ndim < 2:
+        raise ValueError("agent_pos must have shape [..., A, d]")
+
+    A = agent_pos.shape[-2]
+    device = agent_pos.device
+
+    dist = torch.cdist(agent_pos, agent_pos)                       # [..., A, A]
+
+    if alive_mask is None:
+        alive = torch.ones(dist.shape[:-1], dtype=torch.bool, device=device)
+    else:
+        alive = alive_mask.to(device=device, dtype=torch.bool)
+
+    eye = torch.eye(A, dtype=torch.bool, device=device)
+    pair_alive = alive.unsqueeze(-1) & alive.unsqueeze(-2)        # [..., A, A]
+
+    # Adjacency: within radius, distinct nodes, both participating.
+    adj = (dist <= float(radius)) & pair_alive & ~eye             # [..., A, A]
+    # Reachability seed: adjacency + self-loops for participating nodes only.
+    reach = adj | (eye & alive.unsqueeze(-1))
+
+    # Boolean transitive closure via repeated squaring.
+    n_rounds = max(1, math.ceil(math.log2(A))) if A > 1 else 1
+    for _ in range(n_rounds):
+        reach = reach | (torch.matmul(reach.float(), reach.float()) > 0)
+
+    comp_size = reach.sum(dim=-1)                                 # [..., A]
+    N = alive.sum(dim=-1)                                         # [...]
+
+    # sum_c n_c (n_c - 1) == sum over participating nodes of (comp_size - 1).
+    pairs_together = ((comp_size - 1) * alive.long()).sum(dim=-1).to(torch.float)
+    denom = (N * (N - 1)).to(torch.float)
+    fragmentation = torch.where(
+        denom > 0, 1.0 - pairs_together / denom, torch.zeros_like(denom)
+    )
+
+    # Coalition count: the smallest-indexed node of each component is its
+    # unique "root" (min reachable index), so #roots == #components.
+    idx = torch.arange(A, device=device).expand_as(reach)
+    labels = torch.where(reach, idx, torch.full_like(idx, A))
+    root = labels.min(dim=-1).values                             # [..., A]
+    is_root = alive & (root == torch.arange(A, device=device).expand_as(root))
+    n_coalitions = is_root.sum(dim=-1)
+
+    return fragmentation, n_coalitions
+
+
 class StrikeEA2DEnv(EnvBase):
     """Vectorised Strike–EA 2-D environment (MARL, TorchRL)."""
 
@@ -63,6 +158,7 @@ class StrikeEA2DEnv(EnvBase):
         R_obs:        float = 0.50,
         R_comm:       float = 0.50,
         communicate:  bool = True,
+        coalition_radius: float = 0.2,
         # --- flat-MLP observation slots (use_fofe=False only) ---
         n_other_agent_obs_slots: int = 3,
         n_radar_obs_slots: int = 2,
@@ -142,6 +238,7 @@ class StrikeEA2DEnv(EnvBase):
         self.R_obs       = float(R_obs)
         self.R_comm      = float(R_comm)
         self.communicate = bool(communicate)
+        self.coalition_radius = float(coalition_radius)
         self.radar_range = float(radar_range)
 
         # shaping
@@ -301,6 +398,9 @@ class StrikeEA2DEnv(EnvBase):
         self._jammer_prev_dist = torch.zeros(B, n_jammers, self.n_radars, device=self._device)
         # Running team-total reward per env for current episode (sum over agents)
         self._episode_team_reward = torch.zeros(B, device=self.device)
+        # Running sum of per-step coalition-fragmentation F[k] for current
+        # episode; the episode KPI is this divided by the number of steps run.
+        self._episode_frag_sum = torch.zeros(B, device=self.device)
         # Running per-component team-total reward per env for current episode
         self._episode_component_reward = {
             "target_destroyed": torch.zeros(B, device=self.device),
@@ -1117,6 +1217,7 @@ class StrikeEA2DEnv(EnvBase):
             self.radar_eff_range[reset_idx] = self.radar_range
             self.step_count[reset_idx] = 0
             self._episode_team_reward[reset_idx] = 0.0
+            self._episode_frag_sum[reset_idx] = 0.0
             for comp_key in self._episode_component_reward:
                 self._episode_component_reward[comp_key][reset_idx] = 0.0
 
@@ -1693,6 +1794,14 @@ class StrikeEA2DEnv(EnvBase):
         for comp_key, comp_tensor in self.last_reward_components.items():
             self._episode_component_reward[comp_key] += comp_tensor.sum(dim=-1)
 
+        # Accumulate this step's coalition-fragmentation F[k] over only the
+        # currently-alive agents (post-kinematics, post-kill positions). The
+        # per-episode KPI is this sum divided by the number of steps executed.
+        step_frag, _ = coalition_fragmentation(
+            self.agent_pos, self.coalition_radius, alive_mask=self.agent_alive
+        )
+        self._episode_frag_sum += step_frag
+
         # ---- done flags ----
         self.step_count += 1
         all_targets_done = (~self.target_alive).all(dim=-1, keepdim=True)
@@ -1739,12 +1848,15 @@ class StrikeEA2DEnv(EnvBase):
             miss_t       = all_targets_done[done_idx_t].float()                                 # [N,1]
             dur_t        = self.step_count[done_idx_t].float()                                  # [N,1]
             team_r_t     = self._episode_team_reward[done_idx_t].unsqueeze(-1)                  # [N,1]
+            # Per-episode coalition fragmentation = mean F[k] over executed steps.
+            frag_t       = (self._episode_frag_sum[done_idx_t].unsqueeze(-1)
+                            / self.step_count[done_idx_t].float().clamp_min(1.0))                 # [N,1]
             comp_stack_t = torch.stack(
                 [self._episode_component_reward[k][done_idx_t] for k in comp_keys], dim=-1
             )                                                                                    # [N, n_comp]
             all_data = torch.cat(
-                [tgt_frac_t, surv_frac_t, miss_t, dur_t, team_r_t, comp_stack_t], dim=-1
-            )                                                                                    # [N, 5 + n_comp]
+                [tgt_frac_t, surv_frac_t, miss_t, dur_t, team_r_t, frag_t, comp_stack_t], dim=-1
+            )                                                                                    # [N, 6 + n_comp]
 
             # Two batched GPU→CPU transfers total (vs B × n_components before).
             env_indices = done_idx_t.cpu().tolist()
@@ -1759,13 +1871,15 @@ class StrikeEA2DEnv(EnvBase):
                     "mission_complete": bool(row[2]),
                     "duration": int(row[3]),
                     "episode_total_reward": row[4],
+                    "coalition_fragmentation": row[5],
                     "episode_component_reward": {
-                        k: row[5 + j] for j, k in enumerate(comp_keys)
+                        k: row[6 + j] for j, k in enumerate(comp_keys)
                     },
                 })
 
             # Avoid duplicate logging if terminal envs are stepped again before reset
             self._episode_team_reward[done_flat] = 0.0
+            self._episode_frag_sum[done_flat] = 0.0
             for comp_key in self._episode_component_reward:
                 self._episode_component_reward[comp_key][done_flat] = 0.0
 
@@ -1782,6 +1896,7 @@ class StrikeEA2DEnv(EnvBase):
           mission_complete (bool), targets_frac (float),
                     survival_frac (float), duration (int),
                                         episode_total_reward (float),
+                                        coalition_fragmentation (float),
                                         episode_component_reward (dict[str, float]).
         """
         stats = self._completed_episodes

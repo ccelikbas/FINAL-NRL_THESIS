@@ -354,6 +354,7 @@ def _env_kwargs(env_cfg: EnvConfig, ppo_cfg: PPOConfig) -> dict:
         R_obs=env_cfg.R_obs,
         R_comm=env_cfg.R_comm,
         communicate=getattr(env_cfg, "communicate", True),
+        coalition_radius=getattr(env_cfg, "coalition_radius", 0.2),
         n_other_agent_obs_slots=getattr(env_cfg, "n_other_agent_obs_slots", 3),
         n_radar_obs_slots=getattr(env_cfg, "n_radar_obs_slots", 2),
         n_target_obs_slots=getattr(env_cfg, "n_target_obs_slots", 2),
@@ -633,6 +634,7 @@ def evaluate_current_policy(
     ep_duration: List[float] = []
     ep_completion: List[float] = []
     ep_targets_destroyed: List[float] = []
+    ep_coalition_frag: List[float] = []
     ep_component_rewards: Dict[str, List[float]] = {
         key: [] for key in EVAL_REWARD_COMPONENT_KEYS
     }
@@ -687,12 +689,14 @@ def evaluate_current_policy(
             ep_duration.append(float(s.get("duration", float("nan"))))
             ep_completion.append(1.0 if bool(s.get("mission_complete", False)) else 0.0)
             ep_targets_destroyed.append(float(s.get("targets_frac", float("nan"))))
+            ep_coalition_frag.append(float(s.get("coalition_fragmentation", float("nan"))))
         else:
             ep_total_rewards.append(float("nan"))
             ep_survival.append(float("nan"))
             ep_duration.append(float("nan"))
             ep_completion.append(float("nan"))
             ep_targets_destroyed.append(float("nan"))
+            ep_coalition_frag.append(float("nan"))
         for comp_key in EVAL_REWARD_COMPONENT_KEYS:
             ep_component_rewards[comp_key].append(float(component_sums[comp_key][b].item()))
 
@@ -706,6 +710,7 @@ def evaluate_current_policy(
         "eval_mean_duration": float(sum(ep_duration) / len(ep_duration)),
         "eval_task_completion_rate": float(sum(ep_completion) / len(ep_completion)),
         "eval_targets_destroyed_rate": _finite_mean(ep_targets_destroyed),
+        "eval_coalition_fragmentation": _finite_mean(ep_coalition_frag),
     }
     for comp_key in EVAL_REWARD_COMPONENT_KEYS:
         metrics[f"eval_component_{comp_key}"] = _finite_mean(ep_component_rewards[comp_key])
@@ -884,7 +889,7 @@ def train_mappo(
         "clip_ratio": [], "explained_variance": [],
         "eval_mean_episode_total_reward": [], "eval_survival_rate": [],
         "eval_mean_duration": [], "eval_task_completion_rate": [],
-        "eval_targets_destroyed_rate": [],
+        "eval_targets_destroyed_rate": [], "eval_coalition_fragmentation": [],
         "reward_norm_running_mean": [], "reward_norm_running_std": [],
         "raw_reward_mean": [], "raw_reward_std": [],
         "normalized_reward_mean": [], "normalized_reward_std": [],
@@ -1375,6 +1380,7 @@ def train_mappo(
             logs["eval_mean_duration"].append(eval_metrics["eval_mean_duration"])
             logs["eval_task_completion_rate"].append(eval_metrics["eval_task_completion_rate"])
             logs["eval_targets_destroyed_rate"].append(eval_metrics["eval_targets_destroyed_rate"])
+            logs["eval_coalition_fragmentation"].append(eval_metrics["eval_coalition_fragmentation"])
             for comp_key in EVAL_REWARD_COMPONENT_KEYS:
                 logs[f"eval_component_{comp_key}"].append(eval_metrics[f"eval_component_{comp_key}"])
         else:
@@ -1383,6 +1389,7 @@ def train_mappo(
             logs["eval_mean_duration"].append(float("nan"))
             logs["eval_task_completion_rate"].append(float("nan"))
             logs["eval_targets_destroyed_rate"].append(float("nan"))
+            logs["eval_coalition_fragmentation"].append(float("nan"))
             for comp_key in EVAL_REWARD_COMPONENT_KEYS:
                 logs[f"eval_component_{comp_key}"].append(float("nan"))
 
@@ -1485,6 +1492,7 @@ def train_mappo(
                 f"comp {logs['eval_task_completion_rate'][-1]:.2f} | "
                 f"tgt {logs['eval_targets_destroyed_rate'][-1]:.2f} | "
                 f"surv {logs['eval_survival_rate'][-1]:.2f} | "
+                f"frag {logs['eval_coalition_fragmentation'][-1]:.2f} | "
                 f"dur {logs['eval_mean_duration'][-1]:.1f} | "
                 f"S[pi {logs['striker_loss_policy'][-1]:.4f} "
                 f"V {logs['striker_loss_value'][-1]:.4f} "

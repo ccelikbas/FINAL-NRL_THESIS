@@ -101,7 +101,9 @@ def _draw_eval_kpi(ax, logs: Dict[str, List[float]]) -> None:
         _plot_valid(ax, logs["eval_task_completion_rate"], "eval_completion_ratio")
     if "eval_targets_destroyed_rate" in logs:
         _plot_valid(ax, logs["eval_targets_destroyed_rate"], "eval_targets_destroyed_ratio")
-    ax.set_title("Eval Survival, Completion & Targets Destroyed")
+    if "eval_coalition_fragmentation" in logs:
+        _plot_valid(ax, logs["eval_coalition_fragmentation"], "eval_coalition_fragmentation")
+    ax.set_title("Eval Survival, Completion, Targets & Coalition Fragmentation")
     ax.set_xlabel("Iteration")
     ax.legend()
     ax.grid(True)
@@ -967,7 +969,8 @@ def plot_comparison(
     _dual(ax, "eval_survival_rate",          "survival_rate",          "blue",   legacy_logs, fofe_logs)
     _dual(ax, "eval_task_completion_rate",   "completion_rate",        "orange", legacy_logs, fofe_logs)
     _dual(ax, "eval_targets_destroyed_rate", "targets_destroyed_rate", "green",  legacy_logs, fofe_logs)
-    ax.set_title("Eval Survival, Completion & Targets Destroyed")
+    _dual(ax, "eval_coalition_fragmentation", "coalition_fragmentation", "purple", legacy_logs, fofe_logs)
+    ax.set_title("Eval Survival, Completion, Targets & Coalition Fragmentation")
     ax.set_xlabel("Iteration")
     ax.legend(fontsize=7, ncol=2)
     ax.grid(True)

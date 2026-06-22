@@ -200,6 +200,14 @@ class EnvConfig:
     # Independent of the observation encoder, so works with both FOFE and flat MLP.
     communicate: bool = False
 
+    # Coalition radius for the coalition-fragmentation KPI. Two agents are
+    # linked in the per-step proximity graph when their Euclidean distance is
+    # <= coalition_radius; connected components (transitive) define coalitions.
+    # Decoupled from R_obs / R_comm so the KPI can probe a different spatial
+    # scale than sensing/communication. See StrikeEA2DEnv.coalition_fragmentation
+    # and evaluate_current_policy's eval_coalition_fragmentation metric.
+    coalition_radius: float = 0.2
+
     # ── Flat-MLP observation slots (use_fofe=False only) ────────────
     # Number of nearest VISIBLE entities of each type encoded per agent in the
     # flat top-K observation. Entities are sorted by distance; the K nearest fill
@@ -254,6 +262,7 @@ class EnvConfig:
         self.radar_min_sep = float(self.radar_min_sep)
         self.s2_radar_min_sep = float(self.s2_radar_min_sep)
         self.s2_target_min_sep = float(self.s2_target_min_sep)
+        self.coalition_radius = float(self.coalition_radius)
         self.scenario = str(self.scenario).upper()
 
         if self.n_known_targets < 0 or self.n_unknown_targets < 0:
@@ -272,6 +281,8 @@ class EnvConfig:
             raise ValueError("s2_radar_min_sep must be >= 0")
         if self.s2_target_min_sep < 0:
             raise ValueError("s2_target_min_sep must be >= 0")
+        if self.coalition_radius <= 0:
+            raise ValueError("coalition_radius must be > 0")
         if self.scenario not in ("S1", "S2"):
             raise ValueError(f"scenario must be 'S1' or 'S2', got {self.scenario!r}")
 

@@ -23,7 +23,7 @@ import torch
 from tensordict import TensorDict
 
 from .config import HFRadarConfig
-from .environment import StrikeEA2DEnv
+from .environment import StrikeEA2DEnv, coalition_fragmentation
 from .rewards import RewardConfig
 
 
@@ -1394,6 +1394,14 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         self._episode_team_reward += step_team_reward
         for comp_key, comp_tensor in self.last_reward_components.items():
             self._episode_component_reward[comp_key] += comp_tensor.sum(dim=-1)
+
+        # Accumulate this step's coalition-fragmentation F[k] over only the
+        # currently-alive agents (post-kinematics, post-kill positions). The
+        # per-episode KPI is this sum divided by the number of steps executed.
+        step_frag, _ = coalition_fragmentation(
+            self.agent_pos, self.coalition_radius, alive_mask=self.agent_alive
+        )
+        self._episode_frag_sum += step_frag
         _t = self._prof_lap("env_reward_accum", _t)
 
         # ---- done flags ----
@@ -1448,12 +1456,15 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
             miss_t       = all_targets_done[done_idx_t].float()                                 # [N,1]
             dur_t        = self.step_count[done_idx_t].float()                                  # [N,1]
             team_r_t     = self._episode_team_reward[done_idx_t].unsqueeze(-1)                  # [N,1]
+            # Per-episode coalition fragmentation = mean F[k] over executed steps.
+            frag_t       = (self._episode_frag_sum[done_idx_t].unsqueeze(-1)
+                            / self.step_count[done_idx_t].float().clamp_min(1.0))                 # [N,1]
             comp_stack_t = torch.stack(
                 [self._episode_component_reward[k][done_idx_t] for k in comp_keys], dim=-1
             )                                                                                    # [N, n_comp]
             all_data = torch.cat(
-                [tgt_frac_t, surv_frac_t, miss_t, dur_t, team_r_t, comp_stack_t], dim=-1
-            )                                                                                    # [N, 5 + n_comp]
+                [tgt_frac_t, surv_frac_t, miss_t, dur_t, team_r_t, frag_t, comp_stack_t], dim=-1
+            )                                                                                    # [N, 6 + n_comp]
 
             # Two batched GPU→CPU transfers total (vs B × n_components before).
             env_indices = done_idx_t.cpu().tolist()
@@ -1468,13 +1479,15 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
                     "mission_complete": bool(row[2]),
                     "duration": int(row[3]),
                     "episode_total_reward": row[4],
+                    "coalition_fragmentation": row[5],
                     "episode_component_reward": {
-                        k: row[5 + j] for j, k in enumerate(comp_keys)
+                        k: row[6 + j] for j, k in enumerate(comp_keys)
                     },
                 })
 
             # Avoid duplicate logging if terminal envs are stepped again before reset
             self._episode_team_reward[done_flat] = 0.0
+            self._episode_frag_sum[done_flat] = 0.0
             for comp_key in self._episode_component_reward:
                 self._episode_component_reward[comp_key][done_flat] = 0.0
         _t = self._prof_lap("env_done_loop", _t)
