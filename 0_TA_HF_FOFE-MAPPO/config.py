@@ -198,7 +198,7 @@ class EnvConfig:
     # subgroup share observations (multi-hop). When False, each agent forms its
     # own singleton subgroup and only senses entities within its own R_obs.
     # Independent of the observation encoder, so works with both FOFE and flat MLP.
-    communicate: bool = True
+    communicate: bool = False
 
     # ── Flat-MLP observation slots (use_fofe=False only) ────────────
     # Number of nearest VISIBLE entities of each type encoded per agent in the

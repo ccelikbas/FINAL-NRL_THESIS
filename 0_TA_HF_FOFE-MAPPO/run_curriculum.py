@@ -103,50 +103,50 @@ CURRICULUM: List[CurriculumSection] = [
     CurriculumSection(
         name="Baseline 2sx4j 0.01k",
         n_iters=500,
-        n_strikers=2, n_jammers=4,
-        n_known_targets=1, n_unknown_targets=0,
-        n_known_radars=1, n_unknown_radars=0,
-        radar_kill_probability=0.01,
+        n_strikers=1, n_jammers=2,
+        n_known_targets=2, n_unknown_targets=0,
+        n_known_radars=6, n_unknown_radars=0,
+        radar_kill_probability=0.05,
         scenario="S2"
     ),
     # ── Stage 2: randomize the threat field per-env (targets + radars vary) ──
     CurriculumSection(
         name="Baseline 2sx4j 0.025k",
         n_iters=500,
-        n_strikers=2, n_jammers=4,
-        n_known_targets=1, n_unknown_targets=0,
-        n_known_radars=1, n_unknown_radars=0,
-        radar_kill_probability=0.025,
-        scenario="S2"
-    ),
-    # ── Stage 3: full per-env DR including team size + softer kills ──────────
-    CurriculumSection(
-        name="Baseline 2sx4j 0.05k",
-        n_iters=500,
-        n_strikers=2, n_jammers=4,
-        n_known_targets=1, n_unknown_targets=0,
-        n_known_radars=1, n_unknown_radars=0,
-        radar_kill_probability=0.05,
-        scenario="S2"
-    ), 
-    CurriculumSection(
-        name="Baseline 2sx4j 0.1k",
-        n_iters=500,
-        n_strikers=2, n_jammers=4,
-        n_known_targets=1, n_unknown_targets=0,
-        n_known_radars=1, n_unknown_radars=0,
+        n_strikers=1, n_jammers=2,
+        n_known_targets=2, n_unknown_targets=0,
+        n_known_radars=6, n_unknown_radars=0,
         radar_kill_probability=0.1,
         scenario="S2"
-    ), 
-    CurriculumSection(
-        name="Baseline 2sx4j 0.25k",
-        n_iters=1000,
-        n_strikers=2, n_jammers=4,
-        n_known_targets=1, n_unknown_targets=0,
-        n_known_radars=1, n_unknown_radars=0,
-        radar_kill_probability=0.25,
-        scenario="S2"
     )
+    # ── Stage 3: full per-env DR including team size + softer kills ──────────
+#     CurriculumSection(
+#         name="Baseline 2sx4j 0.05k",
+#         n_iters=500,
+#         n_strikers=2, n_jammers=4,
+#         n_known_targets=1, n_unknown_targets=0,
+#         n_known_radars=1, n_unknown_radars=0,
+#         radar_kill_probability=0.05,
+#         scenario="S2"
+#     ), 
+#     CurriculumSection(
+#         name="Baseline 2sx4j 0.1k",
+#         n_iters=500,
+#         n_strikers=2, n_jammers=4,
+#         n_known_targets=1, n_unknown_targets=0,
+#         n_known_radars=1, n_unknown_radars=0,
+#         radar_kill_probability=0.1,
+#         scenario="S2"
+#     ), 
+#     CurriculumSection(
+#         name="Baseline 2sx4j 0.25k",
+#         n_iters=1000,
+#         n_strikers=2, n_jammers=4,
+#         n_known_targets=1, n_unknown_targets=0,
+#         n_known_radars=1, n_unknown_radars=0,
+#         radar_kill_probability=0.25,
+#         scenario="S2"
+#     )
 ]
 
 # check if this is configured correctly. 
