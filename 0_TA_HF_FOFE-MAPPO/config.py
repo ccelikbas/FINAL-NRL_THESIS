@@ -73,7 +73,7 @@ class FOFEConfig:
     critic_fusion_mlp_dims : tuple of int
         Fusion MLP dims for critic.
     """
-    use_fofe: bool = False
+    use_fofe: bool = True
 
     # --- Actor FOFE dims ---
     agents_see_dims:   Tuple[int, ...] = (96,) # one SEE layer
@@ -198,7 +198,7 @@ class EnvConfig:
     # subgroup share observations (multi-hop). When False, each agent forms its
     # own singleton subgroup and only senses entities within its own R_obs.
     # Independent of the observation encoder, so works with both FOFE and flat MLP.
-    communicate: bool = False
+    communicate: bool = True
 
     # ── Flat-MLP observation slots (use_fofe=False only) ────────────
     # Number of nearest VISIBLE entities of each type encoded per agent in the
@@ -223,7 +223,7 @@ class EnvConfig:
 
     # Threats
     radar_range: float = 0.20
-    radar_kill_probability: float = 0.01
+    radar_kill_probability: float = 0.05
 
     # Rewards
     border_thresh: float = 0.05
@@ -294,7 +294,7 @@ class EnvConfig:
 class PPOConfig:
     """Shared PPO hyperparameters for both striker and jammer MAPPO."""
     num_envs: int = 2048  #1048 (local) or 2048 (remote)
-    n_iters: int = 50
+    n_iters: int = 100
     frames_per_batch: Optional[int] = None
     num_epochs: int = 6
     minibatch_size: int = 16384  #8192 (local) or 16384 (remote)
