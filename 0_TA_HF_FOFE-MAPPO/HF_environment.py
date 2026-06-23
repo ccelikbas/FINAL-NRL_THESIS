@@ -111,7 +111,11 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
 
         # Unconstrained range from radar SNR equation (SI meters).
         # Gains/losses are entered in dB and converted to linear above.
-        # R_unc_m = (P_t G_t G_r lambda^2 sigma / ((4pi)^3 k T0 B_n L))^(1/4)
+        # Defined as the range where received SNR == SNR_min, hence SNR_min
+        # (linear) enters the denominator:
+        # R_unc_m = (P_t G_t G_r lambda^2 sigma
+        #            / ((4pi)^3 k T0 B_n L SNR_min))^(1/4)
+        snr_min_linear = _db_to_linear(_cfg_float("snr_min", None, 0.0))
         snr_num = (
             radar_tx_power
             * radar_tx_gain
@@ -125,6 +129,7 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
             * system_temperature
             * receiver_bandwidth
             * system_losses
+            * snr_min_linear
         )
         self._meters_per_world_unit = meters_per_world_unit
         self.radar_range_unconstrained_m_raw = math.pow(max(snr_num / max(snr_den, 1e-30), 0.0), 0.25)

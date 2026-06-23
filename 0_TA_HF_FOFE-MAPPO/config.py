@@ -305,7 +305,7 @@ class EnvConfig:
 class PPOConfig:
     """Shared PPO hyperparameters for both striker and jammer MAPPO."""
     num_envs: int = 2048  #1048 (local) or 2048 (remote)
-    n_iters: int = 10
+    n_iters: int = 1
     frames_per_batch: Optional[int] = None
     num_epochs: int = 6
     minibatch_size: int = 16384  #8192 (local) or 16384 (remote)
@@ -367,15 +367,23 @@ class NetworkConfig:
 class HFRadarConfig:
     """RF parameters for the high-fidelity angular radar/jammer model.
 
-    Unconstrained radar range is derived from the radar SNR equation:
+    Unconstrained radar range is the maximum range at which the received
+    SNR still meets the minimum detectable threshold SNR_min. Starting
+    from the radar SNR equation:
 
         SNR = P_t * G_t_lin * G_r_lin * lambda^2 * sigma /
               ((4*pi)^3 * R^4 * k * T0 * B_n * L)
 
+    and setting SNR = SNR_min, solving for R gives:
+
         R_unconstrained = (
             P_t * G_t_lin * G_r_lin * lambda^2 * sigma /
-            ((4*pi)^3 * k * T0 * B_n * L)
+            ((4*pi)^3 * k * T0 * B_n * L * SNR_min_lin)
         )^(1/4)
+
+    SNR_min_lin = 10^(snr_min_dB / 10). It sits in the denominator, so a
+    higher detection threshold yields a shorter unconstrained range
+    (R scales as SNR_min_lin^(-1/4)).
 
     Jammed-sector burn-through ranges (from JSR = 1):
         R_main = (((P_t * G_t_lin * sigma) / (4*pi*P_J*G_J_lin)) * R_J^2)^(1/4)
@@ -400,15 +408,15 @@ class HFRadarConfig:
         or by setting target_unconstrained_range_world directly.
     """
     # Radar SNR parameters
-    radar_tx_power: float = 1e6                 # P_t [W]
-    radar_tx_gain: float = 38.0                 # G_t [dB]
+    radar_tx_power: float = 100e3                 # P_t [W]
+    radar_tx_gain: float = 35.0                 # G_t [dB]
     radar_rx_gain: Optional[float] = None       # G_r [dB], defaults to G_t
-    wavelength: float = 0.03                    # lambda [m]
+    wavelength: float = 0.5                    # lambda [m]
     target_rcs: float = 1.0                     # sigma [m^2]
     system_temperature: float = 290.0           # T0 [K]
     receiver_bandwidth: float = 1e6             # B_n [Hz]
-    system_losses: float = 4                  # L [dB]
-    snr_min: float = 0.0                        # SNR_min [dB]
+    system_losses: float = 3                  # L [dB]
+    snr_min: float = 13.0                       # SNR_min [dB] (min detectable SNR)
     boltzmann_constant: float = 1.380649e-23    # k [J/K]
 
     # World/map scaling
@@ -427,8 +435,8 @@ class HFRadarConfig:
     G_J: float = 15.0                              # legacy alias [dB]
 
     # Angular lobe boundaries (degrees, converted to radians internally)
-    theta_main_deg: float = 6.0    # full main-lobe width (±1.5° each side)
-    theta_side_deg: float = 40.0    # full side-lobe+main-lobe cone width (±4.5° each side)
+    theta_main_deg: float = 10    # full main-lobe width 
+    theta_side_deg: float = 17.5*2    # full side-lobe+main-lobe cone width 
 
     # ------------------------------------------------------------------
     # Directional jammer model
