@@ -44,6 +44,21 @@ straight across. Field rules are identical:
 copy-paste compatibility. `name` is the row label in the results table.
 
 ──────────────────────────────────────────────────────────────────────────────
+HOW TO EVALUATE DIFFERENT POLICIES IN ONE RUN
+──────────────────────────────────────────────────────────────────────────────
+Each scenario may set `policy_file` to choose which checkpoint evaluates it, so
+a single run can compare policies side by side:
+
+    policy_file="BaselineV2.pt"      → resolves under runs/ (the common case)
+    policy_file=r"C:\\path\\to\\x.pt"  → absolute path, used as-is
+    policy_file=None                 → falls back to the --checkpoint default
+
+Checkpoints are loaded once and cached, so reusing the same file across
+scenarios costs nothing. The "Policy" column in the table shows what ran where.
+--checkpoint is optional: it is only required if some scenario leaves
+`policy_file` as None.
+
+──────────────────────────────────────────────────────────────────────────────
 HOW EVALUATION WORKS
 ──────────────────────────────────────────────────────────────────────────────
 For every scenario we run N_REPEATS independent repeats; each repeat evaluates
@@ -78,6 +93,7 @@ for _stream in (sys.stdout, sys.stderr):
 
 # ── package bootstrap (so the file runs as a script OR as -m fofe_mappo.*) ──
 _THIS_DIR = Path(__file__).resolve().parent
+_RUNS_DIR = _THIS_DIR / "runs"      # bare policy_file names resolve here
 _PKG_NAME = "fofe_mappo"
 if __package__ in (None, ""):
     sys.path.insert(0, str(_THIS_DIR.parent))
@@ -112,7 +128,30 @@ from .run_curriculum import CurriculumSection, _section_to_env_cfg, _section_lab
 EVAL_SCENARIOS: List[CurriculumSection] = [
     CurriculumSection(
         name="Baseline S1",
-        n_iters=200,                       # ignored during evaluation
+        policy_file="BaselineV2.pt",
+        n_iters=1, # not used
+        n_strikers=1, n_jammers=2,
+        n_known_targets=2, n_unknown_targets=0,
+        n_known_radars=6, n_unknown_radars=0,
+        radar_kill_probability=0.5,
+        scenario="S2",
+        communicate=False,
+    ), 
+    CurriculumSection(
+        name="Baseline S2",
+        policy_file="BaselineV2.pt",
+        n_iters=1, # not used
+        n_strikers=1, n_jammers=2,
+        n_known_targets=1, n_unknown_targets=2,
+        n_known_radars=4, n_unknown_radars=2,
+        radar_kill_probability=0.5,
+        scenario="S2",
+        communicate=False,
+    ), 
+    CurriculumSection(
+        name="FOFE-MAPPO S1",
+        policy_file="FOFE-MAPPO-BaselineV2.pt",
+        n_iters=1, # not used
         n_strikers=1, n_jammers=2,
         n_known_targets=2, n_unknown_targets=0,
         n_known_radars=6, n_unknown_radars=0,
@@ -121,8 +160,9 @@ EVAL_SCENARIOS: List[CurriculumSection] = [
         communicate=True,
     ), 
     CurriculumSection(
-        name="Baseline S2",
-        n_iters=200,                       # ignored during evaluation
+        name="FOFE-MAPPO S2",
+        policy_file="FOFE-MAPPO-BaselineV2.pt",
+        n_iters=1, # not used
         n_strikers=1, n_jammers=2,
         n_known_targets=1, n_unknown_targets=2,
         n_known_radars=4, n_unknown_radars=2,
@@ -221,6 +261,20 @@ class _LoadedCheckpoint:
         )
 
 
+def _resolve_policy_path(policy_file: Optional[str],
+                         default_path: Optional[Path]) -> Optional[Path]:
+    """Resolve a scenario's `policy_file` to a concrete checkpoint path.
+
+    None              → the run's --checkpoint default (may be None).
+    bare name / rel.  → under runs/ (e.g. "BaselineV2.pt").
+    absolute path     → used as-is.
+    """
+    if policy_file is None:
+        return default_path
+    p = Path(policy_file)
+    return p if p.is_absolute() else (_RUNS_DIR / p)
+
+
 def _build_policy_for_scenario(ckpt: _LoadedCheckpoint, env_cfg: EnvConfig,
                                device: torch.device):
     """Rebuild a policy sized to env_cfg's role split and strict-load weights.
@@ -250,23 +304,48 @@ def _mean_std(values: List[float]) -> tuple[float, float]:
 
 
 def evaluate_scenarios(
-    ckpt: _LoadedCheckpoint,
     scenarios: List[CurriculumSection],
+    default_ckpt_path: Optional[Path],
     n_episodes: int,
     n_repeats: int,
     base_seed: int,
     device: torch.device,
 ) -> List[Dict[str, Any]]:
-    """Evaluate the frozen policy on every scenario and return result rows."""
+    """Evaluate every scenario (each with its own policy) and return result rows."""
     rows: List[Dict[str, Any]] = []
+    cache: Dict[str, _LoadedCheckpoint] = {}      # resolved path → loaded ckpt
+
+    def _load(path: Path) -> _LoadedCheckpoint:
+        key = str(path.resolve())
+        if key not in cache:
+            print(f"  Loading policy: {path.name}", flush=True)
+            ck = _LoadedCheckpoint(path, device)
+            print(f"      producer={ck.producer}  "
+                  f"FOFE={'on' if ck.fofe_cfg.use_fofe else 'off'}  "
+                  f"HF_radar={'on' if ck.hf_radar_cfg is not None else 'off'}",
+                  flush=True)
+            cache[key] = ck
+        return cache[key]
 
     for i, section in enumerate(scenarios):
+        ckpt_path = _resolve_policy_path(section.policy_file, default_ckpt_path)
+        if ckpt_path is None:
+            raise RuntimeError(
+                f"Scenario '{section.name}' sets no policy_file and no "
+                f"--checkpoint default was given — cannot pick a policy."
+            )
+        if not ckpt_path.exists():
+            raise FileNotFoundError(
+                f"Scenario '{section.name}': policy not found: {ckpt_path}"
+            )
+        ckpt = _load(ckpt_path)
+
         env_cfg = _section_to_env_cfg(
             section, ckpt.base_env_cfg, ckpt.reward_cfg, ckpt.fofe_cfg
         )
         dr_tag = "DR" if env_cfg.dr is not None else "fixed"
         print(f"[{i + 1:2d}/{len(scenarios)}] {section.name:20s} ({dr_tag})  "
-              f"{_section_label(section, env_cfg)}", flush=True)
+              f"[{ckpt_path.name}]  {_section_label(section, env_cfg)}", flush=True)
 
         policy = _build_policy_for_scenario(ckpt, env_cfg, device)
 
@@ -288,6 +367,8 @@ def evaluate_scenarios(
 
         row: Dict[str, Any] = {
             "name": section.name,
+            "policy": ckpt_path.name,
+            "producer": ckpt.producer,
             "scenario": env_cfg.scenario,
             "S": env_cfg.n_strikers, "J": env_cfg.n_jammers,
             "T": env_cfg.n_targets, "R": env_cfg.n_radars,
@@ -307,11 +388,11 @@ def evaluate_scenarios(
     return rows
 
 
-def _print_table(rows: List[Dict[str, Any]], n_episodes: int, n_repeats: int,
-                 producer: str) -> None:
+def _print_table(rows: List[Dict[str, Any]], n_episodes: int,
+                 n_repeats: int) -> None:
     """Print the KPI table: one row per scenario, mean ± std per KPI."""
     # Context columns + one cell per KPI ("0.923 ± 0.031").
-    ctx_headers = ["Scenario", "Scn", "S", "J", "T", "R", "Comm"]
+    ctx_headers = ["Scenario", "Policy", "Scn", "S", "J", "T", "R", "Comm"]
 
     def _cell(row, key, fmt):
         mean, std = row[f"{key}_mean"], row[f"{key}_std"]
@@ -323,7 +404,7 @@ def _print_table(rows: List[Dict[str, Any]], n_episodes: int, n_repeats: int,
     table_rows = []
     for row in rows:
         name = row["name"] + ("*" if row["dr"] else "")
-        ctx = [name, row["scenario"], str(row["S"]), str(row["J"]),
+        ctx = [name, row["policy"], row["scenario"], str(row["S"]), str(row["J"]),
                str(row["T"]), str(row["R"]), "on" if row["comm"] else "off"]
         kpis = [_cell(row, key, fmt) for key, _, _, fmt in KPI_COLUMNS]
         table_rows.append(ctx + kpis)
@@ -340,8 +421,10 @@ def _print_table(rows: List[Dict[str, Any]], n_episodes: int, n_repeats: int,
             for c, cell in enumerate(cells)
         )
 
+    n_policies = len({row["policy"] for row in rows})
     sep = "  ".join("-" * w for w in widths)
-    title = (f"  Policy Evaluation  (producer: {producer} | "
+    title = (f"  Policy Evaluation  ({n_policies} "
+             f"{'policy' if n_policies == 1 else 'policies'} | "
              f"{n_episodes} episodes × {n_repeats} repeats per scenario)")
     bar = "=" * max(len(sep), len(title))
 
@@ -367,8 +450,8 @@ def _write_csv(rows: List[Dict[str, Any]], out_dir: Path, n_episodes: int,
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     out_path = out_dir / f"policy_eval_{stamp}.csv"
 
-    fieldnames = ["name", "scenario", "S", "J", "T", "R", "comm", "dr",
-                  "n_episodes", "n_repeats"]
+    fieldnames = ["name", "policy", "producer", "scenario", "S", "J", "T", "R",
+                  "comm", "dr", "n_episodes", "n_repeats"]
     for key, *_ in KPI_COLUMNS:
         fieldnames += [f"{key}_mean", f"{key}_std"]
 
@@ -376,7 +459,8 @@ def _write_csv(rows: List[Dict[str, Any]], out_dir: Path, n_episodes: int,
         writer = csv.DictWriter(fh, fieldnames=fieldnames)
         writer.writeheader()
         for row in rows:
-            out = {k: row[k] for k in ("name", "scenario", "S", "J", "T", "R", "comm", "dr")}
+            out = {k: row[k] for k in ("name", "policy", "producer", "scenario",
+                                       "S", "J", "T", "R", "comm", "dr")}
             out["n_episodes"] = n_episodes
             out["n_repeats"] = n_repeats
             for key, *_ in KPI_COLUMNS:
@@ -395,8 +479,9 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Evaluate one pretrained FOFE-MAPPO checkpoint across the "
         "EVAL_SCENARIOS defined at the top of this file.",
     )
-    p.add_argument("--checkpoint", required=True, type=str, metavar="PATH",
-                   help="Path to a .pt checkpoint from run.py or run_curriculum.py.")
+    p.add_argument("--checkpoint", type=str, default=None, metavar="PATH",
+                   help="Default .pt checkpoint for scenarios that leave "
+                   "policy_file=None. Optional if every scenario sets policy_file.")
     p.add_argument("--n_episodes", type=int, default=N_EVAL_EPISODES,
                    help=f"Episodes per repeat (default: {N_EVAL_EPISODES}).")
     p.add_argument("--n_repeats", type=int, default=N_REPEATS,
@@ -415,36 +500,35 @@ def _build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = _build_parser().parse_args()
 
-    ckpt_path = Path(args.checkpoint)
-    if not ckpt_path.exists():
-        raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
     if not EVAL_SCENARIOS:
         raise RuntimeError("EVAL_SCENARIOS is empty — define at least one scenario.")
+
+    default_ckpt_path = Path(args.checkpoint) if args.checkpoint else None
+    if default_ckpt_path is not None and not default_ckpt_path.exists():
+        raise FileNotFoundError(f"Checkpoint not found: {default_ckpt_path}")
 
     device = torch.device(args.device) if args.device else torch.device(
         "cuda" if torch.cuda.is_available() else "cpu"
     )
 
+    overrides = sum(s.policy_file is not None for s in EVAL_SCENARIOS)
     print("─" * 70)
-    print(f"  Checkpoint : {ckpt_path.name}")
-    print(f"  Device     : {device}")
-    ckpt = _LoadedCheckpoint(ckpt_path, device)
-    print(f"  Producer   : {ckpt.producer}")
-    print(f"  FOFE       : {'enabled' if ckpt.fofe_cfg.use_fofe else 'disabled (legacy)'}")
-    print(f"  HF radar   : {'enabled' if ckpt.hf_radar_cfg is not None else 'disabled'}")
-    print(f"  Scenarios  : {len(EVAL_SCENARIOS)}")
-    print(f"  Eval       : {args.n_episodes} episodes × {args.n_repeats} repeats")
+    print(f"  Default ckpt: {default_ckpt_path.name if default_ckpt_path else '(none)'}")
+    print(f"  Device      : {device}")
+    print(f"  Scenarios   : {len(EVAL_SCENARIOS)} "
+          f"({overrides} with a per-scenario policy_file)")
+    print(f"  Eval        : {args.n_episodes} episodes × {args.n_repeats} repeats")
     print("─" * 70)
 
     rows = evaluate_scenarios(
-        ckpt, EVAL_SCENARIOS,
+        EVAL_SCENARIOS, default_ckpt_path,
         n_episodes=args.n_episodes,
         n_repeats=args.n_repeats,
         base_seed=args.seed,
         device=device,
     )
 
-    _print_table(rows, args.n_episodes, args.n_repeats, ckpt.producer)
+    _print_table(rows, args.n_episodes, args.n_repeats)
 
     if not args.no_csv:
         out_dir = Path(args.out_dir) if args.out_dir else (_THIS_DIR / "eval_results")

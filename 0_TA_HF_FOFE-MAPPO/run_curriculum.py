@@ -97,6 +97,11 @@ class CurriculumSection:
     # Inter-agent communication: None → inherit from config.py, True/False → fixed.
     communicate:            Optional[bool]  = None
 
+    # Evaluation only (ignored during training): which checkpoint to evaluate
+    # this scenario with. None → use the run's --checkpoint default. A bare name
+    # (e.g. "BaselineV2.pt") resolves under runs/; an absolute path is used as-is.
+    policy_file:            Optional[str]   = None
+
 
 CURRICULUM: List[CurriculumSection] = [
     # ── Stage 1: the simplest possible case, fixed, to bootstrap behaviour ──

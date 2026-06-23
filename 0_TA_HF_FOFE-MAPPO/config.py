@@ -192,8 +192,9 @@ class EnvConfig:
     min_turn_radius: float = 0.001
 
     # Sensors
-    R_obs: float = 0.4
-    R_comm: float = 0.4
+    # R_radar = +- 0.2 < R_obs < R_comm
+    R_obs: float = 0.3 
+    R_comm: float = 0.5 
     # Inter-agent communication. When True, agents within a connected R_comm
     # subgroup share observations (multi-hop). When False, each agent forms its
     # own singleton subgroup and only senses entities within its own R_obs.
@@ -225,8 +226,8 @@ class EnvConfig:
     striker_v_min: float = 0.005
 
     # Jammers
-    jammer_jam_radius: float = 0.35
-    jammer_jam_effect: float = 0.15
+    jammer_jam_radius: float = 0.35 # LF model 
+    jammer_jam_effect: float = 0.15 # LF model 
     jammer_v_min: float = 0.005
 
     # Threats
@@ -426,17 +427,17 @@ class HFRadarConfig:
 
     # Radar angular/lobe model parameter
     radar_side_lobe_gain: Optional[float] = None   # G_S [dB], preferred name
-    G_S: float = 5                                 # legacy alias [dB]
+    G_S: float = 10                                 # side lobe gain [dB] = main lobe gain - 17 dB
 
     # Jammer RF parameters
     jammer_tx_power: Optional[float] = None        # P_J [W], preferred name
     jammer_gain: Optional[float] = None            # G_J [dB], preferred name
     P_J: float = 1e1                              # legacy alias [W]
-    G_J: float = 15.0                              # legacy alias [dB]
+    G_J: float = 10.0                              # legacy alias [dB]
 
     # Angular lobe boundaries (degrees, converted to radians internally)
     theta_main_deg: float = 10    # full main-lobe width 
-    theta_side_deg: float = 17.5*2    # full side-lobe+main-lobe cone width 
+    theta_side_deg: float = 22.5*2    # full side-lobe+main-lobe cone width 
 
     # ------------------------------------------------------------------
     # Directional jammer model
