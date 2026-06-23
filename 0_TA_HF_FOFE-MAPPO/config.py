@@ -409,7 +409,7 @@ class HFRadarConfig:
     """
     # Radar SNR parameters
     radar_tx_power: float = 100e3                 # P_t [W]
-    radar_tx_gain: float = 35.0                 # G_t [dB]
+    radar_tx_gain: float = 37.0                 # G_t [dB]
     radar_rx_gain: Optional[float] = None       # G_r [dB], defaults to G_t
     wavelength: float = 0.5                    # lambda [m]
     target_rcs: float = 1.0                     # sigma [m^2]
