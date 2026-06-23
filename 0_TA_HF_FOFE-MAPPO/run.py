@@ -172,6 +172,11 @@ def main() -> None:
     else:
         print("HF angular radar model: DISABLED (simple binary jam/kill)")
 
+    if cfg.env.communicate:
+        print("Inter-agent communication: ENABLED (R_comm subgroup sharing)")
+    else:
+        print("Inter-agent communication: DISABLED (singleton subgroups)")
+
     checkpoint = None
     if args.load_checkpoint:
         checkpoint = torch.load(args.load_checkpoint, map_location=cfg.ppo.device, weights_only=False)

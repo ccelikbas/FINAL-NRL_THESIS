@@ -265,6 +265,7 @@ def _section_label(section: CurriculumSection, env_cfg: EnvConfig) -> str:
     parts.append(f"kill{fmt(section.radar_kill_probability, env_cfg.radar_kill_probability)}")
     parts.append(f"steps{fmt(section.max_steps, env_cfg.max_steps)}")
     parts.append(env_cfg.scenario)
+    parts.append(f"comm{'ON' if env_cfg.communicate else 'OFF'}")
     return " ".join(parts)
 
 
