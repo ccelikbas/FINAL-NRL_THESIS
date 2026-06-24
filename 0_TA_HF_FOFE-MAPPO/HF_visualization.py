@@ -534,15 +534,15 @@ def hf_animate_rollout(
         ax.add_collection(LineCollection([], linewidths=2.0, zorder=1.5, capstyle="round"))
         for _ in range(env.n_agents)
     ]
-    target_known_sc = ax.scatter([], [], s=80, marker="*", label="Targets (known)", color="#a65e00")
+    target_known_sc = ax.scatter([], [], s=80, marker="*", label="Targets (known)", color="#a65e00", zorder=6)
     target_unknown_sc = ax.scatter(
         [], [], s=80, marker="*", label="Targets (unknown)",
-        facecolors="none", edgecolors="#a65e00", linewidths=1.8,
+        facecolors="none", edgecolors="#a65e00", linewidths=1.8, zorder=6,
     )
-    radar_known_sc = ax.scatter([], [], s=80, marker="X", label="Radars (known)", color="#243c9b")
+    radar_known_sc = ax.scatter([], [], s=80, marker="X", label="Radars (known)", color="#243c9b", zorder=4)
     radar_unknown_sc = ax.scatter(
         [], [], s=80, marker="X", label="Radars (unknown)",
-        facecolors="none", edgecolors="#243c9b", linewidths=1.8,
+        facecolors="none", edgecolors="#243c9b", linewidths=1.8, zorder=4,
     )
 
     # Dashed circles at R_unconstrained (always shown)
@@ -968,15 +968,15 @@ def _draw_hf_world_panel(ax, env: HFStrikeEA2DEnv, frames: List[Dict[str, torch.
 
     striker_sc = ax.scatter([], [], s=60, marker="^", label="Strikers")
     jammer_sc = ax.scatter([], [], s=60, marker="s", label="Jammers")
-    target_known_sc = ax.scatter([], [], s=80, marker="*", label="Targets (known)", color="#a65e00")
+    target_known_sc = ax.scatter([], [], s=80, marker="*", label="Targets (known)", color="#a65e00", zorder=6)
     target_unknown_sc = ax.scatter(
         [], [], s=80, marker="*", label="Targets (unknown)",
-        facecolors="none", edgecolors="#a65e00", linewidths=1.8,
+        facecolors="none", edgecolors="#a65e00", linewidths=1.8, zorder=6,
     )
-    radar_known_sc = ax.scatter([], [], s=80, marker="X", label="Radars (known)", color="#243c9b")
+    radar_known_sc = ax.scatter([], [], s=80, marker="X", label="Radars (known)", color="#243c9b", zorder=4)
     radar_unknown_sc = ax.scatter(
         [], [], s=80, marker="X", label="Radars (unknown)",
-        facecolors="none", edgecolors="#243c9b", linewidths=1.8,
+        facecolors="none", edgecolors="#243c9b", linewidths=1.8, zorder=4,
     )
 
     # Dashed circles at unconstrained range

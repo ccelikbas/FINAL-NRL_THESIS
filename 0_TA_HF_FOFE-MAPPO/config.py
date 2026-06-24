@@ -154,7 +154,7 @@ class EnvConfig:
     # World / episode
     world_bounds: Tuple[float, float] = (0.0, 1.0)
     dt: float = 1.0
-    max_steps: int = 150
+    max_steps: int = 200
     # Pre-generated radar layouts. n_env_layouts > 0 builds a pool of valid
     # radar positions ONCE at env init (using the slow rejection sampler)
     # and resets cycle through them — avoids running _sample_spaced_radars
@@ -193,13 +193,13 @@ class EnvConfig:
 
     # Sensors
     # R_radar = +- 0.2 < R_obs < R_comm
-    R_obs: float = 0.3 
+    R_obs: float = 0.35 
     R_comm: float = 0.5 
     # Inter-agent communication. When True, agents within a connected R_comm
     # subgroup share observations (multi-hop). When False, each agent forms its
     # own singleton subgroup and only senses entities within its own R_obs.
     # Independent of the observation encoder, so works with both FOFE and flat MLP.
-    communicate: bool = False
+    communicate: bool = True
 
     # Coalition radius for the coalition-fragmentation KPI. Two agents are
     # linked in the per-step proximity graph when their Euclidean distance is
@@ -323,7 +323,7 @@ class PPOConfig:
     max_iter_time_s: Optional[float] = 250.0   # safety timeout per iteration (None = disabled)
 
     seed: int = 0
-    log_every: int = 10
+    log_every: int = 20
     device: torch.device = field(default_factory=lambda: torch.device("cuda" if torch.cuda.is_available() else "cpu"))
 
     # ── Hardware optimization flags ─────────────────────────────────

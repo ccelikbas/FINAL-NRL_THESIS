@@ -496,10 +496,10 @@ def animate_rollout(
 
     striker_sc = ax.scatter([], [], s=60, marker="^", color=striker_color, label="Strikers")
     jammer_sc = ax.scatter([], [], s=60, marker="s", color=jammer_color, label="Jammers")
-    target_known_sc = ax.scatter([], [], s=80, marker="*", label="Targets (known)", color="#a65e00")
-    target_unknown_sc = ax.scatter([], [], s=80, marker="*", label="Targets (unknown)", facecolors="none", edgecolors="#a65e00", linewidths=1.8)
-    radar_known_sc = ax.scatter([], [], s=80, marker="X", label="Radars (known)", color="#243c9b")
-    radar_unknown_sc = ax.scatter([], [], s=80, marker="X", label="Radars (unknown)", facecolors="none", edgecolors="#243c9b", linewidths=1.8)
+    target_known_sc = ax.scatter([], [], s=80, marker="*", label="Targets (known)", color="#a65e00", zorder=6)
+    target_unknown_sc = ax.scatter([], [], s=80, marker="*", label="Targets (unknown)", facecolors="none", edgecolors="#a65e00", linewidths=1.8, zorder=6)
+    radar_known_sc = ax.scatter([], [], s=80, marker="X", label="Radars (known)", color="#243c9b", zorder=4)
+    radar_unknown_sc = ax.scatter([], [], s=80, marker="X", label="Radars (unknown)", facecolors="none", edgecolors="#243c9b", linewidths=1.8, zorder=4)
 
     # Trailing path behind agents: per-agent fading LineCollection.
     trail_len = 40
@@ -1009,12 +1009,12 @@ def _draw_world_panel(ax, env, frames, title):
 
     striker_sc = ax.scatter([], [], s=60, marker="^", label="Strikers")
     jammer_sc = ax.scatter([], [], s=60, marker="s", label="Jammers")
-    target_known_sc = ax.scatter([], [], s=80, marker="*", label="Targets (known)", color="#a65e00")
+    target_known_sc = ax.scatter([], [], s=80, marker="*", label="Targets (known)", color="#a65e00", zorder=6)
     target_unknown_sc = ax.scatter([], [], s=80, marker="*", label="Targets (unknown)",
-                                   facecolors="none", edgecolors="#a65e00", linewidths=1.8)
-    radar_known_sc = ax.scatter([], [], s=80, marker="X", label="Radars (known)", color="#243c9b")
+                                   facecolors="none", edgecolors="#a65e00", linewidths=1.8, zorder=6)
+    radar_known_sc = ax.scatter([], [], s=80, marker="X", label="Radars (known)", color="#243c9b", zorder=4)
     radar_unknown_sc = ax.scatter([], [], s=80, marker="X", label="Radars (unknown)",
-                                  facecolors="none", edgecolors="#243c9b", linewidths=1.8)
+                                  facecolors="none", edgecolors="#243c9b", linewidths=1.8, zorder=4)
 
     radar_circles = [ax.add_patch(Circle((0, 0), 0, fill=False, edgecolor="C3", alpha=0.6, lw=2))
                      for _ in range(env.n_radars)]
