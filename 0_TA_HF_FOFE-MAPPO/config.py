@@ -216,9 +216,9 @@ class EnvConfig:
     # are dropped. These set the flat actor's obs_dim (see _compute_obs_dim);
     # the critic's global state is unaffected. Ignored when use_fofe=True (FOFE
     # encodes the full variable-size set). 0 disables that channel entirely.
-    n_other_agent_obs_slots: int = 6
-    n_radar_obs_slots: int = 8
-    n_target_obs_slots: int = 4
+    n_other_agent_obs_slots: int = 3
+    n_radar_obs_slots: int = 2
+    n_target_obs_slots: int = 2
 
     # Strikers
     striker_engage_range: float = 0.10
@@ -232,7 +232,7 @@ class EnvConfig:
 
     # Threats
     radar_range: float = 0.20
-    radar_kill_probability: float = 0.05
+    radar_kill_probability: float = 0.01
 
     # Rewards
     border_thresh: float = 0.05
@@ -306,7 +306,7 @@ class EnvConfig:
 class PPOConfig:
     """Shared PPO hyperparameters for both striker and jammer MAPPO."""
     num_envs: int = 2048  #1048 (local) or 2048 (remote)
-    n_iters: int = 1
+    n_iters: int = 50
     frames_per_batch: Optional[int] = None
     num_epochs: int = 6
     minibatch_size: int = 16384  #8192 (local) or 16384 (remote)
@@ -323,7 +323,7 @@ class PPOConfig:
     max_iter_time_s: Optional[float] = 250.0   # safety timeout per iteration (None = disabled)
 
     seed: int = 0
-    log_every: int = 20
+    log_every: int = 10
     device: torch.device = field(default_factory=lambda: torch.device("cuda" if torch.cuda.is_available() else "cpu"))
 
     # ── Hardware optimization flags ─────────────────────────────────

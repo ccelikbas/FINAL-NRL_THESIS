@@ -260,10 +260,10 @@ class RewardConfig:
     # κ cap so it cannot dominate. escort_jammer_scale sets the strength of the
     # (non-vanishing) translational pull on the jammers; raise it if the jammers
     # are sluggish relative to the per-step control-effort cost (0.01).
-    escort_kernel_length: float = 0    # ℓ — escort kernel length scale (map units); larger = longer-range pull
-    escort_capacity:      float = 0    # κ — desired jammers per striker (soft count); also sets emergent team size
-    escort_striker_scale: float = 0   # w_s — striker penalty per unit unmet demand (max penalty = w_s·κ)
-    escort_jammer_scale:  float = 0   # w_j — jammer reward per unit of useful coverage provided
+    escort_kernel_length: float = 0.05    # ℓ — escort kernel length scale (map units); larger = longer-range pull
+    escort_capacity:      float = 1    # κ — desired jammers per striker (soft count); also sets emergent team size
+    escort_striker_scale: float = 0.1   # w_s — striker penalty per unit unmet demand (max penalty = w_s·κ)
+    escort_jammer_scale:  float = 0.1   # w_j — jammer reward per unit of useful coverage provided
 
     # ─── OPTIONAL PAPER-STYLE MISSION REWARD ────────────────────────────────
     # R_mission = -Reward_fn(n_targets_alive, n_targets_initial)
