@@ -232,7 +232,7 @@ class EnvConfig:
 
     # Threats
     radar_range: float = 0.20
-    radar_kill_probability: float = 0.01
+    radar_kill_probability: float = 0.05
 
     # Rewards
     border_thresh: float = 0.05
@@ -306,7 +306,7 @@ class EnvConfig:
 class PPOConfig:
     """Shared PPO hyperparameters for both striker and jammer MAPPO."""
     num_envs: int = 2048  #1048 (local) or 2048 (remote)
-    n_iters: int = 50
+    n_iters: int = 200
     frames_per_batch: Optional[int] = None
     num_epochs: int = 6
     minibatch_size: int = 16384  #8192 (local) or 16384 (remote)

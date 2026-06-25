@@ -415,6 +415,7 @@ class StrikeEA2DEnv(EnvBase):
             "jammer_jam_bonus": torch.zeros(B, device=self.device),
             "formation": torch.zeros(B, device=self.device),
             "escort": torch.zeros(B, device=self.device),
+            "target_cover": torch.zeros(B, device=self.device),
             "agent_destroyed": torch.zeros(B, device=self.device),
             "paper_mission": torch.zeros(B, device=self.device),
             "separation_penalty": torch.zeros(B, device=self.device),
@@ -1654,16 +1655,25 @@ class StrikeEA2DEnv(EnvBase):
         escort_full = torch.zeros(B, A, device=self.device)
         w_s = float(rp.escort_striker_scale)
         w_j = float(rp.escort_jammer_scale)
-        if (w_s != 0.0 or w_j != 0.0) and ns > 0 and nj > 0:
+        w_a = float(getattr(rp, "jammer_escort_approach_scale", 0.0))
+        if (w_s != 0.0 or w_j != 0.0 or w_a != 0.0) and ns > 0 and nj > 0:
             ell     = max(float(rp.escort_kernel_length), 1e-6)
             kappa_c = float(rp.escort_capacity)
+            tau     = max(float(rp.escort_commit_temp), 1e-6)
             s_alive_f = alive[:, :ns].float()                          # [B, ns]
             j_alive_f = alive[:, ns:].float()                          # [B, nj]
             any_j     = (j_alive_f.sum(dim=-1, keepdim=True) > 0)      # [B, 1]
 
             d_sj = torch.cdist(self.agent_pos[:, :ns, :], self.agent_pos[:, ns:, :])  # [B, ns, nj]
             k_sj = torch.exp(-d_sj / ell) * j_alive_f[:, None, :]      # dead jammers contribute 0
-            c_s  = k_sj.sum(dim=-1)                                    # [B, ns]  soft jammer count
+            # ADDITIVE shared coverage (no soft-commit): a jammer near several strikers
+            # protects all of them, so c_s feels EVERY jammer — including a DISTANT one,
+            # giving an un-suppressed gradient to go cover an under-served striker (a hard
+            # soft-commit zeroes that distant contribution and traps both jammers on the
+            # near striker). The straddle/hover that additive coverage used to allow is now
+            # prevented by the jammer→striker ATTRACTION below (pulls a jammer ONTO one
+            # striker). Additive also restores "1 jammer can protect a tight striker cluster".
+            c_s      = k_sj.sum(dim=-1)                                # [B, ns] additive coverage
 
             # Striker side: penalty for unmet demand (0 when no jammer is alive).
             striker_escort = -w_s * (kappa_c - c_s).clamp(min=0.0)
@@ -1671,14 +1681,69 @@ class StrikeEA2DEnv(EnvBase):
             reward[:, :ns]      += striker_escort
             escort_full[:, :ns]  = striker_escort
 
-            # Jammer side: useful (saturating) coverage each jammer provides.
-            sat_with    = c_s.clamp(max=kappa_c)                       # min(cᵢ, κ)            [B, ns]
-            c_without   = (c_s[:, :, None] - k_sj).clamp(min=0.0)      # cᵢ without jammer j   [B, ns, nj]
-            sat_without = c_without.clamp(max=kappa_c)                 # min(cᵢ−k_ij, κ)
-            marginal    = (sat_with[:, :, None] - sat_without) * s_alive_f[:, :, None]  # ≥ 0  [B, ns, nj]
-            jammer_escort = w_j * marginal.sum(dim=1) * j_alive_f      # [B, nj]
+            # Jammer side (NEGATIVE shaping, farm-proof): penalise the team's UNMET
+            # striker-escort demand, 0 when every striker is escorted to κ. The
+            # gradient w.r.t. each jammer's position runs through c_s, pulling it to
+            # an UNDER-escorted striker; the soft-commit in c_s stops a jammer from
+            # farming by straddling two strikers. (Matches the negative shaping of the
+            # other terms — the desired distributed state is the least-negative = 0.)
+            unmet_s = (kappa_c - c_s).clamp(min=0.0).sum(dim=-1, keepdim=True)  # [B,1] Σ_s (κ−c_s)₊
+            jammer_escort = -w_j * unmet_s * j_alive_f                          # [B, nj]
+
+            # Jammer→striker ATTRACTION (negative, LONG-RANGE, soft-nearest over
+            # strikers): the analog of striker_approach→targets. Penalty ∝ soft-nearest
+            # distance to an alive striker (0 when ON a striker), so it gives a jammer the
+            # REACH to get to a striker anywhere AND pulls it ONTO one (no hovering between
+            # two). The coverage term above decides WHICH striker; this provides reach +
+            # commitment. Decoupling reach (here) from distribution (the cap) is what scales.
+            if w_a != 0.0:
+                eps_a  = 1e-6
+                s_mask = s_alive_f[:, :, None] > 0                              # [B, ns, 1]
+                inv_d  = torch.where(s_mask, 1.0 / (d_sj + eps_a), torch.zeros_like(d_sj))  # [B, ns, nj]
+                wsum   = inv_d.sum(dim=1, keepdim=True).clamp_min(eps_a)        # [B, 1, nj]
+                shaped_dj = ((inv_d / wsum) * d_sj).sum(dim=1)                  # [B, nj] soft-nearest striker dist
+                jammer_escort = jammer_escort - w_a * shaped_dj * j_alive_f     # 0 on a striker, −w_a·d far
+
             reward[:, ns:]      += jammer_escort
             escort_full[:, ns:]  = jammer_escort
+
+        # ------------------------------------------------------------------
+        # 8c. Striker-target coverage field  (MIRROR of the escort, striker↔target)
+        #     Each striker = one unit of attack mass, soft-committed to its nearest
+        #     target (softmax τ_t); C_t = Σ_s b_ts·exp(−d_ts/ℓ_t). NEGATIVE shaping:
+        #     r_s = −w_st·Σ_t (κ_t − C_t)₊ over alive targets (0 when all covered).
+        #     The κ_t cap + soft-commit make U=0 require DISTRIBUTION (one striker per
+        #     target) — the split the escort structurally cannot provide. See RewardConfig.
+        # ------------------------------------------------------------------
+        target_cover_full = torch.zeros(B, A, device=self.device)
+        w_st = float(getattr(rp, "target_cover_scale", 0.0))
+        if w_st != 0.0 and ns > 0 and self.n_targets > 0:
+            ell_t   = max(float(rp.target_cover_kernel_length), 1e-6)
+            kappa_t = float(rp.target_cover_capacity)
+            tau_t   = max(float(rp.target_cover_commit_temp), 1e-6)
+            s_alive_f = alive[:, :ns].float()                          # [B, ns]
+            t_alive_f = self.target_alive.float()                      # [B, nt]
+
+            d_st = self._c_dist_at[:, :ns, :]                          # [B, ns, nt] striker→target
+            k_st = torch.exp(-d_st / ell_t) * s_alive_f[:, :, None]    # dead strikers contribute 0
+
+            # Soft commitment over targets (alive only): each striker assigns its
+            # one unit of mass to its nearest target → no straddling between targets.
+            t_logits = (-d_st / tau_t).masked_fill(t_alive_f[:, None, :] == 0, float("-inf"))  # [B, ns, nt]
+            b_st     = torch.nan_to_num(torch.softmax(t_logits, dim=2), nan=0.0)  # over targets
+            bc_st    = b_st * k_st                                     # committed contribution [B, ns, nt]
+            C_t      = bc_st.sum(dim=1)                                # [B, nt] coverage per target
+
+            # NEGATIVE shaping (farm-proof): penalise the team's UNMET target coverage
+            # over ALIVE targets, 0 when every target is covered to κ_t. The gradient
+            # w.r.t. each striker runs through C_t, pulling it onto an UNDER-covered
+            # target; with the κ_t cap + soft-commit, U=0 requires DISTRIBUTION (one
+            # striker per target). Loitering between targets leaves them uncovered →
+            # penalised, so strikers are driven ONTO targets (engage/destroy preserved).
+            unmet_t = ((kappa_t - C_t).clamp(min=0.0) * t_alive_f).sum(dim=-1, keepdim=True)  # [B,1]
+            striker_cover = -w_st * unmet_t * s_alive_f                # [B, ns]
+            reward[:, :ns]            += striker_cover
+            target_cover_full[:, :ns]  = striker_cover
 
         # ------------------------------------------------------------------
         # 9. Agent destruction penalty  (team_spirit blends team ↔ individual)
@@ -1795,6 +1860,7 @@ class StrikeEA2DEnv(EnvBase):
             "jammer_jam_bonus":   jammer_jam_bonus_full.detach(),
             "formation":          formation_full.detach(),
             "escort":             escort_full.detach(),
+            "target_cover":       target_cover_full.detach(),
             "agent_destroyed":    death_pen_full.detach(),
             "paper_mission":      mission_reward_full.detach(),
             "separation_penalty": separation_pen_full.detach(),

@@ -227,13 +227,15 @@ class RewardConfig:
     # and the team's SATISFIED coverage, capped at κ = escort_capacity jammers
     # per striker, is
     #     J = Σ_{i alive} min(cᵢ, κ).
-    # Both roles are shaped by their own contribution to J:
-    #   • Striker i — penalty for unmet escort demand (pulls it toward jammers):
+    # Both roles use NEGATIVE shaping — least-negative (0) at the desired escorted
+    # state, so neither role can FARM a positive coverage reward by loitering:
+    #   • Striker i — penalty for ITS OWN unmet escort demand (pulls it toward jammers):
     #         r_i = − escort_striker_scale · (κ − cᵢ)₊
     #         = 0 once escorted to capacity, −scale·κ when fully abandoned.
-    #   • Jammer  j — its USEFUL (saturating) coverage, a difference reward:
-    #         r_j = + escort_jammer_scale · (J − J_{−j})
-    #             = scale · Σ_i [ min(cᵢ, κ) − min(cᵢ − k(d_ij), κ) ].
+    #   • Jammer  j — penalty for the team's UNMET striker-escort demand (pulls it to
+    #     an under-escorted striker; soft-commit in cᵢ stops it farming by straddling):
+    #         r_j = − escort_jammer_scale · Σ_i (κ − cᵢ)₊
+    #         = 0 once every striker is escorted to κ.
     #
     # Why this shape (and not nearest-jammer proximity / a min-distance
     # difference reward): ADDITIVE coverage means removing any jammer near an
@@ -250,6 +252,23 @@ class RewardConfig:
     # (2s/4j) each demand their own two (two parallel groups) — the same κ yields
     # both behaviours, emergently, from striker geometry.
     #
+    # SOFT COMMITMENT (escort_commit_temp = τ): pure additive coverage lets a
+    # jammer sit at the MIDPOINT of two strikers and collect k(d) from BOTH —
+    # a symmetric tie that, for larger ℓ, makes straddling more rewarding than
+    # accompanying either striker (the jammers never "pick" one). To break the
+    # tie WITHOUT a separation penalty (which would hard-code "strikers apart"
+    # and fail to generalise to clustered strikers), each jammer is treated as
+    # ONE unit of escort, softly assigned over strikers by a softmax of −d/τ:
+    #     a_ij = softmax_i(−‖sᵢ−jⱼ‖ / τ),   Σ_i a_ij = 1   (alive strikers only)
+    # and its contribution to cᵢ is committed: k_commit_ij = a_ij · k(d_ij).
+    # A jammer equidistant between two FAR-apart strikers then delivers ≤ 1 unit
+    # total (cannot saturate both), so committing (≈1 to one striker) strictly
+    # beats straddling at ANY ℓ — which lets ℓ be large enough to give a real
+    # commit-from-range gradient. τ sets the commitment SCALE: strikers within
+    # ~τ of each other are still co-covered by one jammer (shared coverage for
+    # genuinely-tight clusters preserved), strikers farther than ~τ force a
+    # choice. τ → 0 = hard nearest-striker assignment; large τ → uniform.
+    #
     # Edge cases: dead jammers add 0 to every cᵢ; dead strikers exert no demand
     # and receive no penalty; with no alive jammer the striker term is 0 (escort
     # is impossible, so there is no gradient to give). Set both scales to 0 to
@@ -260,10 +279,51 @@ class RewardConfig:
     # κ cap so it cannot dominate. escort_jammer_scale sets the strength of the
     # (non-vanishing) translational pull on the jammers; raise it if the jammers
     # are sluggish relative to the per-step control-effort cost (0.01).
-    escort_kernel_length: float = 0.05    # ℓ — escort kernel length scale (map units); larger = longer-range pull
+    escort_kernel_length: float = 0.3     # ℓ — coverage kernel length (map units); long enough that a jammer FEELS an under-served striker that split to a far target (the attraction term below stops the long-range hovering)
     escort_capacity:      float = 1    # κ — desired jammers per striker (soft count); also sets emergent team size
     escort_striker_scale: float = 0.1   # w_s — striker penalty per unit unmet demand (max penalty = w_s·κ)
-    escort_jammer_scale:  float = 0.1   # w_j — jammer reward per unit of useful coverage provided
+    escort_jammer_scale:  float = 0.25  # w_j — jammer penalty per unit of UNMET team escort demand (0 when all strikers escorted); decides WHICH striker (distribution). Keep ≥ approach scale below.
+    escort_commit_temp:   float = 0.1   # τ — softmax temperature for jammer→striker commitment (0=hard nearest; ≳striker spread=shared). Set very large to recover pure additive coverage.
+    # Jammer→striker ATTRACTION: the analog of striker_approach→targets, the second half of
+    # the escort's restructure. A negative, LONG-RANGE, soft-nearest pull toward strikers
+    # (penalty ∝ soft-nearest distance to an alive striker; 0 when ON a striker). It gives a
+    # jammer the REACH to get to a striker anywhere, and — crucially — pulls jammers ONTO a
+    # striker so they commit instead of hovering between two (which pure long-range coverage
+    # alone did). The coverage field above (w_j) decides WHICH striker; this only provides
+    # reach + commitment. Keep escort_jammer_scale ≥ this so distribution wins on assignment.
+    # Pure jammer↔striker → scales to any (ns,nj), symmetric or not. Set 0 to disable.
+    jammer_escort_approach_scale: float = 0.4   # w_a — penalty per unit soft-nearest distance from a jammer to a striker (raised so a jammer is pulled ONTO its nearest striker, out of the symmetric middle, and tracks it through the split)
+
+    # ─── STRIKER-TARGET COVERAGE FIELD  (MIRROR of JAMMER ESCORT, striker ↔ target) ──
+    # The escort makes jammers DISTRIBUTE across strikers; this is its exact twin on
+    # the striker→target side, so STRIKERS DISTRIBUTE ACROSS TARGETS by the same
+    # emergent, scenario-independent mechanism (NOT a separation penalty). It is the
+    # piece the escort structurally cannot provide: when both strikers sit on one
+    # target the escort is already satisfied (each has a jammer) and has no gradient
+    # to separate the pairs — so the split must come from the striker↔target side.
+    #
+    # Each striker is ONE unit of "attack mass", soft-committed to its nearest target
+    # (softmax τ_t, alive targets only) so it does not straddle between two targets:
+    #     b_ts = softmax_t(−‖sₛ−Tₜ‖ / τ_t),   Σ_t b_ts = 1
+    # contributing C_t = Σ_s b_ts · exp(−‖sₛ−Tₜ‖ / ℓ_t) to target t. The shaping is
+    # NEGATIVE (like every other shaping term here — least-negative / 0 at the desired
+    # behaviour, so there is nothing to FARM by loitering): each striker is penalised by
+    # the team's UNMET target coverage over ALIVE targets
+    #     r_s = −w_st · Σ_t (κ_t − C_t)₊ .
+    # The min-style (κ_t − C_t)₊ CAP means a target already covered to κ_t adds 0, so a
+    # striker reduces the penalty only by covering an UNDER-served target → surplus
+    # strikers are pulled to uncovered targets; with soft-commit + κ_t≥1, U=0 is reached
+    # ONLY by distributing one striker per target (with 2s/2t → two pairs once escorted).
+    # Generalises: more targets than strikers → cover as many as possible; more strikers
+    # than targets → cluster (cap), all from target geometry — no explicit assignment and
+    # no hard "spread out" rule. Loitering between targets leaves them uncovered (U>0,
+    # penalised) so strikers are driven ONTO targets, where they also engage/destroy.
+    # Runs ALONGSIDE striker_approach (which gives the long-range pull to targets);
+    # this field decides WHICH target. Set target_cover_scale = 0 to disable.
+    target_cover_kernel_length: float = 0.3    # ℓ_t — target coverage kernel length (map units); range over which the unmet-coverage gradient pulls a striker onto a target
+    target_cover_capacity:      float = 1      # κ_t — desired strikers per target (soft count); =1 so U=0 needs a FULL striker per target (κ_t<1 invites a midpoint straddle-farm)
+    target_cover_scale:         float = 0.15   # w_st — NEGATIVE penalty per unit of unmet target coverage (max |penalty| = w_st·Σκ_t); 0 at the desired one-striker-per-target state
+    target_cover_commit_temp:   float = 0.2    # τ_t — softmax temperature for striker→target commitment (prevents a striker covering two targets at once)
 
     # ─── OPTIONAL PAPER-STYLE MISSION REWARD ────────────────────────────────
     # R_mission = -Reward_fn(n_targets_alive, n_targets_initial)

@@ -260,6 +260,7 @@ EVAL_REWARD_COMPONENT_KEYS: Tuple[str, ...] = (
     "jammer_jam_bonus",
     "formation",
     "escort",
+    "target_cover",
     "agent_destroyed",
     "paper_mission",
     "separation_penalty",
