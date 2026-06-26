@@ -39,11 +39,24 @@ def main():
     ap.add_argument("--seeds", type=int, default=6)
     ap.add_argument("--radius", type=float, default=0.2)  # coalition_radius
     ap.add_argument("--out", default="runs/diag_softcommit.png")
+    ap.add_argument("--n_jammers", type=int, default=None,
+                    help="Override active jammer count for evaluation (fixed composition; "
+                         "clears DR). Legacy actor obs is fixed-slot so the same policy loads.")
+    ap.add_argument("--n_strikers", type=int, default=None,
+                    help="Override striker count for evaluation (fixed composition).")
+    ap.add_argument("--title", default=None, help="Optional figure suptitle prefix (e.g. config label).")
     args = ap.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     ckpt = _LoadedCheckpoint(Path(args.checkpoint), device)
     env_cfg = ckpt.base_env_cfg
+    if args.n_jammers is not None or args.n_strikers is not None:
+        if hasattr(env_cfg, "dr"):
+            env_cfg.dr = None                # disable DR so the counts are exactly as set
+    if args.n_jammers is not None:
+        env_cfg.n_jammers = args.n_jammers   # fixed composition for eval
+    if args.n_strikers is not None:
+        env_cfg.n_strikers = args.n_strikers
     rc = env_cfg.reward_config
     ns, nj = env_cfg.n_strikers, env_cfg.n_jammers
     print(f"ckpt={args.checkpoint} producer={ckpt.producer} ns={ns} nj={nj} "
@@ -119,9 +132,9 @@ def main():
             axf.set_ylim(-0.05, 1.05); axf.set_title("frag vs step", fontsize=8)
             axf.tick_params(labelsize=6)
 
+    _label = (args.title + "  " if args.title else "") + f"{ns}s{nj}j"
     fig.suptitle(
-        f"soft-commit τ={getattr(rc,'escort_commit_temp','?')} ℓ={rc.escort_kernel_length} "
-        f"| episode-mean frag={np.mean(ep_frags):.3f} "
+        f"{_label}  |  episode-mean frag={np.mean(ep_frags):.3f} "
         f"| mean striker-striker dist={np.mean(ss_dists) if ss_dists else float('nan'):.3f} "
         f"| frac time strikers on DIFFERENT targets={np.mean(diff_target_frac) if diff_target_frac else float('nan'):.2f}",
         fontsize=10)

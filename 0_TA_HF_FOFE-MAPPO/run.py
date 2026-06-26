@@ -34,7 +34,7 @@ if __package__ in (None, ""):
     sys.modules[_pkg_name] = _pkg
     __package__ = _pkg_name
 
-from .config import EnvConfig, EnvExtensionsConfig, ExperimentConfig, FOFEConfig, NetworkConfig, PPOConfig
+from .config import DomainRandomization, EnvConfig, EnvExtensionsConfig, ExperimentConfig, FOFEConfig, NetworkConfig, PPOConfig
 from .trainer import train_mappo
 from .rewards import RewardConfig
 from .visualization import TestRunner, animate_rollout, plot_training
@@ -55,6 +55,14 @@ def build_parser() -> argparse.ArgumentParser:
     # Counts
     p.add_argument("--n_strikers", type=int, default=env_defaults.n_strikers)
     p.add_argument("--n_jammers", type=int, default=env_defaults.n_jammers)
+    p.add_argument(
+        "--dr_n_jammers", type=int, nargs=2, default=None, metavar=("LO", "HI"),
+        help="Domain-randomize the number of ACTIVE jammers per env, drawn in [LO,HI] each reset "
+             "(trains ONE policy over mixed team compositions). Allocates n_jammers=HI slots; "
+             "DR activates LO..HI of them per environment.",
+    )
+    p.add_argument("--radar_kill_probability", type=float, default=env_defaults.radar_kill_probability,
+                   help="Per-step radar kill probability inside the (un-jammed) lethal zone.")
     p.add_argument("--n_targets", type=int, default=env_defaults.n_targets)
     p.add_argument("--n_radars", type=int, default=env_defaults.n_radars)
     p.add_argument("--n_known_targets", type=int, default=env_defaults.n_known_targets)
@@ -126,9 +134,18 @@ def main() -> None:
         jammer_progress_scale=args.jammer_progress_scale,
         jammer_jam_bonus=args.jammer_jam_bonus,
     )
+    # Optional domain randomization over team composition (one policy, mixed n_jammers).
+    dr = None
+    n_jammers = args.n_jammers
+    if args.dr_n_jammers is not None:
+        lo, hi = int(args.dr_n_jammers[0]), int(args.dr_n_jammers[1])
+        dr = DomainRandomization(n_jammers=(lo, hi))
+        n_jammers = hi  # allocate slots at the max; DR activates lo..hi active per env
+        print(f"Domain randomization: ACTIVE n_jammers ~ U[{lo},{hi}] per env (slots={hi})")
+
     env_cfg = EnvConfig(
         n_strikers=args.n_strikers,
-        n_jammers=args.n_jammers,
+        n_jammers=n_jammers,
         n_known_targets=args.n_known_targets,
         n_unknown_targets=args.n_unknown_targets,
         n_known_radars=args.n_known_radars,
@@ -138,7 +155,9 @@ def main() -> None:
         s2_radar_min_sep=args.s2_radar_min_sep,
         s2_target_min_sep=args.s2_target_min_sep,
         max_steps=args.max_steps,
+        radar_kill_probability=args.radar_kill_probability,
         reward_config=reward_cfg,
+        dr=dr,
     )
     ppo_cfg = PPOConfig(
         num_envs=args.num_envs,

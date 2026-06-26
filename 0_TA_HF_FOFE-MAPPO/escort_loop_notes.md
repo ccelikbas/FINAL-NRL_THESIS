@@ -286,3 +286,58 @@ a POLICY/ARCHITECTURE symmetry-break, not more reward shaping:
 OR accept (escort correct & scalable; strikers split) and move to the larger non-symmetric tests.
 Best frag achieved: episode-mean ~0.24 (iter5/7); two-pairs reached in some seeds (panels →0.83-1.0).
 PAUSED for user decision.
+
+RESOLUTION (Phase 1): user increased radar kill rate + iterations (n_iters default→200) → the
+2s2j two-formation case now WORKS. Higher radar lethality makes an unescorted striker actually
+die, supplying the symmetry-breaking the symmetric reward couldn't. Escort reward kept as-is.
+
+# ============================================================================
+# PHASE 2 — composition-agnostic: SAME reward must give 2 formations (2s2j) AND
+# one clump (2s1j). One policy, trained over mixed n_jammers, adapts on observation.
+# ============================================================================
+Failure: trained directly on 2s1j, strikers still SPLIT (one ends up unescorted) instead of
+clumping around the single jammer. Confirmed by user.
+DIAGNOSIS: reward rated an uncovered target (w_st=0.15) worse than an unescorted striker
+(w_s=0.1) → strikers split to cover both targets even when one can't be escorted.
+FIX (user-approved "escort-first priority"): set w_s > w_st so an UNESCORTED striker is always
+worse than an UNCOVERED target → strikers spread only as far as jammers can escort.
+  • rewards.py: escort_striker_scale 0.1 → 0.35 (now > w_st=0.15; note 2 strikers sharing 1
+    jammer still carries residual unmet, so margin matters — threshold est. ~0.29).
+  • Reinforced by radar lethality: an unescorted split striker dies → big mission penalty.
+TRAINING (user-approved): go straight to MIXED domain-randomized training, ONE policy.
+  • run.py: added --dr_n_jammers LO HI (DomainRandomization over ACTIVE jammers; allocates HI
+    slots) and --radar_kill_probability CLI flag. build_env already plumbs env_cfg.dr; DR-absent
+    jammers are correctly not-alive (env.py:1176).
+  • Plan: train with --n_strikers 2 --dr_n_jammers 1 2 (mix 1j/2j), S1, 2 targets/radars.
+EVAL: legacy MLP actor obs is fixed-slot (n_other_agent_obs_slots), so the SAME policy can be
+rolled out at fixed n_jammers=1 and n_jammers=2. Check: 2s1j → frag≈0 (clump of 3), 2s2j →
+frag≈0.667 (two pairs). (May need to add --n_jammers override to _diag_softcommit.py.)
+USER VALUES: radar_kill=0.05 (was 0.01 before; 0.05 is the working value), n_iters=300.
+
+## PHASE 2 RESULT — SUCCESS, composition-agnostic ✓
+Mixed-composition training: ONE policy, escort-first reward (w_s=0.35 > w_st=0.15), DR
+n_jammers∈{1,2}, radar_kill=0.05, 300 iters → runs/fofe_mappo_mixcomp.pt.
+Training (mixed episodes): comp 0.96, surv 0.93, tgt 0.98 (climbing the whole run).
+Per-composition eval (SAME policy, _diag_softcommit.py --n_jammers k):
+  • 2s1j (runs/diag_mix_1j.png): episode-mean frag=0.061, striker-striker dist=0.065,
+    frac-diff-tgt=0.10. 5/6 seeds frag stays 0 the whole episode → ALL 3 AGENTS CLUMP
+    (both strikers + the lone jammer fly as one tight group to a target). ✓ DESIRED.
+  • 2s2j (runs/diag_mix_2j.png): episode-mean frag=0.350, frac-diff-tgt=0.41. Every seed:
+    strikers split to the 2 targets, EACH with its own jammer → frag-vs-step reaches exactly
+    0.667 (two pairs) in steady state and holds. Mean diluted only by the shared approach phase.
+    ✓ DESIRED — and cleaner/more consistent than Phase 1 (1j training reinforced escort commit).
+CONCLUSION: escort-first priority (w_s>w_st) + mixed DR training gives ONE policy that, from
+observation alone, forms TWO formations with 2 jammers and ONE clump with 1 jammer. The reward
+is now composition-agnostic for the 2s/{1,2}j case. DONE.
+
+## MULTI-CONFIG VALIDATION (same policy → runs/composition_agnostic.pt = copy of mixcomp)
+Added _diag_softcommit.py --n_strikers override; built _diag_compare.py (side-by-side 4-config).
+Evaluated ONE policy (6 seeds each) — figures runs/diag_cfg_{2s2j,2s1j,1s1j,1s2j}.png and the
+side-by-side runs/diag_compare_4cfg.png:
+  • 2s2j: mean frag 0.350 (steady-state 0.667) — strikers split, EACH with a jammer → 2 formations ✓
+  • 2s1j: mean frag 0.061 — all 3 clump (share lone jammer) → 1 formation ✓
+  • 1s1j: mean frag 0.000 — striker+jammer pair travel together → 1 formation ✓ (NEVER trained on 1 striker)
+  • 1s2j: mean frag 0.034 — striker + both jammers travel together (surplus jammer stays) → 1 formation ✓ (untrained)
+ALL MATCH EXPECTATION. Policy even GENERALISES to 1-striker compositions it never saw in training
+(only n_jammers was domain-randomised; n_strikers fixed at 2). Legacy per-role actor obs is
+fixed-slot so the same weights roll out at any (ns,nj). Composition-agnostic CONFIRMED.
