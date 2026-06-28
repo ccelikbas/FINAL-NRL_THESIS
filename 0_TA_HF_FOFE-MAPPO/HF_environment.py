@@ -1201,7 +1201,8 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         w_s = float(rp.escort_striker_scale)
         w_j = float(rp.escort_jammer_scale)
         w_a = float(getattr(rp, "jammer_escort_approach_scale", 0.0))
-        if (w_s != 0.0 or w_j != 0.0 or w_a != 0.0) and ns > 0 and nj > 0:
+        w_over = float(getattr(rp, "escort_over_scale", 0.0))
+        if (w_s != 0.0 or w_j != 0.0 or w_a != 0.0 or w_over != 0.0) and ns > 0 and nj > 0:
             ell     = max(float(rp.escort_kernel_length), 1e-6)
             kappa_c = float(rp.escort_capacity)
             tau     = max(float(rp.escort_commit_temp), 1e-6)
@@ -1233,7 +1234,8 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
             # farming by straddling two strikers. (Matches the negative shaping of the
             # other terms — the desired distributed state is the least-negative = 0.)
             unmet_s = (kappa_c - c_s).clamp(min=0.0).sum(dim=-1, keepdim=True)  # [B,1] Σ_s (κ−c_s)₊
-            jammer_escort = -w_j * unmet_s * j_alive_f                          # [B, nj]
+            over_s  = (c_s - kappa_c).clamp(min=0.0).sum(dim=-1, keepdim=True)  # [B,1] Σ_s (c_s−κ)₊ (over-coverage → balance)
+            jammer_escort = (-w_j * unmet_s - w_over * over_s) * j_alive_f      # [B, nj]
 
             # Jammer→striker ATTRACTION (negative, LONG-RANGE, soft-nearest over
             # strikers): the analog of striker_approach→targets. Penalty ∝ soft-nearest

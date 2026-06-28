@@ -341,3 +341,86 @@ side-by-side runs/diag_compare_4cfg.png:
 ALL MATCH EXPECTATION. Policy even GENERALISES to 1-striker compositions it never saw in training
 (only n_jammers was domain-randomised; n_strikers fixed at 2). Legacy per-role actor obs is
 fixed-slot so the same weights roll out at any (ns,nj). Composition-agnostic CONFIRMED.
+
+# ============================================================================
+# PHASE 3 — strikers prefer a 2-JAMMER escort (κ=2). Same composition-agnostic logic.
+# ============================================================================
+Change: rewards.py escort_capacity 1 → 2 (κ). Everything else unchanged (escort-first w_s=0.35,
+additive coverage, attraction w_a=0.4, target_cover κ_t=1/w_st=0.15, negative shaping). No code
+change — the escort penalties already use κ generically.
+Expected emergent behaviour (escort-first: striker wants 2 jammers > cover a 2nd target):
+  • 2s4j → TWO formations of (1 striker + 2 jammers). N=6, two groups of 3 → frag≈0.60.
+  • 2s2j → ONE clump of 4 (2 strikers share the 2 jammers; each ~2-covered when tight) → frag≈0.
+  • 1s2j → ONE formation (1 striker + 2 jammers) → frag≈0.
+  • 1s1j → ONE formation (1 striker + 1 jammer, under-escorted) → frag≈0.
+TRAINING: ONE policy, --n_strikers 2 --dr_n_jammers 1 4 (sees scarcity→abundance), radar_kill=0.05,
+n_iters 400 (harder: wider jammer range). Checkpoint runs/fofe_mappo_kappa2.pt.
+EVAL: _diag_compare.py CONFIGS updated to [(2,4),(2,2),(1,2),(1,1)]; per-config via
+_diag_softcommit.py --n_strikers/--n_jammers. NOTE frag target for two 3-agent formations is 0.60
+(not 0.667).
+OOM at 2048 envs: κ=2 → n_jammers=4 slots → 6 agents → centralized critic OOMs 8GB GPU at iter 4
+(critic(td) wrapped in try/except → values None → transpose crash). expandable_segments unsupported
+on Windows. FIX: num_envs 2048→1024 (mem ~halves), n_iters 400→600 (keep sample budget). Relaunched.
+Checkpoint runs/fofe_mappo_kappa2.pt. Status: training (1024 envs, 600 iters).
+
+## Phase 3 result @ 600 iters — STRUCTURE CORRECT but UNDER-TRAINED
+Final: comp 0.80, surv 0.73, tgt 0.89 — and STILL CLIMBING at iter 600 (comp 0.66→0.80 over last
+110 iters). κ=2 is harder (6 agents, 2-jammer coordination); same sample budget as κ=1 (which hit
+comp 0.96) is not enough. Per-config eval (runs/diag_k2_*.png):
+  • 2s4j: frag 0.258 (steady ~0.54), frac-diff-tgt 0.50 — strikers split to 2 targets, 4 jammers
+    follow ~2-per-striker → TWO formations of (1s+2j) FORMING (structure correct, not fully clean).
+  • 2s2j: frag 0.179 — mostly clump, some split (under-trained).
+  • 1s2j: frag 0.038 — one formation (1s+2j) ✓.
+  • 1s1j: frag 0.120 — mostly one pair, some split.
+Structure is RIGHT (escort-first κ=2 → 2s4j makes two 1s+2j formations); just needs more training.
+FIX: resume from checkpoint (run.py --load_checkpoint loads policy+critic+normalizer; fresh optim)
++600 more iters → runs/fofe_mappo_kappa2_ext.pt. Status: extending.
+
+## Phase 3 result @ 1200 iters (extended) — κ=2 WORKS, composition-agnostic, not perfectly crisp
+Final: comp 0.91 (up from 0.80; plateaued ~0.89-0.93 iters 530-600), surv 0.83, tgt 0.95.
+Saved: runs/composition_agnostic_k2.pt. Per-config eval (runs/diag_k2e_*.png, side-by-side
+runs/diag_compare_k2.png):
+  • 2s4j: frag 0.263 (steady-state ~0.54), frac-diff-tgt 0.50 — TWO formations of (1s+2j): strikers
+    split to 2 targets, 4 jammers split 2-per-striker. Correct structure; ~0.54 vs 0.60 ideal (jammers
+    not perfectly tight 2-groups every seed).
+  • 2s2j: frag 0.191 — one clump of 4 (2 strikers share 2 jammers), with some transient splitting.
+  • 1s2j: frag 0.202 — one formation (1s+2j); a couple seeds a jammer wanders.
+  • 1s1j: frag 0.039 — one pair (1s+1j) ✓.
+VERDICT: escort_capacity κ=2 + escort-first + mixed DR(1,4) gives ONE policy that prefers 2-jammer
+escorts and stays composition-agnostic (formations merge under jammer scarcity). Behaviours all
+qualitatively correct. Looseness (jammer wander, surv 0.83) = κ=2 is a harder coordination task;
+comp plateaued at 0.91 so more iters give marginal gains — crisper would need tuning (w_a/w_j/κ
+balance or more iters) OR is the same jammer equilibrium-selection looseness as κ=1. Reported to user.
+
+## USER CAUGHT a real bug: 2s4j does 1-3 jammer splits, NOT balanced 2-2.
+frag KPI is BLIND to this: 2-2 (two groups of 3) → frag 0.600; 1-3 (groups of 2 and 4) → frag 0.533.
+Only 0.067 apart — measured ~0.54 = the BAD 1-3 split. Added a proper metric to _diag_softcommit.py:
+jammers/striker IMBALANCE (max-min nearest-assigned count; 0=even 2-2, 2=a 1-3) + balanced-frac.
+Measured on κ=2 policy (2s4j): IMBALANCE 1.638, balanced only 17.8% → 1-3 splits dominate. Confirmed.
+
+## Phase 3b — OVER-COVERAGE penalty to force balanced 2-2 (one more iteration)
+ROOT CAUSE: escort only penalised UNDER-coverage (κ−c)₊; piling 3 jammers on one striker (c=3>κ=2)
+cost nothing directly, and strong attraction (w_a=0.4) locked the unbalanced split.
+FIX: add jammer OVER-coverage penalty −w_over·Σ_s(c_s−κ)₊ → balanced split (each striker exactly κ)
+is now the unique optimum; a κ+1-th jammer on a striker is pushed to an under-served one.
+  • rewards.py: NEW param escort_over_scale (w_over) = 0.3. Code: both env files, jammer escort now
+    (−w_j·unmet − w_over·over)·j_alive. Doesn't affect 2s2j/1s2j (c≈κ, no over) or 1s1j (under).
+TRAINING: resume from runs/fofe_mappo_kappa2_ext.pt (+over-penalty) +600 iters, 1024 envs, DR(1,4),
+radar_kill 0.05 → runs/fofe_mappo_kappa2_bal.pt. Eval with the new IMBALANCE metric (want →0, balanced→1).
+Status: training.
+
+## Phase 3b RESULT — OVER-PENALTY FIXED THE BALANCE ✓ (note: 1st run hung overnight on a
+## machine-sleep CUDA stall; killed + relaunched, ran clean)
+Final: comp 0.93, surv 0.87 (BOTH up from 0.80-iter / 0.91-1200iter; balanced escorts protect
+both strikers better). Saved runs/composition_agnostic_k2.pt (= fofe_mappo_kappa2_bal.pt).
+Per-config (runs/diag_k2bal_*.png, side-by-side runs/diag_compare_k2bal.png):
+  • 2s4j: IMBALANCE 0.000, BALANCED 1.000 (was 1.638 / 0.18!). frag-vs-step = EXACTLY 0.60 every
+    seed → TWO formations of EXACTLY (1 striker + 2 jammers). 1-3 split ELIMINATED. ✓✓
+  • 2s2j: IMBALANCE 0.000; mostly one clump (frag 0.17). ✓
+  • 1s2j: one formation, slightly looser (frag 0.19, was 0.04) — minor over-penalty side effect.
+  • 1s1j: one pair, slightly looser (frag 0.24). Minor.
+VERDICT: adding the jammer over-coverage penalty −w_over·Σ(c−κ)₊ (escort_over_scale=0.3) makes the
+balanced κ-per-striker split the unique optimum → 2s4j reliably 2-2. Composition-agnostic + balanced.
+Minor: 1s configs a touch looser (over-penalty discourages over-tight clustering); reduce w_over or
+add a small margin if tighter 1s formations wanted. KEY metric lesson: frag is blind to balance
+(2-2=0.60 vs 1-3=0.533); the jammers/striker IMBALANCE metric in _diag_softcommit.py is the right gauge.

@@ -31,8 +31,14 @@ from .environment import coalition_fragmentation
 from .HF_visualization import HFTestRunner
 from .evaluate_policy import _LoadedCheckpoint, _build_policy_for_scenario
 
-CONFIGS = [(2, 2), (2, 1), (1, 1), (1, 2)]
-EXPECT = {(2, 2): "2 formations", (2, 1): "1 clump (3)", (1, 1): "1 pair", (1, 2): "1 formation (3)"}
+# κ=2 (strikers prefer a 2-jammer escort)
+CONFIGS = [(2, 4), (2, 2), (1, 2), (1, 1)]
+EXPECT = {
+    (2, 4): "2 formations (1s+2j ea)",   # two groups of 3 → frag≈0.60
+    (2, 2): "1 clump (4: 2s share 2j)",  # one group of 4 → frag≈0
+    (1, 2): "1 formation (1s+2j)",       # one group of 3 → frag≈0
+    (1, 1): "1 formation (1s+1j)",       # one group of 2, under-escorted → frag≈0
+}
 
 
 def main():

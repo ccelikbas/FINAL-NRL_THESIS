@@ -72,13 +72,13 @@ def main():
     if n_panels == 1:
         axes = axes.reshape(2, 1)
 
-    ep_frags, ss_dists, diff_target_frac = [], [], []
+    ep_frags, ss_dists, diff_target_frac, imbalances, bal_fracs = [], [], [], [], []
     for si in range(args.seeds):
         runner = HFTestRunner(policy, env_cfg=env_cfg, hf_cfg=ckpt.hf_radar_cfg,
                               device=device, seed=1000 + si)
         frames = runner.rollout()
 
-        fr_frag, fr_ssd, fr_difftgt = [], [], []
+        fr_frag, fr_ssd, fr_difftgt, fr_imbal = [], [], [], []
         s_traj = [[] for _ in range(ns)]
         j_traj = [[] for _ in range(nj)]
         for fr in frames:
@@ -99,10 +99,21 @@ def main():
                 d0 = torch.norm(tp_alive - s[0], dim=-1)
                 d1 = torch.norm(tp_alive - s[1], dim=-1)
                 fr_difftgt.append(int(torch.argmin(d0) != torch.argmin(d1)))
+            # jammers-per-striker BALANCE: assign each alive jammer to its nearest
+            # alive striker; imbalance = max-min count (0 = even split e.g. 2-2;
+            # 2 = a 1-3 split; 4 = 0-4). Only meaningful with ≥2 strikers alive.
+            s_al = al_[:ns]; j_al = al_[ns:]
+            if ns >= 2 and int(s_al.sum()) >= 2 and int(j_al.sum()) >= 1:
+                d_js = torch.cdist(j[j_al], s[s_al])           # [nj_alive, ns_alive]
+                counts = torch.bincount(d_js.argmin(dim=1), minlength=int(s_al.sum()))
+                fr_imbal.append(float(counts.max() - counts.min()))
 
         ep_frags.append(np.mean(fr_frag))
         if fr_ssd: ss_dists.append(np.mean(fr_ssd))
         if fr_difftgt: diff_target_frac.append(np.mean(fr_difftgt))
+        if fr_imbal:
+            imbalances.append(float(np.mean(fr_imbal)))
+            bal_fracs.append(float(np.mean([1.0 if x == 0 else 0.0 for x in fr_imbal])))
 
         if si < n_panels:
             axt = axes[0, si]
@@ -145,6 +156,8 @@ def main():
     print(f"OVERALL episode-mean frag       = {np.mean(ep_frags):.3f}  (target ~0.667 for two pairs)")
     print(f"mean striker-striker distance   = {np.mean(ss_dists) if ss_dists else float('nan'):.3f}  (coalition_radius={args.radius})")
     print(f"frac of time on DIFFERENT tgts  = {np.mean(diff_target_frac) if diff_target_frac else float('nan'):.3f}")
+    print(f"jammers/striker IMBALANCE        = {np.mean(imbalances) if imbalances else float('nan'):.3f}  (max-min count; 0=even e.g. 2-2, 2=a 1-3 split)")
+    print(f"frac time BALANCED (even) split  = {np.mean(bal_fracs) if bal_fracs else float('nan'):.3f}  (want ~1.0)")
     print(f"saved figure -> {args.out}")
 
 

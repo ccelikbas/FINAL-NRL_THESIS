@@ -280,9 +280,10 @@ class RewardConfig:
     # (non-vanishing) translational pull on the jammers; raise it if the jammers
     # are sluggish relative to the per-step control-effort cost (0.01).
     escort_kernel_length: float = 0.3     # ℓ — coverage kernel length (map units); long enough that a jammer FEELS an under-served striker that split to a far target (the attraction term below stops the long-range hovering)
-    escort_capacity:      float = 1    # κ — desired jammers per striker (soft count); also sets emergent team size
+    escort_capacity:      float = 2    # κ — desired jammers PER STRIKER (soft count). κ=2 → each striker prefers a 2-jammer escort; jammers distribute to give every striker 2, and merge formations when jammers are scarce (escort-first). Also sets emergent formation size.
     escort_striker_scale: float = 0.35  # w_s — striker penalty per unit unmet demand. ESCORT-FIRST PRIORITY: kept > target_cover_scale (w_st) so an UNESCORTED striker is always worse than an UNCOVERED target. This makes the reward composition-agnostic: strikers spread across targets only as far as jammers can escort them → 2 formations with 2 jammers, ONE clump (all share the lone jammer) with 1 jammer.
     escort_jammer_scale:  float = 0.25  # w_j — jammer penalty per unit of UNMET team escort demand (0 when all strikers escorted); decides WHICH striker (distribution). Keep ≥ approach scale below.
+    escort_over_scale:    float = 0.3   # w_over — jammer penalty per unit of OVER-coverage Σ_s(c_s−κ)₊. Makes the BALANCED split (each striker exactly κ jammers) the unique optimum, so a κ-th+1 jammer piling on one striker is pushed to an under-served one. Without it the escort only punishes under-coverage → 1-3 splits (not 2-2) when κ>1. Set 0 to disable (recovers under-only behaviour).
     escort_commit_temp:   float = 0.1   # τ — softmax temperature for jammer→striker commitment (0=hard nearest; ≳striker spread=shared). Set very large to recover pure additive coverage.
     # Jammer→striker ATTRACTION: the analog of striker_approach→targets, the second half of
     # the escort's restructure. A negative, LONG-RANGE, soft-nearest pull toward strikers
