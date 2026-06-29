@@ -73,7 +73,7 @@ class FOFEConfig:
     critic_fusion_mlp_dims : tuple of int
         Fusion MLP dims for critic.
     """
-    use_fofe: bool = False
+    use_fofe: bool = True
 
     # --- Actor FOFE dims ---
     agents_see_dims:   Tuple[int, ...] = (96,) # one SEE layer
@@ -143,7 +143,7 @@ class DomainRandomization:
 class EnvConfig:
     # Team composition
     n_strikers: int = 2
-    n_jammers: int = 1
+    n_jammers: int = 4
     n_known_targets: int = 2
     n_unknown_targets: int = 0
     n_known_radars: int = 2
@@ -154,7 +154,7 @@ class EnvConfig:
     # World / episode
     world_bounds: Tuple[float, float] = (0.0, 1.0)
     dt: float = 1.0
-    max_steps: int = 200
+    max_steps: int = 150
     # Pre-generated radar layouts. n_env_layouts > 0 builds a pool of valid
     # radar positions ONCE at env init (using the slow rejection sampler)
     # and resets cycle through them — avoids running _sample_spaced_radars
@@ -173,7 +173,7 @@ class EnvConfig:
     #         form a defensive line between agents and targets.
     # The radar layout pool is still pre-generated at env init for both
     # scenarios; only the sampling bounds + min-sep differ.
-    scenario: str = "S1"
+    scenario: str = "S2"
     # Minimum pairwise radar separation when scenario == "S2". S2's radar
     # band is much thinner than S1's, so the default is lower to keep
     # rejection sampling tractable.
@@ -216,9 +216,9 @@ class EnvConfig:
     # are dropped. These set the flat actor's obs_dim (see _compute_obs_dim);
     # the critic's global state is unaffected. Ignored when use_fofe=True (FOFE
     # encodes the full variable-size set). 0 disables that channel entirely.
-    n_other_agent_obs_slots: int = 3
-    n_radar_obs_slots: int = 2
-    n_target_obs_slots: int = 2
+    n_other_agent_obs_slots: int = 6
+    n_radar_obs_slots: int = 8
+    n_target_obs_slots: int = 6
 
     # Strikers
     striker_engage_range: float = 0.10
