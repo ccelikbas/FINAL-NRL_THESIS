@@ -424,3 +424,55 @@ balanced κ-per-striker split the unique optimum → 2s4j reliably 2-2. Composit
 Minor: 1s configs a touch looser (over-penalty discourages over-tight clustering); reduce w_over or
 add a small margin if tighter 1s formations wanted. KEY metric lesson: frag is blind to balance
 (2-2=0.60 vs 1-3=0.533); the jammers/striker IMBALANCE metric in _diag_softcommit.py is the right gauge.
+
+# ============================================================================
+# PHASE 4 — does the SAME reward hold in scenario S2 (defensive line, radars BETWEEN
+# agents and targets)? 6 radars, 2 targets. Want: 2s4j → two (1s+2j) formations;
+# shortage → merge to one formation. Composition-agnostic + κ=2 balance, in S2.
+# ============================================================================
+Reward UNCHANGED from Phase 3b (κ=2, escort-first w_s=0.35, additive coverage, attraction w_a=0.4,
+over-penalty w_over=0.3, target_cover κ_t=1/w_st=0.15, negative shaping). Only the SCENARIO changes.
+Config via CLI (S1 defaults untouched): --scenario S2 --n_known_radars 6 --n_known_targets 2
+--dr_n_jammers 1 4 --radar_kill_probability 0.05 --num_envs 1024.
+Train FRESH (NOT resume): S2 critic global-state has 6 radars vs S1's 2 → critic dim differs, can't
+load S1 weights. User: "might need double" iters (S2 harder). Staged: 600 first → runs/fofe_mappo_kappa2_s2.pt,
+then resume +600 (=1200) if under-trained (protects against sleep-hang losing a long run).
+Smoke (S2, 6 radars, 64 envs): OK, no spawn error, mem fine.
+EVAL (unchanged scripts; they read S2 from the checkpoint env_cfg): per-config 2s4j/2s2j/1s2j/1s1j
+with IMBALANCE metric + _diag_compare.py side-by-side. Status: training (600 fresh).
+
+## Phase 4 result @ 600 iters — S2 TOO LETHAL TO LEARN FLAT (not a reward issue)
+comp 0.10, surv 0.03, tgt 0.25 (S1 was 0.93/0.87). Trajectory: comp 0.01(it10)→0.10(it600), surv
+~0.01-0.04 throughout — agents DIE almost immediately crossing the 6-radar defensive line, so the
+escort/formation behaviour can't even manifest (frag ~0.03). It IS learning but VERY slowly.
+ROOT CAUSE: S2 (6 radars BETWEEN agents and targets) at radar_kill=0.05 is far more lethal than S1
+(2 radars guarding targets). Survival ~3% → almost no useful reward signal → slow/stuck learning.
+This is scenario difficulty + exploration, NOT the escort reward (which is unchanged & worked in S1).
+"double" (1200) is a big underestimate: the existing run_curriculum.py spends 1000+ iters on JUST the
+first S2 stage — and with an EASIER 1-striker setup; ours is 2-striker + κ=2 (harder).
+PAUSED — need user decision: (a) lower radar_kill for S2 (e.g. 0.02/0.01) to make it survivable so
+the formations can be tested, then optionally ramp; (b) curriculum ramp (run_curriculum.py style);
+(c) train MUCH longer at 0.05 (likely 3000+ iters, hours, may still struggle). Recommend (a) to first
+verify the reward generalizes to S2 GEOMETRY, then add lethality.
+
+USER chose (a): lower radar_kill. Plan: resume from runs/fofe_mappo_kappa2_s2.pt (has some S2
+navigation) with radar_kill 0.05→0.02, S2/6 radars/2 targets, DR(1,4), 1024 envs, +800 iters →
+runs/fofe_mappo_kappa2_s2lk.pt. Expect survival to jump → formations can manifest → test escort
+reward in S2 geometry (2s4j two 1s+2j formations, shortage→merge, IMBALANCE→0). If survival still
+low after, drop to 0.01. Status: training.
+
+## Phase 4 result @ S2 radar_kill=0.02 (800 iters resumed) — TEAM CLUMPS, DOES NOT SPLIT
+(NB: 2nd overnight hang on the 1st attempt; killed+relaunched, ran clean.)
+comp 0.80, surv 0.61 (vs 0.10/0.03 at kill=0.05 — lower lethality FIXED survivability ✓), STILL RISING.
+Per-config eval (runs/diag_k2s2lk_*.png, side-by-side runs/diag_compare_k2s2lk.png):
+  • 2s4j: frac-diff-targets 0.000 (strikers NEVER split), frag 0.07 → ONE clumped group of 6.
+    IMBALANCE 2.05 is an artifact (metric assumes split strikers; here they're together).
+  • 2s2j: frac-diff 0.000, frag 0.02 → one clump.
+  • 1s2j / 1s1j: one formation (as before).
+So escort still works (jammers stay with strikers) but the STRIKER SPLIT (target_cover) does NOT emerge
+in S2 — the whole team moves as ONE group up through the radar field. NOT the 2-formation goal.
+WHY (3 candidates): (1) survival-driven — splitting to 2 targets through the 6-radar defensive line is
+risky; clumping concentrates jamming → safer (clump may be genuinely optimal in S2); (2) under-trained
+(comp/surv still rising at 800); (3) resume-bias — resumed from the kill=0.05 policy that learned to
+clump-to-survive. PAUSED — report to user; options: train fresh/longer at 0.02 to see if split emerges;
+boost target_cover (w_st) to force splitting despite risk; or accept S2 clumping as correct adaptation.
