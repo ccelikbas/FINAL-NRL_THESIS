@@ -30,6 +30,11 @@ The OUTPUT is TWO figures per scenario:
      each output follows (the very motivation for using the distribution-free
      CoV). The raw pooled samples are also dumped to CSV for your own fits.
 
+The console also reports a D'Agostino-Pearson omnibus normality test for every
+histogrammed KPI. At alpha=0.05, p < alpha rejects the null hypothesis that the
+samples come from a normal distribution; p >= alpha means normality is not
+rejected (it does not prove that the underlying distribution is normal).
+
 ──────────────────────────────────────────────────────────────────────────────
 SEEDS vs RUNS-PER-SEED  (why the x-axis is "episodes")
 ──────────────────────────────────────────────────────────────────────────────
@@ -115,6 +120,7 @@ import torch
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from scipy.stats import normaltest
 
 from .config import PPOConfig
 from .trainer import build_env
@@ -155,6 +161,7 @@ MAX_EPISODES   = 1000     # episodes per seed  → x-axis runs from 1..MAX_EPISO
 N_SEEDS        = 1        # independent master seeds (replicates of the curve)
 BASE_SEED      = 42       # seed s uses BASE_SEED + s * SEED_STRIDE
 SEED_STRIDE    = 1_000_000
+NORMALITY_ALPHA = 0.05    # D'Agostino-Pearson test significance level
 CHUNK_EPISODES = 250      # parallel envs per rollout (chunked to avoid OOM)
 N_ORDERINGS    = 64       # random shuffles → order-independent CoV curve
 STABILITY_TOL  = 0.05     # "stable" = CoV within ±5% of its final value …
@@ -375,9 +382,8 @@ def _safe_name(name: str) -> str:
     return "".join(c if c.isalnum() else "_" for c in name).strip("_")
 
 
-def plot_scenario(name: str, curves: Dict[str, Dict[str, np.ndarray]],
-                  per_kpi_req: Dict[str, Optional[int]], overall_req: Optional[int],
-                  n_seeds: int, max_eps: int, tol: float, out_png: Path) -> None:
+def plot_scenario(curves: Dict[str, Dict[str, np.ndarray]],
+                  max_eps: int, out_png: Path) -> None:
     """One figure: c_v vs number of simulations, one line per KPI + min–max band."""
     fig, ax = plt.subplots(figsize=(8.2, 5.2))
 
@@ -389,29 +395,17 @@ def plot_scenario(name: str, curves: Dict[str, Dict[str, np.ndarray]],
         pm = c["n"] >= 2                       # skip the n=1 artefact (σ≡0)
         nn = c["n"][pm]
         ax.fill_between(nn, c["min"][pm], c["max"][pm], color=color, alpha=0.15, lw=0)
-        req = per_kpi_req.get(key)
-        ax.plot(nn, c["mean"][pm], color=color, lw=1.9,
-                label=f"{label}  (n*={req if req else '—'})")
+        ax.plot(nn, c["mean"][pm], color=color, lw=1.9, label=label)
         # robust y-cap: ignore the small-n explosion so the plateau is legible
         stable = c["n"] >= max(STABILITY_MIN_N, 2)
         if stable.any():
             cap_vals.append(float(np.nanmax(c["max"][stable])))
-
-    if overall_req:
-        ax.axvline(overall_req, color=NLR_REFERENCE, ls="--", lw=1.3)
-        ax.annotate(f"all KPIs stable @ {overall_req} runs",
-                    xy=(overall_req, ax.get_ylim()[1]),
-                    xytext=(6, -12), textcoords="offset points",
-                    color=NLR_REFERENCE, fontsize=9, va="top")
 
     ax.set_xlim(2, max_eps)
     if cap_vals:
         ax.set_ylim(0, max(cap_vals) * 1.15)
     ax.set_xlabel("Number of simulations (episodes)")
     ax.set_ylabel(r"Coefficient of variation  $c_v = \sigma / \mu$")
-    ax.set_title(f"CoV stabilisation — {name}\n"
-                 f"{max_eps} episodes × {n_seeds} seeds  ·  "
-                 f"band = min–max across seeds  ·  n*: ±{tol:.0%} of final $c_v$")
     ax.grid(True, alpha=0.4)
     ax.legend(title="KPI", fontsize=9, framealpha=0.9)
     fig.tight_layout()
@@ -496,6 +490,68 @@ def _write_samples_csv(pooled: Dict[str, np.ndarray], out_path: Path) -> None:
 
 
 # =====================================================================
+#  STEP 5 - D'Agostino-Pearson omnibus normality test
+# =====================================================================
+
+def normality_tests(pooled: Dict[str, np.ndarray],
+                    alpha: float) -> Dict[str, dict]:
+    """Test each pooled KPI against H0: the samples are normally distributed.
+
+    SciPy's D'Agostino-Pearson test combines skewness and kurtosis and requires
+    at least eight finite observations. ``is_normal`` is True when H0 is not
+    rejected at ``alpha``, False when it is rejected, and None when the test
+    cannot produce a valid result.
+    """
+    results: Dict[str, dict] = {}
+    for key, _, _ in HIST_KPIS:
+        x = pooled[key]
+        x = x[np.isfinite(x)]
+        result = {
+            "n": int(x.size),
+            "statistic": None,
+            "pvalue": None,
+            "is_normal": None,
+            "reason": None,
+        }
+        if x.size < 8:
+            result["reason"] = "requires at least 8 finite samples"
+        elif np.ptp(x) == 0.0:
+            result["reason"] = "all finite samples are identical"
+        else:
+            test = normaltest(x)
+            statistic = float(test.statistic)
+            pvalue = float(test.pvalue)
+            if np.isfinite(statistic) and np.isfinite(pvalue):
+                result["statistic"] = statistic
+                result["pvalue"] = pvalue
+                result["is_normal"] = pvalue >= alpha
+            else:
+                result["reason"] = "test returned a non-finite result"
+        results[key] = result
+    return results
+
+
+def _print_normality_results(results: Dict[str, dict], alpha: float) -> None:
+    """Print one D'Agostino-Pearson normality verdict per histogrammed KPI."""
+    print(f"      -- D'Agostino-Pearson normality (alpha={alpha:g}) --")
+    for key, _, label in HIST_KPIS:
+        result = results[key]
+        if result["is_normal"] is None:
+            print(f"        {label:16s}  not testable"
+                  f"  (n={result['n']}: {result['reason']})", flush=True)
+            continue
+        verdict = ("normally distributed" if result["is_normal"]
+                   else "NOT normally distributed")
+        print(f"        {label:16s}  {verdict:24s}"
+              f"  (n={result['n']}, K^2={result['statistic']:.4g}, "
+              f"p={result['pvalue']:.4g})", flush=True)
+    print("        Note: 'normally distributed' means H0 was not rejected; "
+          "it does not prove normality.", flush=True)
+    print("        Note: Completion is binary, so a continuous normal model "
+          "is not appropriate for that KPI.", flush=True)
+
+
+# =====================================================================
 #  DRIVER
 # =====================================================================
 
@@ -503,6 +559,7 @@ def analyse_scenarios(scenarios: List[CurriculumSection],
                       default_ckpt_path: Optional[Path],
                       max_episodes: int, n_seeds: int, base_seed: int,
                       chunk: int, n_orderings: int, tol: float, min_n: int,
+                      normality_alpha: float,
                       device: torch.device, out_dir: Path,
                       write_csv: bool) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -574,8 +631,7 @@ def analyse_scenarios(scenarios: List[CurriculumSection],
 
         # ── STEP 4: plot + CSV rows ──
         out_png = out_dir / f"cov_{_safe_name(section.name)}_{stamp}.png"
-        plot_scenario(section.name, curves, per_kpi_req, overall_req,
-                      n_seeds, max_episodes, tol, out_png)
+        plot_scenario(curves, max_episodes, out_png)
         print(f"      saved CoV plot      : {out_png}", flush=True)
 
         # ── KPI probability-distribution dashboard (all runs pooled across seeds) ──
@@ -584,6 +640,10 @@ def analyse_scenarios(scenarios: List[CurriculumSection],
         dist_png = out_dir / f"kpi_dist_{_safe_name(section.name)}_{stamp}.png"
         plot_distributions(section.name, pooled, n_runs, dist_png)
         print(f"      saved distributions : {dist_png}", flush=True)
+
+        normality = normality_tests(pooled, normality_alpha)
+        _print_normality_results(normality, normality_alpha)
+
         if write_csv:
             samp_csv = out_dir / f"kpi_samples_{_safe_name(section.name)}_{stamp}.csv"
             _write_samples_csv(pooled, samp_csv)
@@ -630,6 +690,9 @@ def _build_parser() -> argparse.ArgumentParser:
                    help=f"Relative stability band around final CoV (default: {STABILITY_TOL}).")
     p.add_argument("--min_n", type=int, default=STABILITY_MIN_N,
                    help=f"Ignore n below this when detecting n* (default: {STABILITY_MIN_N}).")
+    p.add_argument("--normality_alpha", type=float, default=NORMALITY_ALPHA,
+                   help="D'Agostino-Pearson significance level "
+                        f"(default: {NORMALITY_ALPHA}).")
     p.add_argument("--device", type=str, default=None, metavar="DEVICE",
                    help="Torch device, e.g. 'cpu' or 'cuda:0'. Default: auto.")
     p.add_argument("--out_dir", type=str, default=None,
@@ -642,6 +705,8 @@ def main() -> None:
     args = _build_parser().parse_args()
     if not SCENARIOS:
         raise RuntimeError("SCENARIOS is empty — define at least one scenario.")
+    if not 0.0 < args.normality_alpha < 1.0:
+        raise ValueError("--normality_alpha must be strictly between 0 and 1.")
 
     default_ckpt_path = Path(args.checkpoint) if args.checkpoint else None
     if default_ckpt_path is not None and not default_ckpt_path.exists():
@@ -658,13 +723,15 @@ def main() -> None:
     print(f"  KPIs (CoV)   : " + ", ".join(lbl for _, _, lbl in KPI_COLUMNS))
     print(f"  KPIs (dist)  : " + ", ".join(lbl for _, _, lbl in HIST_KPIS)
           + "   (reward: histogram only)")
+    print(f"  Normality    : D'Agostino-Pearson, alpha={args.normality_alpha:g}")
     print("─" * 70)
 
     analyse_scenarios(
         SCENARIOS, default_ckpt_path,
         max_episodes=args.max_episodes, n_seeds=args.n_seeds, base_seed=args.seed,
         chunk=args.chunk, n_orderings=args.n_orderings, tol=args.tol,
-        min_n=args.min_n, device=device, out_dir=out_dir,
+        min_n=args.min_n, normality_alpha=args.normality_alpha,
+        device=device, out_dir=out_dir,
         write_csv=not args.no_csv,
     )
 

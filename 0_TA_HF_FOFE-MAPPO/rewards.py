@@ -279,12 +279,12 @@ class RewardConfig:
     # κ cap so it cannot dominate. escort_jammer_scale sets the strength of the
     # (non-vanishing) translational pull on the jammers; raise it if the jammers
     # are sluggish relative to the per-step control-effort cost (0.01).
-    escort_kernel_length: float = 0.3     # ℓ — coverage kernel length (map units); long enough that a jammer FEELS an under-served striker that split to a far target (the attraction term below stops the long-range hovering)
+    escort_kernel_length: float = 0.1     # ℓ — coverage kernel length (map units); long enough that a jammer FEELS an under-served striker that split to a far target (the attraction term below stops the long-range hovering)
     escort_capacity:      float = 2    # κ — desired jammers PER STRIKER (soft count). κ=2 → each striker prefers a 2-jammer escort; jammers distribute to give every striker 2, and merge formations when jammers are scarce (escort-first). Also sets emergent formation size.
-    escort_striker_scale: float = 0.35  # w_s — striker penalty per unit unmet demand. ESCORT-FIRST PRIORITY: kept > target_cover_scale (w_st) so an UNESCORTED striker is always worse than an UNCOVERED target. This makes the reward composition-agnostic: strikers spread across targets only as far as jammers can escort them → 2 formations with 2 jammers, ONE clump (all share the lone jammer) with 1 jammer.
-    escort_jammer_scale:  float = 0.25  # w_j — jammer penalty per unit of UNMET team escort demand (0 when all strikers escorted); decides WHICH striker (distribution). Keep ≥ approach scale below.
-    escort_over_scale:    float = 0.3   # w_over — jammer penalty per unit of OVER-coverage Σ_s(c_s−κ)₊. Makes the BALANCED split (each striker exactly κ jammers) the unique optimum, so a κ-th+1 jammer piling on one striker is pushed to an under-served one. Without it the escort only punishes under-coverage → 1-3 splits (not 2-2) when κ>1. Set 0 to disable (recovers under-only behaviour).
-    escort_commit_temp:   float = 0.1   # τ — softmax temperature for jammer→striker commitment (0=hard nearest; ≳striker spread=shared). Set very large to recover pure additive coverage.
+    escort_striker_scale: float = 0.035  # w_s — striker penalty per unit unmet demand. ESCORT-FIRST PRIORITY: kept > target_cover_scale (w_st) so an UNESCORTED striker is always worse than an UNCOVERED target. This makes the reward composition-agnostic: strikers spread across targets only as far as jammers can escort them → 2 formations with 2 jammers, ONE clump (all share the lone jammer) with 1 jammer.
+    escort_jammer_scale:  float = 0.025  # w_j — jammer penalty per unit of UNMET team escort demand (0 when all strikers escorted); decides WHICH striker (distribution). Keep ≥ approach scale below.
+    escort_over_scale:    float = 0.03   # w_over — jammer penalty per unit of OVER-coverage Σ_s(c_s−κ)₊. Makes the BALANCED split (each striker exactly κ jammers) the unique optimum, so a κ-th+1 jammer piling on one striker is pushed to an under-served one. Without it the escort only punishes under-coverage → 1-3 splits (not 2-2) when κ>1. Set 0 to disable (recovers under-only behaviour).
+    escort_commit_temp:   float = 0.01   # τ — softmax temperature for jammer→striker commitment (0=hard nearest; ≳striker spread=shared). Set very large to recover pure additive coverage.
     # Jammer→striker ATTRACTION: the analog of striker_approach→targets, the second half of
     # the escort's restructure. A negative, LONG-RANGE, soft-nearest pull toward strikers
     # (penalty ∝ soft-nearest distance to an alive striker; 0 when ON a striker). It gives a
@@ -293,7 +293,7 @@ class RewardConfig:
     # alone did). The coverage field above (w_j) decides WHICH striker; this only provides
     # reach + commitment. Keep escort_jammer_scale ≥ this so distribution wins on assignment.
     # Pure jammer↔striker → scales to any (ns,nj), symmetric or not. Set 0 to disable.
-    jammer_escort_approach_scale: float = 0.4   # w_a — penalty per unit soft-nearest distance from a jammer to a striker (raised so a jammer is pulled ONTO its nearest striker, out of the symmetric middle, and tracks it through the split)
+    jammer_escort_approach_scale: float = 0.04   # w_a — penalty per unit soft-nearest distance from a jammer to a striker (raised so a jammer is pulled ONTO its nearest striker, out of the symmetric middle, and tracks it through the split)
 
     # ─── STRIKER-TARGET COVERAGE FIELD  (MIRROR of JAMMER ESCORT, striker ↔ target) ──
     # The escort makes jammers DISTRIBUTE across strikers; this is its exact twin on
@@ -321,9 +321,9 @@ class RewardConfig:
     # penalised) so strikers are driven ONTO targets, where they also engage/destroy.
     # Runs ALONGSIDE striker_approach (which gives the long-range pull to targets);
     # this field decides WHICH target. Set target_cover_scale = 0 to disable.
-    target_cover_kernel_length: float = 0.3    # ℓ_t — target coverage kernel length (map units); range over which the unmet-coverage gradient pulls a striker onto a target
+    target_cover_kernel_length: float = 0.1    # ℓ_t — target coverage kernel length (map units); range over which the unmet-coverage gradient pulls a striker onto a target
     target_cover_capacity:      float = 1      # κ_t — desired strikers per target (soft count); =1 so U=0 needs a FULL striker per target (κ_t<1 invites a midpoint straddle-farm)
-    target_cover_scale:         float = 0.15   # w_st — NEGATIVE penalty per unit of unmet target coverage (max |penalty| = w_st·Σκ_t); 0 at the desired one-striker-per-target state
+    target_cover_scale:         float = 0.01   # w_st — NEGATIVE penalty per unit of unmet target coverage (max |penalty| = w_st·Σκ_t); 0 at the desired one-striker-per-target state
     target_cover_commit_temp:   float = 0.2    # τ_t — softmax temperature for striker→target commitment (prevents a striker covering two targets at once)
 
     # ─── OPTIONAL PAPER-STYLE MISSION REWARD ────────────────────────────────

@@ -3,3 +3,4 @@ torchrl
 tensordict
 matplotlib
 numpy
+scipy
