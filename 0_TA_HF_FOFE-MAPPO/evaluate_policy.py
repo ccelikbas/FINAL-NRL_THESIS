@@ -135,7 +135,7 @@ MAIN_POLICY = PolicyInput(name="Complete", policy_file="2s4j_V1.pt")
 # The COMPARISON policies — each shown WITH a one-sided Wilcoxon p-value vs MAIN.
 # Leave this list EMPTY to just tabulate the main policy (no tests, no p-values).
 COMPARISON_POLICIES: List[PolicyInput] = [
-    PolicyInput(name="Baseline", policy_file="2s2-4j.pt")
+    PolicyInput(name="Baseline", policy_file="2s4j_V1.pt")
     # PolicyInput(name="No FOFE",  policy_file="2s4j_no_fofe.pt"),
 ]
 

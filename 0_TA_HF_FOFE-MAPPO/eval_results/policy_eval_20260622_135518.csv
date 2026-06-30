@@ -1,2 +1,0 @@
-name,scenario,S,J,T,R,comm,dr,n_episodes,n_repeats,completion_mean,completion_std,targets_mean,targets_std,survival_mean,survival_std,fragmentation_mean,fragmentation_std,duration_mean,duration_std,reward_mean,reward_std
-S1 - Known - Comm,S2,1,2,3,6,True,False,300,10,0.6153333333333333,0.022288789187768585,0.7680000045498212,0.014868421439760783,0.5875555570125579,0.02123614709154339,nan,nan,72.42333333333333,0.9029758757014301,-1.804960309346517,0.33627476972053605

@@ -106,31 +106,31 @@ class CurriculumSection:
 CURRICULUM: List[CurriculumSection] = [
     CurriculumSection(
         name="S2 - k0.05",
-        n_iters=1000,
+        n_iters=50,
         n_strikers=1, n_jammers=2,
-        n_known_targets=(1,2), n_unknown_targets=(1,2),
-        n_known_radars=(2,3), n_unknown_radars=(2,3),
-        radar_kill_probability=0.05,
+        n_known_targets=2, n_unknown_targets=0,
+        n_known_radars=6, n_unknown_radars=0,
+        radar_kill_probability=0.02,
         scenario="S2"
     ), 
-    CurriculumSection(
-        name="S2 - k0.1",
-        n_iters=1000,
-        n_strikers=1, n_jammers=2,
-        n_known_targets=(1,2), n_unknown_targets=(1,2),
-        n_known_radars=(2,3), n_unknown_radars=(2,3),
-        radar_kill_probability=0.1,
-        scenario="S2"
-    ), 
-    CurriculumSection(
-        name="S2 - k0.5",
-        n_iters=3000,
-        n_strikers=1, n_jammers=2,
-        n_known_targets=(1,2), n_unknown_targets=(1,2),
-        n_known_radars=(2,3), n_unknown_radars=(2,3),
-        radar_kill_probability=0.5,
-        scenario="S2"
-    )
+    # CurriculumSection(
+    #     name="S2 - k0.1",
+    #     n_iters=1000,
+    #     n_strikers=1, n_jammers=2,
+    #     n_known_targets=(1,2), n_unknown_targets=(1,2),
+    #     n_known_radars=(2,3), n_unknown_radars=(2,3),
+    #     radar_kill_probability=0.1,
+    #     scenario="S2"
+    # ), 
+    # CurriculumSection(
+    #     name="S2 - k0.5",
+    #     n_iters=3000,
+    #     n_strikers=1, n_jammers=2,
+    #     n_known_targets=(1,2), n_unknown_targets=(1,2),
+    #     n_known_radars=(2,3), n_unknown_radars=(2,3),
+    #     radar_kill_probability=0.5,
+    #     scenario="S2"
+    # )
 ]
 
 # check if this is configured correctly. 
@@ -460,19 +460,21 @@ def plot_curriculum_eval_rates(
     save_path: Optional[str] = None,
 ) -> None:
     """Eval rates over the full curriculum: survival, task completion,
-    targets destroyed — all bounded in [0, 1] so they share one axis."""
+    targets destroyed, coalition fragmentation — all bounded in [0, 1] so
+    they share one axis."""
     fig, ax = plt.subplots(1, 1, figsize=(11, 5.5))
     series = [
         ("eval_survival_rate",        "survival rate",         NLR_PRIMARY),
         ("eval_task_completion_rate", "task completion rate",  NLR_ACCENT),
         ("eval_targets_destroyed_rate", "targets destroyed rate", NLR_SECONDARY),
+        ("eval_coalition_fragmentation", "coalition fragmentation (frag)", NLR_DARKGRAY),
     ]
     for key, label, color in series:
         if logs.get(key):
             x = np.arange(1, len(logs[key]) + 1)
             _plot_valid_xy(ax, x, logs[key], label, color=color)
     _shade_sections(ax, section_bounds)
-    ax.set_title("Eval: Survival / Completion / Targets-Destroyed Rates",
+    ax.set_title("Eval: Survival / Completion / Targets-Destroyed / Fragmentation Rates",
                  fontsize=13, fontweight="bold")
     ax.set_xlabel("Global Iteration"); ax.set_ylabel("Rate")
     ax.set_ylim(0.0, 1.05)
