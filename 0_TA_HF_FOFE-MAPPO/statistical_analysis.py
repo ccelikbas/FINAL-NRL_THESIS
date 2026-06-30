@@ -141,10 +141,10 @@ from .nlr_style import NLR_CYCLE, NLR_REFERENCE
 SCENARIOS: List[CurriculumSection] = [
     CurriculumSection(
         name="FOFE-MAPPO S2",
-        policy_file="FOFE-MAPPO-BaselineV2.pt",
+        policy_file="2s4j_V1.pt",
         n_iters=1,  # not used
-        n_strikers=1, n_jammers=2,
-        n_known_targets=2, n_unknown_targets=0,
+        n_strikers=2, n_jammers=4,
+        n_known_targets=(2, 4), n_unknown_targets=0,
         n_known_radars=6, n_unknown_radars=0,
         radar_kill_probability=0.5,
         scenario="S2",

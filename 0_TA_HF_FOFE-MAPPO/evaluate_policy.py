@@ -1,71 +1,63 @@
 """
 evaluate_policy.py
 ══════════════════
-Evaluate ONE pretrained FOFE-MAPPO checkpoint across a list of test scenarios
-and print a KPI table (rows = scenarios, columns = KPIs).
+Compare a MAIN FOFE-MAPPO policy against zero or more COMPARISON policies on a
+set of test scenarios, and decide — per KPI — whether the main policy is
+significantly better, using the **Wilcoxon signed-rank test**.
 
 ──────────────────────────────────────────────────────────────────────────────
-HOW TO USE A PRETRAINED POLICY
+WHAT THIS PRODUCES
 ──────────────────────────────────────────────────────────────────────────────
-The striker AND jammer are trained jointly and saved together as a single
-combined policy inside one .pt checkpoint. Both run.py and run_curriculum.py
-produce such a file:
+For every KPI it builds ONE table (console + LaTeX): rows = scenarios, columns
+= policies. The MAIN policy column shows the raw KPI value with NO p-value (it
+is the reference). Every COMPARISON policy column shows its KPI value, the
+deviation from the main policy in parentheses, and a one-sided Wilcoxon
+signed-rank p-value testing the hypothesis below. With a single policy (no
+comparisons) you simply get the value columns and no p-values.
 
-    run.py             →  runs/fofe_mappo.pt
-    run_curriculum.py  →  runs/curriculum_mappo.pt
+Hypotheses tested (H1 = what we hope holds for the MAIN policy):
+    Completion, Targets, Survival, Reward   →  main is HIGHER than comparison
+    Duration                                →  main is LOWER  than comparison
+Coalition fragmentation is collected but NOT tabulated/tested here.
 
-Point this script at that ONE file with --checkpoint. The script auto-detects
-which producer made it (run.py checkpoints carry an `env_cfg`; curriculum
-checkpoints don't) and loads the network / FOFE / reward / extension configs
-needed to rebuild the exact policy that was trained.
+──────────────────────────────────────────────────────────────────────────────
+WHY A *SIGNED-RANK* (PAIRED) TEST IS VALID HERE
+──────────────────────────────────────────────────────────────────────────────
+The environment is fully seeded: a given seed reproduces the same randomised
+layout at reset (see statistical_analysis.py / environment.py). Every policy in
+a scenario is therefore evaluated on the SAME seed schedule, so episode i faces
+the SAME starting layout for the main and each comparison policy. That makes the
+per-episode pair (main_i, baseline_i) a matched pair, and the test runs on the
+paired differences d_i = main_i − baseline_i (common random numbers → higher
+power). Episodes where either policy never finished are dropped pairwise.
 
-Run it as a direct script with the project's venv python (there is no `python`
-on PATH, and the package folder isn't importable as `-m ...`):
+The layout draw at reset depends only on the entity counts / scenario / ranges
+(which the scenario forces identical across policies) and the seed — not on the
+reward shaping, communication flag, FOFE, or the policy itself — so the pairing
+holds even when the compared policies are trained variants (e.g. comm on/off).
+
+──────────────────────────────────────────────────────────────────────────────
+HOW TO CONFIGURE  (edit the three blocks below)
+──────────────────────────────────────────────────────────────────────────────
+1. MAIN_POLICY            – the reference checkpoint (the "no-p-value" column).
+2. COMPARISON_POLICIES    – the checkpoints to test against it (each a column
+                            WITH a p-value). Leave empty for a single-policy run.
+3. EVAL_SCENARIOS         – the environments (rows). Same `CurriculumSection`
+                            format as run_curriculum.py. Its `policy_file` field
+                            is IGNORED here — policies come from blocks 1 & 2.
+
+`policy_file` values resolve like before:
+    "BaselineV2.pt"          → under runs/ (the common case)
+    r"C:\\path\\to\\x.pt"      → absolute path, used as-is
+    None                     → falls back to the --checkpoint default
+
+Run it as a direct script with the project's venv python:
 
     # from the repo root:
-    .\.venv\Scripts\python.exe 0_TA_HF_FOFE-MAPPO\evaluate_policy.py --checkpoint 0_TA_HF_FOFE-MAPPO\runs\2s2-4j.pt
+    .\\.venv\\Scripts\\python.exe 0_TA_HF_FOFE-MAPPO\\evaluate_policy.py
 
-    # or after `cd 0_TA_HF_FOFE-MAPPO`:
-    ..\.venv\Scripts\python.exe evaluate_policy.py --checkpoint runs\fofe_mappo.pt --n_episodes 200 --n_repeats 5
-
-──────────────────────────────────────────────────────────────────────────────
-HOW TO DEFINE SCENARIOS
-──────────────────────────────────────────────────────────────────────────────
-Edit the EVAL_SCENARIOS list below. It uses the SAME `CurriculumSection`
-dataclass you already use in run_curriculum.py, so you can copy-paste sections
-straight across. Field rules are identical:
-
-    None        → inherit from the checkpoint's defaults
-    scalar      → fixed for the scenario
-    (lo, hi)    → per-environment domain randomization (a single scenario then
-                  evaluates over a MIX of configs, exactly like training eval)
-
-`n_iters` is ignored here (it only matters for training); keep it for
-copy-paste compatibility. `name` is the row label in the results table.
-
-──────────────────────────────────────────────────────────────────────────────
-HOW TO EVALUATE DIFFERENT POLICIES IN ONE RUN
-──────────────────────────────────────────────────────────────────────────────
-Each scenario may set `policy_file` to choose which checkpoint evaluates it, so
-a single run can compare policies side by side:
-
-    policy_file="BaselineV2.pt"      → resolves under runs/ (the common case)
-    policy_file=r"C:\\path\\to\\x.pt"  → absolute path, used as-is
-    policy_file=None                 → falls back to the --checkpoint default
-
-Checkpoints are loaded once and cached, so reusing the same file across
-scenarios costs nothing. The "Policy" column in the table shows what ran where.
---checkpoint is optional: it is only required if some scenario leaves
-`policy_file` as None.
-
-──────────────────────────────────────────────────────────────────────────────
-HOW EVALUATION WORKS
-──────────────────────────────────────────────────────────────────────────────
-For every scenario we run N_REPEATS independent repeats; each repeat evaluates
-the frozen policy over N_EVAL_EPISODES episodes (run in parallel) and yields one
-value per KPI. The table then reports mean ± std across the repeats, so you can
-see the run-to-run spread of each estimate. Both counts are configurable below
-(or via --n_episodes / --n_repeats).
+    # quicker smoke-test:
+    .\\.venv\\Scripts\\python.exe 0_TA_HF_FOFE-MAPPO\\evaluate_policy.py --n_episodes 100
 """
 
 from __future__ import annotations
@@ -75,16 +67,17 @@ import copy
 import os
 import sys
 import types
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 # Match the training entry points: force Inductor to compile in-process (avoids
 # a Triton 'cubin' KeyError on some Linux+CUDA setups). Harmless elsewhere.
 os.environ.setdefault("TORCHINDUCTOR_COMPILE_THREADS", "1")
 
 # Windows consoles default to cp1252, which can't encode the table glyphs
-# (± × ─). Switch the streams to UTF-8 so printing never crashes.
+# (± × ─ Δ α). Switch the streams to UTF-8 so printing never crashes.
 for _stream in (sys.stdout, sys.stderr):
     try:
         _stream.reconfigure(encoding="utf-8")
@@ -107,65 +100,59 @@ if __package__ in (None, ""):
 
 import numpy as np
 import torch
+from scipy.stats import wilcoxon
 
 from .config import (
-    EnvConfig, EnvExtensionsConfig, ExperimentConfig, FOFEConfig,
-    NetworkConfig, PPOConfig,
+    EnvConfig, EnvExtensionsConfig, FOFEConfig, NetworkConfig, PPOConfig,
 )
 from .rewards import RewardConfig
 from .models import make_combined_policy
-from .trainer import build_env, evaluate_current_policy
+from .trainer import build_env
 # Reuse the EXACT curriculum scenario format + its config-resolution logic so a
 # scenario defined here behaves identically to a curriculum section.
 from .run_curriculum import CurriculumSection, _section_to_env_cfg, _section_label
 
 
 # =====================================================================
-#  >>>  EDIT YOUR TEST SCENARIOS HERE  <<<
-#  Same format as the CURRICULUM list in run_curriculum.py.
+#  >>>  POLICIES TO COMPARE  (the COLUMNS of every KPI table)  <<<
+# =====================================================================
+
+@dataclass
+class PolicyInput:
+    """One model variant = one column in every KPI table.
+
+    `name`        : column header (e.g. "Complete", "No comm.").
+    `policy_file` : checkpoint — bare name → runs/, absolute path → as-is,
+                    None → the run's --checkpoint default.
+    """
+    name: str
+    policy_file: Optional[str] = None
+
+
+# The MAIN policy — shown WITHOUT a p-value (the reference column).
+MAIN_POLICY = PolicyInput(name="Complete", policy_file="2s4j_V1.pt")
+
+# The COMPARISON policies — each shown WITH a one-sided Wilcoxon p-value vs MAIN.
+# Leave this list EMPTY to just tabulate the main policy (no tests, no p-values).
+COMPARISON_POLICIES: List[PolicyInput] = [
+    PolicyInput(name="Baseline", policy_file="2s2-4j.pt")
+    # PolicyInput(name="No FOFE",  policy_file="2s4j_no_fofe.pt"),
+]
+
+
+# =====================================================================
+#  >>>  EVAL SCENARIOS  (the ROWS of every KPI table)  <<<
+#  Same format as the CURRICULUM list in run_curriculum.py. The `policy_file`
+#  field is IGNORED here — policies come from the two blocks above.
 # =====================================================================
 
 EVAL_SCENARIOS: List[CurriculumSection] = [
     CurriculumSection(
-        name="Baseline S1",
-        policy_file="BaselineV2.pt",
-        n_iters=1, # not used
-        n_strikers=1, n_jammers=2,
+        name="S1",
+        n_iters=1,  # not used
+        n_strikers=2, n_jammers=4,
         n_known_targets=2, n_unknown_targets=0,
         n_known_radars=6, n_unknown_radars=0,
-        radar_kill_probability=0.5,
-        scenario="S2",
-        communicate=False,
-    ), 
-    CurriculumSection(
-        name="Baseline S2",
-        policy_file="BaselineV2.pt",
-        n_iters=1, # not used
-        n_strikers=1, n_jammers=2,
-        n_known_targets=1, n_unknown_targets=2,
-        n_known_radars=4, n_unknown_radars=2,
-        radar_kill_probability=0.5,
-        scenario="S2",
-        communicate=False,
-    ), 
-    CurriculumSection(
-        name="FOFE-MAPPO S1",
-        policy_file="FOFE-MAPPO-BaselineV2.pt",
-        n_iters=1, # not used
-        n_strikers=1, n_jammers=2,
-        n_known_targets=2, n_unknown_targets=0,
-        n_known_radars=6, n_unknown_radars=0,
-        radar_kill_probability=0.5,
-        scenario="S2",
-        communicate=True,
-    ), 
-    CurriculumSection(
-        name="FOFE-MAPPO S2",
-        policy_file="FOFE-MAPPO-BaselineV2.pt",
-        n_iters=1, # not used
-        n_strikers=1, n_jammers=2,
-        n_known_targets=1, n_unknown_targets=2,
-        n_known_radars=4, n_unknown_radars=2,
         radar_kill_probability=0.5,
         scenario="S2",
         communicate=True,
@@ -174,26 +161,49 @@ EVAL_SCENARIOS: List[CurriculumSection] = [
 
 
 # =====================================================================
-#  >>>  EVALUATION CONFIG (the "n" you asked about)  <<<
+#  >>>  TEST / EVALUATION CONFIG  (all the "inputs" for the test)  <<<
 # =====================================================================
 
-N_EVAL_EPISODES = 300      # domain randomised episodes (enviernments) per repeat (run in parallel)
-N_REPEATS       = 10        # independent repeats per scenario → mean ± std
-BASE_SEED       = 42       # repeat r uses BASE_SEED + r * 1000
+N_EPISODES   = 300        # paired episodes per policy per scenario (= the test N)
+CHUNK_EPISODES = 300      # parallel envs per rollout (chunked to avoid OOM)
+BASE_SEED    = 42         # scenario s uses BASE_SEED + s*SEED_STRIDE for every policy
+SEED_STRIDE  = 1_000_000  # distinct layouts per scenario, identical across policies
+ALPHA        = 0.05       # significance level for declaring "significantly better"
+P_ADJUST     = "none"     # multiplicity correction: "none" (default) or "holm".
+                          # "holm" corrects across the comparison policies within
+                          # each (scenario, KPI).
 
 
 # =====================================================================
-#  KPI columns (key in evaluate_current_policy output, header, fmt)
+#  KPI definitions
+#  direction = the main policy is BETTER when its value is {higher|lower};
+#  it maps to the one-sided Wilcoxon alternative on d = main − baseline:
+#       higher → "greater"      lower → "less"
 # =====================================================================
 
-KPI_COLUMNS = [
-    ("completion", "eval_task_completion_rate",       "Completion", "{:.3f}"),
-    ("targets",    "eval_targets_destroyed_rate",     "Targets",    "{:.3f}"),
-    ("survival",   "eval_survival_rate",              "Survival",   "{:.3f}"),
-    ("fragmentation", "eval_coalition_fragmentation", "Coalition Frag", "{:.3f}"),
-    ("duration",   "eval_mean_duration",              "Duration",   "{:.1f}"),
-    ("reward",     "eval_mean_episode_total_reward",  "Reward",     "{:.2f}"),
+@dataclass(frozen=True)
+class KPISpec:
+    key: str          # short id (column key)
+    stat_key: str     # per-episode key in env.pop_episode_stats()
+    label: str        # human label / caption
+    fmt: str          # value format, e.g. "{:.3f}"
+    unit: str         # short sub-header, e.g. "rate" / "steps" / "reward"
+    direction: str    # "higher" or "lower"  (main is better when …)
+
+
+KPIS: List[KPISpec] = [
+    KPISpec("completion", "mission_complete",     "Task completion",  "{:.3f}", "rate",   "higher"),
+    KPISpec("targets",    "targets_frac",         "Targets destroyed","{:.3f}", "rate",   "higher"),
+    KPISpec("survival",   "survival_frac",        "Survival",         "{:.3f}", "rate",   "higher"),
+    KPISpec("duration",   "duration",             "Duration",         "{:.1f}", "steps",  "lower"),
+    KPISpec("reward",     "episode_total_reward", "Episode reward",   "{:.2f}", "reward", "higher"),
 ]
+
+# Coalition fragmentation is still collected per episode (handy in the CSV) but
+# is NOT tabulated or tested. Kept separate so it never enters the KPI tables.
+_EXTRA_STAT_KEYS = [("fragmentation", "coalition_fragmentation")]
+
+_ALT = {"higher": "greater", "lower": "less"}   # direction → scipy alternative
 
 
 # =====================================================================
@@ -263,7 +273,7 @@ class _LoadedCheckpoint:
 
 def _resolve_policy_path(policy_file: Optional[str],
                          default_path: Optional[Path]) -> Optional[Path]:
-    """Resolve a scenario's `policy_file` to a concrete checkpoint path.
+    """Resolve a `policy_file` to a concrete checkpoint path.
 
     None              → the run's --checkpoint default (may be None).
     bare name / rel.  → under runs/ (e.g. "BaselineV2.pt").
@@ -290,184 +300,611 @@ def _build_policy_for_scenario(ckpt: _LoadedCheckpoint, env_cfg: EnvConfig,
         depth=ckpt.net_cfg.depth,
         fofe_cfg=ckpt.fofe_cfg if ckpt.fofe_cfg.use_fofe else None,
     )
-    policy.load_state_dict(ckpt.policy_state_dict, strict=True)
+    try:
+        policy.load_state_dict(ckpt.policy_state_dict, strict=True)
+    except RuntimeError as exc:
+        # Turn torch's cryptic size-mismatch into an actionable message: the
+        # checkpoint was trained against a different observation layout than the
+        # current env/config produces — almost always an OUTDATED checkpoint
+        # (e.g. a flat-MLP policy saved before the obs-slot defaults changed).
+        want = next((int(v.shape[1]) for k, v in ckpt.policy_state_dict.items()
+                     if k.endswith("net.net.0.weight") and getattr(v, "ndim", 0) == 2),
+                    None)
+        try:
+            have = int(probe_env.observation_spec["agents", "observation"].shape[-1])
+        except Exception:
+            have = None
+        dims = (f" Its flat-MLP actor expects obs_dim={want}, but this scenario "
+                f"builds obs_dim={have}." if (want and have and want != have) else "")
+        raise RuntimeError(
+            f"Cannot load this checkpoint into the policy rebuilt for the "
+            f"scenario (FOFE={'on' if ckpt.fofe_cfg.use_fofe else 'off'}).{dims} "
+            f"The checkpoint's observation layout does not match what the current "
+            f"environment/config produces — almost always an OUTDATED checkpoint. "
+            f"Evaluate a policy trained against the current config.\n"
+            f"  underlying error: {exc}"
+        ) from exc
     return policy.to(device)
 
 
-def _mean_std(values: List[float]) -> tuple[float, float]:
-    """Mean and (sample) std over finite values; (nan, nan) if none finite."""
-    arr = np.asarray([v for v in values if np.isfinite(v)], dtype=float)
-    if arr.size == 0:
-        return float("nan"), float("nan")
-    std = float(arr.std(ddof=1)) if arr.size > 1 else 0.0
-    return float(arr.mean()), std
+# =====================================================================
+#  RAW per-episode KPI collection (the Xᵢ samples the test needs)
+#  Mirrors statistical_analysis.py: a parallel batch of episodes, keeping the
+#  RAW per-episode stats instead of averaging. Stats for a newly-finished env
+#  are popped immediately so a re-stepped done env can't overwrite them.
+# =====================================================================
+
+_ALL_STAT_KEYS: List[Tuple[str, str]] = (
+    [(s.key, s.stat_key) for s in KPIS] + _EXTRA_STAT_KEYS
+)
 
 
-def evaluate_scenarios(
-    scenarios: List[CurriculumSection],
-    default_ckpt_path: Optional[Path],
-    n_episodes: int,
-    n_repeats: int,
-    base_seed: int,
-    device: torch.device,
-) -> List[Dict[str, Any]]:
-    """Evaluate every scenario (each with its own policy) and return result rows."""
-    rows: List[Dict[str, Any]] = []
-    cache: Dict[str, _LoadedCheckpoint] = {}      # resolved path → loaded ckpt
+@torch.no_grad()
+def _rollout_collect(policy, env, max_steps: int, n_envs: int,
+                     device: torch.device) -> List[Optional[dict]]:
+    """Run one parallel batch of `n_envs` episodes; return per-env stats dicts."""
+    was_training = policy.training
+    policy.eval()
+    policy.deterministic = True          # frozen, greedy policy during eval
 
-    def _load(path: Path) -> _LoadedCheckpoint:
-        key = str(path.resolve())
-        if key not in cache:
-            print(f"  Loading policy: {path.name}", flush=True)
-            ck = _LoadedCheckpoint(path, device)
-            print(f"      producer={ck.producer}  "
-                  f"FOFE={'on' if ck.fofe_cfg.use_fofe else 'off'}  "
-                  f"HF_radar={'on' if ck.hf_radar_cfg is not None else 'off'}",
-                  flush=True)
-            cache[key] = ck
-        return cache[key]
+    done_mask = torch.zeros(n_envs, dtype=torch.bool, device=device)
+    td = env.reset()
+    stats_by_env: Dict[int, dict] = {}
 
-    for i, section in enumerate(scenarios):
-        ckpt_path = _resolve_policy_path(section.policy_file, default_ckpt_path)
-        if ckpt_path is None:
-            raise RuntimeError(
-                f"Scenario '{section.name}' sets no policy_file and no "
-                f"--checkpoint default was given — cannot pick a policy."
-            )
-        if not ckpt_path.exists():
-            raise FileNotFoundError(
-                f"Scenario '{section.name}': policy not found: {ckpt_path}"
-            )
-        ckpt = _load(ckpt_path)
+    for _ in range(max_steps):
+        td = policy(td)
+        td_next = env.step(td)
 
-        env_cfg = _section_to_env_cfg(
-            section, ckpt.base_env_cfg, ckpt.reward_cfg, ckpt.fofe_cfg
-        )
-        dr_tag = "DR" if env_cfg.dr is not None else "fixed"
-        print(f"[{i + 1:2d}/{len(scenarios)}] {section.name:20s} ({dr_tag})  "
-              f"[{ckpt_path.name}]  {_section_label(section, env_cfg)}", flush=True)
+        step_done = td_next.get(("next", "done")).reshape(n_envs).bool()
+        newly_done = step_done & ~done_mask
+        done_mask = done_mask | step_done
 
-        policy = _build_policy_for_scenario(ckpt, env_cfg, device)
+        if newly_done.any():
+            for s in env.pop_episode_stats():
+                ei = int(s.get("env_idx", -1))
+                if ei >= 0 and bool(newly_done[ei]) and ei not in stats_by_env:
+                    stats_by_env[ei] = s
 
-        # repeat -> {kpi_key: value}
-        per_repeat: Dict[str, List[float]] = {key: [] for key, *_ in KPI_COLUMNS}
-        for r in range(n_repeats):
-            eval_ppo = PPOConfig(num_envs=1, device=device, seed=base_seed + r * 1000)
-            metrics = evaluate_current_policy(
-                policy, env_cfg, eval_ppo,
-                n_eval_episodes=n_episodes,
-                hf_radar_cfg=ckpt.hf_radar_cfg,
-            )
-            for key, metric_key, *_ in KPI_COLUMNS:
-                per_repeat[key].append(float(metrics.get(metric_key, float("nan"))))
-            print(f"        repeat {r + 1}/{n_repeats}  "
-                  + "  ".join(
-                      f"{key}={per_repeat[key][-1]:.3f}" for key, *_ in KPI_COLUMNS
-                  ), flush=True)
+        if done_mask.all():
+            break
+        td = td_next.get("next")
 
-        row: Dict[str, Any] = {
-            "name": section.name,
-            "policy": ckpt_path.name,
-            "producer": ckpt.producer,
-            "scenario": env_cfg.scenario,
-            "S": env_cfg.n_strikers, "J": env_cfg.n_jammers,
-            "T": env_cfg.n_targets, "R": env_cfg.n_radars,
-            "comm": bool(getattr(env_cfg, "communicate", True)),
-            "dr": env_cfg.dr is not None,
-        }
-        for key, *_ in KPI_COLUMNS:
-            mean, std = _mean_std(per_repeat[key])
-            row[f"{key}_mean"] = mean
-            row[f"{key}_std"] = std
-        rows.append(row)
+    policy.deterministic = False
+    if was_training:
+        policy.train()
 
-        del policy
+    return [stats_by_env.get(b) for b in range(n_envs)]
+
+
+def _collect_episode_kpis(policy, env_cfg, hf_radar_cfg, n_episodes: int,
+                          master_seed: int, device: torch.device,
+                          chunk: int) -> Dict[str, np.ndarray]:
+    """Return {kpi_key: array[n_episodes]} of per-episode values for one policy.
+
+    Episodes are generated in independent parallel chunks. The chunk seeds are a
+    deterministic function of `master_seed` only — so two policies called with
+    the SAME master_seed, n_episodes and chunk see the SAME layouts in the SAME
+    order, i.e. their returned arrays are aligned 1:1 (paired by episode index).
+    """
+    per_kpi: Dict[str, List[float]] = {key: [] for key, _ in _ALL_STAT_KEYS}
+    collected = 0
+    chunk_idx = 0
+    while collected < n_episodes:
+        b = min(chunk, n_episodes - collected)
+        ppo = PPOConfig(num_envs=b, device=device,
+                        seed=int(master_seed + chunk_idx * 1000))
+        env = build_env(env_cfg, ppo, hf_radar_cfg=hf_radar_cfg)
+        stats = _rollout_collect(policy, env, env_cfg.max_steps, b, device)
+
+        for s in stats:
+            for key, stat_key in _ALL_STAT_KEYS:
+                if s is None:
+                    per_kpi[key].append(float("nan"))
+                elif stat_key == "mission_complete":           # bool → 0/1 KPI
+                    per_kpi[key].append(1.0 if bool(s.get(stat_key, False)) else 0.0)
+                else:
+                    per_kpi[key].append(float(s.get(stat_key, float("nan"))))
+
+        collected += b
+        chunk_idx += 1
+        del env
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-    return rows
+    return {k: np.asarray(v, dtype=float) for k, v in per_kpi.items()}
 
 
-def _print_table(rows: List[Dict[str, Any]], n_episodes: int,
-                 n_repeats: int) -> None:
-    """Print the KPI table: one row per scenario, mean ± std per KPI."""
-    # Context columns + one cell per KPI ("0.923 ± 0.031").
-    ctx_headers = ["Scenario", "Policy", "Scn", "S", "J", "T", "R", "Comm"]
+# =====================================================================
+#  Statistics
+# =====================================================================
 
-    def _cell(row, key, fmt):
-        mean, std = row[f"{key}_mean"], row[f"{key}_std"]
-        if not np.isfinite(mean):
-            return "n/a"
-        return f"{fmt.format(mean)} ± {fmt.format(std)}"
+def _finite_stats(arr: np.ndarray) -> Tuple[float, float, int]:
+    """(mean, sample-std, n) over the finite entries; (nan, nan, 0) if none."""
+    a = np.asarray(arr, dtype=float)
+    a = a[np.isfinite(a)]
+    if a.size == 0:
+        return float("nan"), float("nan"), 0
+    std = float(a.std(ddof=1)) if a.size > 1 else 0.0
+    return float(a.mean()), std, int(a.size)
 
-    kpi_headers = [hdr for _, _, hdr, _ in KPI_COLUMNS]
-    table_rows = []
-    for row in rows:
-        name = row["name"] + ("*" if row["dr"] else "")
-        ctx = [name, row["policy"], row["scenario"], str(row["S"]), str(row["J"]),
-               str(row["T"]), str(row["R"]), "on" if row["comm"] else "off"]
-        kpis = [_cell(row, key, fmt) for key, _, _, fmt in KPI_COLUMNS]
-        table_rows.append(ctx + kpis)
 
-    headers = ctx_headers + kpi_headers
+def _wilcoxon_pair(main_vals: np.ndarray, base_vals: np.ndarray,
+                   alternative: str) -> Dict[str, Any]:
+    """One-sided Wilcoxon signed-rank test on the paired differences.
+
+    d_i = main_i − baseline_i over episodes where BOTH policies finished.
+    alternative="greater" → H1 median(d) > 0 (main higher);
+    alternative="less"    → H1 median(d) < 0 (main lower).
+    """
+    m = np.asarray(main_vals, dtype=float)
+    b = np.asarray(base_vals, dtype=float)
+    n = min(m.size, b.size)
+    m, b = m[:n], b[:n]                       # guard against ragged collection
+    mask = np.isfinite(m) & np.isfinite(b)
+    d = m[mask] - b[mask]
+
+    out: Dict[str, Any] = {
+        "alternative": alternative,
+        "n_pairs": int(d.size),
+        "statistic": float("nan"),
+        "pvalue": float("nan"),
+        "median_diff": float(np.median(d)) if d.size else float("nan"),
+        "mean_diff": float(np.mean(d)) if d.size else float("nan"),
+        "reason": None,
+    }
+    if d.size < 1:
+        out["reason"] = "no finite paired episodes"
+        return out
+    if np.all(d == 0.0):
+        # Identical on every pair → no evidence of a difference in either tail.
+        out["statistic"], out["pvalue"] = 0.0, 1.0
+        out["reason"] = "all paired differences are zero"
+        return out
+    try:
+        res = wilcoxon(d, alternative=alternative, zero_method="wilcox",
+                       correction=False)
+        out["statistic"] = float(res.statistic)
+        out["pvalue"] = float(res.pvalue)
+    except ValueError as exc:                 # e.g. degenerate inputs
+        out["reason"] = str(exc)
+    return out
+
+
+def _holm_adjust(pvals: List[float]) -> List[float]:
+    """Holm–Bonferroni step-down adjustment; NaNs pass through untouched."""
+    idx = [i for i, p in enumerate(pvals) if np.isfinite(p)]
+    out = list(pvals)
+    m = len(idx)
+    if m == 0:
+        return out
+    order = sorted(idx, key=lambda i: pvals[i])
+    running = 0.0
+    for rank, i in enumerate(order):
+        adj = min(1.0, (m - rank) * pvals[i])
+        running = max(running, adj)           # enforce monotonic non-decreasing
+        out[i] = running
+    return out
+
+
+# =====================================================================
+#  Evaluation driver
+# =====================================================================
+
+def _load_checkpoint(path: Path, device: torch.device,
+                     cache: Dict[str, _LoadedCheckpoint]) -> _LoadedCheckpoint:
+    """Load (and cache) a checkpoint, announcing producer/FOFE/HF-radar once."""
+    key = str(path.resolve())
+    if key not in cache:
+        print(f"  Loading policy: {path.name}", flush=True)
+        ck = _LoadedCheckpoint(path, device)
+        print(f"      producer={ck.producer}  "
+              f"FOFE={'on' if ck.fofe_cfg.use_fofe else 'off'}  "
+              f"HF_radar={'on' if ck.hf_radar_cfg is not None else 'off'}",
+              flush=True)
+        cache[key] = ck
+    return cache[key]
+
+
+def evaluate_comparison(
+    scenarios: List[CurriculumSection],
+    main_policy: PolicyInput,
+    comparison_policies: List[PolicyInput],
+    default_ckpt_path: Optional[Path],
+    n_episodes: int,
+    chunk: int,
+    base_seed: int,
+    p_adjust: str,
+    device: torch.device,
+    cache: Optional[Dict[str, _LoadedCheckpoint]] = None,
+) -> Tuple[Dict[Tuple[str, str, str], Tuple[float, float, int]],
+           Dict[Tuple[str, str, str], Dict[str, Any]],
+           Dict[str, Dict[str, Dict[str, np.ndarray]]]]:
+    """Collect paired per-episode KPIs and run the per-KPI Wilcoxon tests.
+
+    Returns:
+      summary[(scenario, policy, kpi)]  = (mean, std, n_finite)
+      tests[(scenario, baseline, kpi)]  = wilcoxon result dict (raw + adjusted p)
+      samples[scenario][policy]         = {kpi: array[n_episodes]}
+
+    `cache` (resolved-path → loaded checkpoint) may be shared with the
+    pre-evaluation policy check so each checkpoint is loaded only once.
+    """
+    policies = [main_policy] + list(comparison_policies)
+    cache = {} if cache is None else cache
+
+    summary: Dict[Tuple[str, str, str], Tuple[float, float, int]] = {}
+    tests: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
+    samples: Dict[str, Dict[str, Dict[str, np.ndarray]]] = {}
+
+    for si, section in enumerate(scenarios):
+        master_seed = base_seed + si * SEED_STRIDE
+        print(f"\n[{si + 1}/{len(scenarios)}] Scenario '{section.name}'  "
+              f"(seed={master_seed}, N={n_episodes} paired episodes)", flush=True)
+
+        per_policy: Dict[str, Dict[str, np.ndarray]] = {}
+        max_steps_seen: Dict[str, int] = {}
+
+        for pol in policies:
+            ckpt_path = _resolve_policy_path(pol.policy_file, default_ckpt_path)
+            if ckpt_path is None:
+                raise RuntimeError(
+                    f"Policy '{pol.name}' sets no policy_file and no "
+                    f"--checkpoint default was given — cannot pick a checkpoint."
+                )
+            if not ckpt_path.exists():
+                raise FileNotFoundError(
+                    f"Policy '{pol.name}': checkpoint not found: {ckpt_path}"
+                )
+            ckpt = _load_checkpoint(ckpt_path, device, cache)
+            env_cfg = _section_to_env_cfg(
+                section, ckpt.base_env_cfg, ckpt.reward_cfg, ckpt.fofe_cfg
+            )
+            max_steps_seen[pol.name] = int(env_cfg.max_steps)
+            print(f"    [{pol.name:14s}] {ckpt_path.name:22s} "
+                  f"{_section_label(section, env_cfg)}", flush=True)
+
+            policy = _build_policy_for_scenario(ckpt, env_cfg, device)
+            arrs = _collect_episode_kpis(
+                policy, env_cfg, ckpt.hf_radar_cfg, n_episodes, master_seed,
+                device, chunk,
+            )
+            per_policy[pol.name] = arrs
+            for spec in KPIS:
+                summary[(section.name, pol.name, spec.key)] = _finite_stats(arrs[spec.key])
+            print("        means: " + "  ".join(
+                f"{spec.key}={summary[(section.name, pol.name, spec.key)][0]:.3f}"
+                for spec in KPIS), flush=True)
+
+            del policy
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+        # Horizon must match for a fair paired comparison (duration/completion
+        # are horizon-sensitive). Same seed still pairs the START layouts, but a
+        # differing horizon means the rollouts are not comparable.
+        if len(set(max_steps_seen.values())) > 1:
+            print("    ! WARNING: policies resolved to different max_steps "
+                  f"{max_steps_seen} — set `max_steps` in the scenario to force "
+                  "a common horizon for a fair comparison.", flush=True)
+
+        # ── per-KPI Wilcoxon tests vs the main policy ──
+        main_arrs = per_policy[main_policy.name]
+        for spec in KPIS:
+            raw: List[float] = []
+            base_keys: List[Tuple[str, str, str]] = []
+            for base in comparison_policies:
+                res = _wilcoxon_pair(main_arrs[spec.key],
+                                     per_policy[base.name][spec.key],
+                                     _ALT[spec.direction])
+                key = (section.name, base.name, spec.key)
+                tests[key] = res
+                base_keys.append(key)
+                raw.append(res["pvalue"])
+            # Multiplicity correction within (scenario, KPI) across baselines.
+            adj = _holm_adjust(raw) if p_adjust == "holm" else list(raw)
+            for key, a in zip(base_keys, adj):
+                tests[key]["pvalue_adj"] = a
+
+        samples[section.name] = per_policy
+
+    return summary, tests, samples
+
+
+# =====================================================================
+#  Console + LaTeX + CSV output
+# =====================================================================
+
+def _fmt_or_na(spec: KPISpec, x: float) -> str:
+    return spec.fmt.format(x) if np.isfinite(x) else "n/a"
+
+
+def _pct_delta(main_mean: float, base_mean: float, tex: bool = False) -> str:
+    """Comparison's deviation from the main policy as a signed percentage,
+    relative to the main: 100·(base − main)/|main|, e.g. '+12.3%' / '-8.1%'.
+
+    Returns 'n/a' when undefined (non-finite, or main == 0)."""
+    pct_sign = r"\%" if tex else "%"
+    if not (np.isfinite(main_mean) and np.isfinite(base_mean)) or main_mean == 0.0:
+        return "n/a"
+    pct = (base_mean - main_mean) / abs(main_mean) * 100.0
+    return f"{pct:+.1f}{pct_sign}"
+
+
+def _stars(p: float, alpha: float) -> int:
+    if not np.isfinite(p):
+        return 0
+    if p < 0.001:
+        return 3
+    if p < 0.01:
+        return 2
+    if p < alpha:
+        return 1
+    return 0
+
+
+def _p_console(p: float, alpha: float) -> str:
+    if not np.isfinite(p):
+        return "n/a"
+    txt = "<0.001" if p < 0.001 else f"{p:.3f}"
+    return txt + "*" * _stars(p, alpha)
+
+
+def _p_used(res: Dict[str, Any], p_adjust: str) -> float:
+    """The p-value to display (adjusted if a correction was requested)."""
+    return res.get("pvalue_adj", res["pvalue"]) if p_adjust == "holm" else res["pvalue"]
+
+
+def _print_config(main_policy: PolicyInput, comparison_policies: List[PolicyInput],
+                  scenarios: List[CurriculumSection], n_episodes: int,
+                  base_seed: int, alpha: float, p_adjust: str,
+                  device: torch.device) -> None:
+    print("─" * 78)
+    print("  WILCOXON SIGNED-RANK POLICY COMPARISON")
+    print("─" * 78)
+    print(f"  Main policy        : {main_policy.name}  [{main_policy.policy_file}]")
+    if comparison_policies:
+        print(f"  Comparison policies: "
+              + ", ".join(f"{p.name} [{p.policy_file}]" for p in comparison_policies))
+    else:
+        print("  Comparison policies: (none — values only, no p-values)")
+    print(f"  Scenarios          : {len(scenarios)}  "
+          f"({', '.join(s.name for s in scenarios)})")
+    print(f"  Test               : Wilcoxon signed-rank, paired by common seed")
+    print(f"  N (paired episodes): {n_episodes}   base seed: {base_seed}")
+    print(f"  Significance       : alpha={alpha:g}   correction: {p_adjust}")
+    print("  Hypotheses (H1, main vs comparison):")
+    for spec in KPIS:
+        rel = "higher" if spec.direction == "higher" else "lower"
+        print(f"      {spec.label:18s} main {rel:6s}  (alternative='{_ALT[spec.direction]}')")
+    print("  Stars: * p<{a:g}   ** p<0.01   *** p<0.001".format(a=alpha))
+    print("─" * 78)
+
+
+def _print_policy_diagnostics(main_policy: PolicyInput,
+                              comparison_policies: List[PolicyInput],
+                              scenarios: List[CurriculumSection],
+                              default_ckpt_path: Optional[Path],
+                              device: torch.device,
+                              cache: Dict[str, _LoadedCheckpoint]) -> None:
+    """Per-policy sanity check printed at the top: whether each policy uses the
+    FOFE encoder (off → flat MLP) and whether communication is on/off in the
+    environment it is evaluated in. Loads checkpoints into the shared `cache`."""
+    entries = ([("Main", main_policy)]
+               + [("Comparison", p) for p in comparison_policies])
+
+    loaded = []  # (role, policy, path|None, ckpt|None)
+    for role, pol in entries:
+        path = _resolve_policy_path(pol.policy_file, default_ckpt_path)
+        ck = _load_checkpoint(path, device, cache) if (path and path.exists()) else None
+        loaded.append((role, pol, path, ck))
+
+    print("\n  Policy check  (FOFE encoder / communication used in evaluation):")
+    for role, pol, path, ck in loaded:
+        if ck is None:
+            print(f"      [{role:10s}] {pol.name:14s} : checkpoint NOT FOUND "
+                  f"({pol.policy_file})", flush=True)
+            continue
+        fofe_txt = "FOFE on" if ck.fofe_cfg.use_fofe else "FOFE off (flat MLP)"
+        comms = [bool(getattr(_section_to_env_cfg(
+                    s, ck.base_env_cfg, ck.reward_cfg, ck.fofe_cfg),
+                    "communicate", True)) for s in scenarios]
+        if all(comms):
+            comm_txt = "communication on"
+        elif not any(comms):
+            comm_txt = "communication off (no communication)"
+        else:
+            comm_txt = "communication " + " ".join(
+                f"{s.name}={'on' if c else 'off'}" for s, c in zip(scenarios, comms))
+        print(f"      [{role:10s}] {pol.name:14s} : {fofe_txt:19s} | "
+              f"{comm_txt:36s} [{path.name}]", flush=True)
+    print("─" * 78)
+
+
+def _print_kpi_console(spec: KPISpec, scenarios: List[CurriculumSection],
+                       main_policy: PolicyInput,
+                       comparison_policies: List[PolicyInput],
+                       summary: Dict[Tuple[str, str, str], Tuple[float, float, int]],
+                       tests: Dict[Tuple[str, str, str], Dict[str, Any]],
+                       alpha: float, p_adjust: str) -> None:
+    better = "higher" if spec.direction == "higher" else "lower"
+    headers = ["Scenario", f"{main_policy.name} ({spec.unit})"]
+    for base in comparison_policies:
+        headers += [f"{base.name} ({spec.unit}, Δ%)", "p"]
+
+    table: List[List[str]] = []
+    for scn in scenarios:
+        m_mean, _, _ = summary[(scn.name, main_policy.name, spec.key)]
+        cells = [scn.name, _fmt_or_na(spec, m_mean)]
+        for base in comparison_policies:
+            b_mean, _, _ = summary[(scn.name, base.name, spec.key)]
+            res = tests[(scn.name, base.name, spec.key)]
+            b_str = _fmt_or_na(spec, b_mean)
+            if np.isfinite(b_mean):                       # value (+-xx%)
+                b_str += f" ({_pct_delta(m_mean, b_mean)})"
+            cells += [b_str, _p_console(_p_used(res, p_adjust), alpha)]
+        table.append(cells)
+
     widths = [len(h) for h in headers]
-    for tr in table_rows:
-        for c, cell in enumerate(tr):
+    for row in table:
+        for c, cell in enumerate(row):
             widths[c] = max(widths[c], len(cell))
 
-    def _fmt_row(cells):
-        return "  ".join(
-            cell.ljust(widths[c]) if c == 0 else cell.rjust(widths[c])
-            for c, cell in enumerate(cells)
-        )
+    def _fmt_row(cells: List[str]) -> str:
+        return "  ".join(cell.ljust(widths[c]) if c == 0 else cell.rjust(widths[c])
+                         for c, cell in enumerate(cells))
 
-    n_policies = len({row["policy"] for row in rows})
     sep = "  ".join("-" * w for w in widths)
-    title = (f"  Policy Evaluation  ({n_policies} "
-             f"{'policy' if n_policies == 1 else 'policies'} | "
-             f"{n_episodes} episodes × {n_repeats} repeats per scenario)")
-    bar = "=" * max(len(sep), len(title))
-
-    print(f"\n{bar}")
-    print(title)
-    print(bar)
-    print(_fmt_row(headers))
-    print(sep)
-    for tr in table_rows:
-        print(_fmt_row(tr))
-    print(sep)
-    if any(row["dr"] for row in rows):
-        print("  * = domain-randomized scenario (counts shown are the maxima)")
-    print()
+    print(f"\n  KPI: {spec.label}  ({better} is better)")
+    print("  " + _fmt_row(headers))
+    print("  " + sep)
+    for row in table:
+        print("  " + _fmt_row(row))
 
 
-def _write_csv(rows: List[Dict[str, Any]], out_dir: Path, n_episodes: int,
-               n_repeats: int) -> Path:
-    """Write a flat CSV (mean + std columns per KPI) and return its path."""
+def _tex_escape(text: str) -> str:
+    for a, b in (("\\", r"\textbackslash{}"), ("&", r"\&"), ("%", r"\%"),
+                 ("_", r"\_"), ("#", r"\#")):
+        text = text.replace(a, b)
+    return text
+
+
+def _p_tex(p: float, alpha: float) -> str:
+    if not np.isfinite(p):
+        return "--"
+    txt = r"$<$0.001" if p < 0.001 else f"{p:.3f}"
+    k = _stars(p, alpha)
+    return txt + (r"$^{" + "*" * k + "}$" if k else "")
+
+
+def _kpi_latex_table(spec: KPISpec, scenarios: List[CurriculumSection],
+                     main_policy: PolicyInput,
+                     comparison_policies: List[PolicyInput],
+                     summary: Dict[Tuple[str, str, str], Tuple[float, float, int]],
+                     tests: Dict[Tuple[str, str, str], Dict[str, Any]],
+                     n_episodes: int, alpha: float, p_adjust: str) -> str:
+    ncomp = len(comparison_policies)
+    main_name = _tex_escape(main_policy.name)
+    better = "higher" if spec.direction == "higher" else "lower"
+    h1 = (r"main $>$ comparison" if spec.direction == "higher"
+          else r"main $<$ comparison")
+    corr = ("Holm-corrected within each scenario" if p_adjust == "holm"
+            else "uncorrected")
+
+    caption = (
+        f"{spec.label} ({better} is better). "
+        f"Each cell is the mean over $N={n_episodes}$ paired episodes (common "
+        f"random layouts). Comparison columns add, in parentheses, the relative "
+        f"deviation from the {main_name} column as a percentage "
+        f"($\\Delta\\%=100\\,(c-m)/|m|$; $m$={main_name}, $c$=comparison), and "
+        f"the one-sided Wilcoxon signed-rank $p$-value (H$_1$: {h1}). "
+        f"Significance ({corr}): $^{{*}}p<{alpha:g}$, "
+        f"$^{{**}}p<0.01$, $^{{***}}p<0.001$; $\\alpha={alpha:g}$."
+    )
+
+    colspec = "l c" + " cc" * ncomp
+    lines = [
+        r"\begin{table}[ht]",
+        r"  \centering",
+        "  \\caption{" + caption + "}",
+        "  \\label{tab:wilcoxon-" + spec.key + "}",
+        r"  \small",
+        "  \\begin{tabular}{" + colspec + "}",
+        r"    \toprule",
+    ]
+
+    # Header row 1: policy group headers.
+    h1cells = " & " + main_name
+    for base in comparison_policies:
+        h1cells += r" & \multicolumn{2}{c}{" + _tex_escape(base.name) + "}"
+    lines.append("    " + h1cells + r" \\")
+
+    # cmidrules under each policy group.
+    cmid = r"    \cmidrule(lr){2-2}"
+    col = 3
+    for _ in comparison_policies:
+        cmid += r"\cmidrule(lr){%d-%d}" % (col, col + 1)
+        col += 2
+    lines.append(cmid)
+
+    # Header row 2: units / p sub-headers.
+    h2cells = "Scenario & {" + spec.unit + "}"
+    for _ in comparison_policies:
+        h2cells += " & {" + spec.unit + r" ($\Delta$\%)} & {$p$}"
+    lines.append("    " + h2cells + r" \\")
+    lines.append(r"    \midrule")
+
+    # Body: one row per scenario.
+    for scn in scenarios:
+        m_mean, _, _ = summary[(scn.name, main_policy.name, spec.key)]
+        row = _tex_escape(scn.name) + " & " + (
+            spec.fmt.format(m_mean) if np.isfinite(m_mean) else "--")
+        for base in comparison_policies:
+            b_mean, _, _ = summary[(scn.name, base.name, spec.key)]
+            res = tests[(scn.name, base.name, spec.key)]
+            if np.isfinite(b_mean) and np.isfinite(m_mean):
+                val = spec.fmt.format(b_mean) + " (" + _pct_delta(m_mean, b_mean, tex=True) + ")"
+            else:
+                val = "--"
+            row += " & " + val + " & " + _p_tex(_p_used(res, p_adjust), alpha)
+        lines.append("    " + row + r" \\")
+
+    lines += [r"    \bottomrule", r"  \end{tabular}", r"\end{table}"]
+    return "\n".join(lines)
+
+
+def _write_latex(scenarios, main_policy, comparison_policies, summary, tests,
+                 n_episodes, alpha, p_adjust, out_path: Path) -> None:
+    blocks = [
+        "% Wilcoxon signed-rank policy comparison — generated by evaluate_policy.py",
+        f"% {datetime.now().isoformat(timespec='seconds')}",
+        "% Requires \\usepackage{booktabs} in the preamble.",
+        "",
+    ]
+    for spec in KPIS:
+        blocks.append(_kpi_latex_table(spec, scenarios, main_policy,
+                                       comparison_policies, summary, tests,
+                                       n_episodes, alpha, p_adjust))
+        blocks.append("")
+    out_path.write_text("\n".join(blocks), encoding="utf-8")
+
+
+def _write_csv(scenarios, main_policy, comparison_policies, summary, tests,
+               n_episodes, base_seed, alpha, p_adjust, out_path: Path) -> None:
     import csv
-
-    out_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_path = out_dir / f"policy_eval_{stamp}.csv"
-
-    fieldnames = ["name", "policy", "producer", "scenario", "S", "J", "T", "R",
-                  "comm", "dr", "n_episodes", "n_repeats"]
-    for key, *_ in KPI_COLUMNS:
-        fieldnames += [f"{key}_mean", f"{key}_std"]
-
-    with out_path.open("w", newline="") as fh:
-        writer = csv.DictWriter(fh, fieldnames=fieldnames)
-        writer.writeheader()
-        for row in rows:
-            out = {k: row[k] for k in ("name", "policy", "producer", "scenario",
-                                       "S", "J", "T", "R", "comm", "dr")}
-            out["n_episodes"] = n_episodes
-            out["n_repeats"] = n_repeats
-            for key, *_ in KPI_COLUMNS:
-                out[f"{key}_mean"] = row[f"{key}_mean"]
-                out[f"{key}_std"] = row[f"{key}_std"]
-            writer.writerow(out)
-    return out_path
+    main_name = main_policy.name
+    with out_path.open("w", newline="", encoding="utf-8") as fh:
+        w = csv.writer(fh)
+        w.writerow([
+            "scenario", "kpi", "kpi_label", "direction", "policy", "role",
+            "mean", "std", "n_finite", "n_episodes", "base_seed",
+            "alternative", "n_pairs", "wilcoxon_stat", "p_raw", "p_adj",
+            "p_adjust", "alpha", "significant", "mean_diff_vs_main",
+            "median_diff_vs_main", "pct_diff_vs_main", "note",
+        ])
+        for scn in scenarios:
+            for spec in KPIS:
+                # main row (reference, no test)
+                m_mean, m_std, m_n = summary[(scn.name, main_policy.name, spec.key)]
+                w.writerow([scn.name, spec.key, spec.label, spec.direction,
+                            main_name, "main", m_mean, m_std, m_n, n_episodes,
+                            base_seed, "", "", "", "", "", p_adjust, alpha,
+                            "", "", "", "", "reference policy"])
+                for base in comparison_policies:
+                    b_mean, b_std, b_n = summary[(scn.name, base.name, spec.key)]
+                    res = tests[(scn.name, base.name, spec.key)]
+                    p_show = _p_used(res, p_adjust)
+                    sig = bool(np.isfinite(p_show) and p_show < alpha)
+                    pct = ((b_mean - m_mean) / abs(m_mean) * 100.0
+                           if (np.isfinite(b_mean) and np.isfinite(m_mean)
+                               and m_mean != 0.0) else "")
+                    w.writerow([
+                        scn.name, spec.key, spec.label, spec.direction,
+                        base.name, "comparison", b_mean, b_std, b_n, n_episodes,
+                        base_seed, res["alternative"], res["n_pairs"],
+                        res["statistic"], res["pvalue"], res.get("pvalue_adj", ""),
+                        p_adjust, alpha, sig, res["mean_diff"], res["median_diff"],
+                        pct, res["reason"] or "",
+                    ])
 
 
 # =====================================================================
@@ -476,24 +913,29 @@ def _write_csv(rows: List[Dict[str, Any]], out_dir: Path, n_episodes: int,
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="Evaluate one pretrained FOFE-MAPPO checkpoint across the "
-        "EVAL_SCENARIOS defined at the top of this file.",
+        description="Compare a MAIN FOFE-MAPPO policy against COMPARISON "
+        "policies on the EVAL_SCENARIOS via the Wilcoxon signed-rank test. "
+        "Edit MAIN_POLICY / COMPARISON_POLICIES / EVAL_SCENARIOS at the top.",
     )
     p.add_argument("--checkpoint", type=str, default=None, metavar="PATH",
-                   help="Default .pt checkpoint for scenarios that leave "
-                   "policy_file=None. Optional if every scenario sets policy_file.")
-    p.add_argument("--n_episodes", type=int, default=N_EVAL_EPISODES,
-                   help=f"Episodes per repeat (default: {N_EVAL_EPISODES}).")
-    p.add_argument("--n_repeats", type=int, default=N_REPEATS,
-                   help=f"Repeats per scenario for mean±std (default: {N_REPEATS}).")
+                   help="Default .pt for any policy that leaves policy_file=None.")
+    p.add_argument("--n_episodes", type=int, default=N_EPISODES,
+                   help=f"Paired episodes per policy per scenario (default: {N_EPISODES}).")
+    p.add_argument("--chunk", type=int, default=CHUNK_EPISODES,
+                   help=f"Parallel envs per rollout (default: {CHUNK_EPISODES}).")
     p.add_argument("--seed", type=int, default=BASE_SEED,
                    help=f"Base RNG seed (default: {BASE_SEED}).")
+    p.add_argument("--alpha", type=float, default=ALPHA,
+                   help=f"Significance level (default: {ALPHA}).")
+    p.add_argument("--p_adjust", type=str, default=P_ADJUST,
+                   choices=["none", "holm"],
+                   help=f"Multiplicity correction across baselines (default: {P_ADJUST}).")
     p.add_argument("--device", type=str, default=None, metavar="DEVICE",
                    help="Torch device, e.g. 'cpu' or 'cuda:0'. Default: auto.")
-    p.add_argument("--no_csv", action="store_true",
-                   help="Do not write a CSV (console table only).")
+    p.add_argument("--no_csv", action="store_true", help="Do not write the CSV.")
+    p.add_argument("--no_tex", action="store_true", help="Do not write the LaTeX.")
     p.add_argument("--out_dir", type=str, default=None,
-                   help="CSV output dir (default: <script_dir>/eval_results).")
+                   help="Output dir (default: <script_dir>/eval_results).")
     return p
 
 
@@ -502,6 +944,10 @@ def main() -> None:
 
     if not EVAL_SCENARIOS:
         raise RuntimeError("EVAL_SCENARIOS is empty — define at least one scenario.")
+    if MAIN_POLICY is None:
+        raise RuntimeError("MAIN_POLICY is not set.")
+    if not 0.0 < args.alpha < 1.0:
+        raise ValueError("--alpha must be strictly between 0 and 1.")
 
     default_ckpt_path = Path(args.checkpoint) if args.checkpoint else None
     if default_ckpt_path is not None and not default_ckpt_path.exists():
@@ -511,29 +957,50 @@ def main() -> None:
         "cuda" if torch.cuda.is_available() else "cpu"
     )
 
-    overrides = sum(s.policy_file is not None for s in EVAL_SCENARIOS)
-    print("─" * 70)
-    print(f"  Default ckpt: {default_ckpt_path.name if default_ckpt_path else '(none)'}")
-    print(f"  Device      : {device}")
-    print(f"  Scenarios   : {len(EVAL_SCENARIOS)} "
-          f"({overrides} with a per-scenario policy_file)")
-    print(f"  Eval        : {args.n_episodes} episodes × {args.n_repeats} repeats")
-    print("─" * 70)
+    _print_config(MAIN_POLICY, COMPARISON_POLICIES, EVAL_SCENARIOS,
+                  args.n_episodes, args.seed, args.alpha, args.p_adjust, device)
 
-    rows = evaluate_scenarios(
-        EVAL_SCENARIOS, default_ckpt_path,
-        n_episodes=args.n_episodes,
-        n_repeats=args.n_repeats,
-        base_seed=args.seed,
-        device=device,
+    # Load each checkpoint once (shared cache) and print the per-policy
+    # FOFE / communication check before the (slow) rollouts begin.
+    cache: Dict[str, _LoadedCheckpoint] = {}
+    _print_policy_diagnostics(MAIN_POLICY, COMPARISON_POLICIES, EVAL_SCENARIOS,
+                              default_ckpt_path, device, cache)
+
+    summary, tests, _samples = evaluate_comparison(
+        EVAL_SCENARIOS, MAIN_POLICY, COMPARISON_POLICIES, default_ckpt_path,
+        n_episodes=args.n_episodes, chunk=args.chunk, base_seed=args.seed,
+        p_adjust=args.p_adjust, device=device, cache=cache,
     )
 
-    _print_table(rows, args.n_episodes, args.n_repeats)
+    # ── console tables (one per KPI) ──
+    print("\n" + "=" * 78)
+    print("  RESULTS  (rows = scenarios, columns = policies)")
+    print("=" * 78)
+    for spec in KPIS:
+        _print_kpi_console(spec, EVAL_SCENARIOS, MAIN_POLICY, COMPARISON_POLICIES,
+                           summary, tests, args.alpha, args.p_adjust)
+    if not COMPARISON_POLICIES:
+        print("\n  (single policy — no comparison p-values)")
+    print()
+
+    # ── files ──
+    out_dir = Path(args.out_dir) if args.out_dir else (_THIS_DIR / "eval_results")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    if not args.no_tex:
+        tex_path = out_dir / f"policy_wilcoxon_{stamp}.tex"
+        _write_latex(EVAL_SCENARIOS, MAIN_POLICY, COMPARISON_POLICIES, summary,
+                     tests, args.n_episodes, args.alpha, args.p_adjust, tex_path)
+        print(f"Saved LaTeX tables to: {tex_path}")
 
     if not args.no_csv:
-        out_dir = Path(args.out_dir) if args.out_dir else (_THIS_DIR / "eval_results")
-        csv_path = _write_csv(rows, out_dir, args.n_episodes, args.n_repeats)
-        print(f"Saved CSV to: {csv_path}\n")
+        csv_path = out_dir / f"policy_wilcoxon_{stamp}.csv"
+        _write_csv(EVAL_SCENARIOS, MAIN_POLICY, COMPARISON_POLICIES, summary,
+                   tests, args.n_episodes, args.seed, args.alpha, args.p_adjust,
+                   csv_path)
+        print(f"Saved CSV to: {csv_path}")
+    print()
 
 
 if __name__ == "__main__":

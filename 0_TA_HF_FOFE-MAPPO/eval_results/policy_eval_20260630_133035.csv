@@ -1,0 +1,2 @@
+name,policy,producer,scenario,S,J,T,R,comm,dr,n_episodes,n_repeats,completion_mean,completion_std,targets_mean,targets_std,survival_mean,survival_std,fragmentation_mean,fragmentation_std,duration_mean,duration_std,reward_mean,reward_std
+2s4s V1,2s4j_V1.pt,run_curriculum.py,S2,2,4,2,6,False,False,300,1,0.9833333333333333,0.0,0.9916666666666667,0.0,0.9477777777115504,0.0,0.15743184208869934,0.0,37.696666666666665,0.0,0.7310784967740377,0.0

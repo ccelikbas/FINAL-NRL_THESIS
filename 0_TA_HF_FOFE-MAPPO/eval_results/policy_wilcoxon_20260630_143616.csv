@@ -1,0 +1,11 @@
+scenario,kpi,kpi_label,direction,policy,role,mean,std,n_finite,n_episodes,base_seed,alternative,n_pairs,wilcoxon_stat,p_raw,p_adj,p_adjust,alpha,significant,mean_diff_vs_main,median_diff_vs_main,note
+S1,completion,Task completion,higher,Complete,main,0.9833333333333333,0.12823299585640946,300,300,42,,,,,,none,0.05,,,,reference policy
+S1,completion,Task completion,higher,Baseline,comparison,0.5666666666666667,0.49636358810271614,300,300,42,greater,300,8064.0,6.862637444505985e-29,6.862637444505985e-29,none,0.05,True,0.4166666666666667,0.0,
+S1,targets,Targets destroyed,higher,Complete,main,0.99,0.08117036874710996,300,300,42,,,,,,none,0.05,,,,reference policy
+S1,targets,Targets destroyed,higher,Baseline,comparison,0.7033333333333334,0.3752219707230194,300,300,42,greater,300,8471.5,8.485118056516673e-25,8.485118056516673e-25,none,0.05,True,0.2866666666666667,0.0,
+S1,survival,Survival,higher,Complete,main,0.9338888883590698,0.1848489764071167,300,300,42,,,,,,none,0.05,,,,reference policy
+S1,survival,Survival,higher,Baseline,comparison,0.5133333302040894,0.46225820018332114,300,300,42,greater,300,20261.0,1.4733627980779728e-30,1.4733627980779728e-30,none,0.05,True,0.42055555815498036,0.1666666865348816,
+S1,duration,Duration,lower,Complete,main,38.0,6.486930519015016,300,300,42,,,,,,none,0.05,,,,reference policy
+S1,duration,Duration,lower,Baseline,comparison,46.69,11.779775480368587,300,300,42,less,300,5524.0,2.3776331075895937e-25,2.3776331075895937e-25,none,0.05,True,-8.69,-7.0,
+S1,reward,Episode reward,higher,Complete,main,0.34499470710754393,5.141617749400369,300,300,42,,,,,,none,0.05,,,,reference policy
+S1,reward,Episode reward,higher,Baseline,comparison,-9.72844235420227,12.72224837944504,300,300,42,greater,300,37503.0,1.5853957037116235e-23,1.5853957037116235e-23,none,0.05,True,10.073437061309814,4.156966924667358,
