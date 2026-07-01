@@ -1661,12 +1661,23 @@ class StrikeEA2DEnv(EnvBase):
             ell     = max(float(rp.escort_kernel_length), 1e-6)
             kappa_c = float(rp.escort_capacity)
             tau     = max(float(rp.escort_commit_temp), 1e-6)
+            k_type  = str(getattr(rp, "escort_kernel_type", "exp")).lower()
+            R_esc   = float(getattr(rp, "escort_kernel_radius", 0.15))
+            s_esc   = max(float(getattr(rp, "escort_kernel_softness", 0.03)), 1e-6)
             s_alive_f = alive[:, :ns].float()                          # [B, ns]
             j_alive_f = alive[:, ns:].float()                          # [B, nj]
             any_j     = (j_alive_f.sum(dim=-1, keepdim=True) > 0)      # [B, 1]
 
             d_sj = torch.cdist(self.agent_pos[:, :ns, :], self.agent_pos[:, ns:, :])  # [B, ns, nj]
-            k_sj = torch.exp(-d_sj / ell) * j_alive_f[:, None, :]      # dead jammers contribute 0
+            # Per-jammer proximity kernel k(d) ∈ (0,1] → additive coverage c_s = Σ_j k.
+            #   exp     : exp(−d/ℓ) — steepest at d=0 (penalises any standoff heavily).
+            #   sigmoid : σ((R−d)/s) — DEADZONE/plateau: ≈1 inside escort radius R (a
+            #             jammer anywhere in the bubble counts as covered → acceptable
+            #             standoff costs ≈0), =0.5 at d=R, →0 beyond. See RewardConfig.
+            if k_type == "sigmoid":
+                k_sj = torch.sigmoid((R_esc - d_sj) / s_esc) * j_alive_f[:, None, :]
+            else:
+                k_sj = torch.exp(-d_sj / ell) * j_alive_f[:, None, :]  # dead jammers contribute 0
             # ADDITIVE shared coverage (no soft-commit): a jammer near several strikers
             # protects all of them, so c_s feels EVERY jammer — including a DISTANT one,
             # giving an un-suppressed gradient to go cover an under-served striker (a hard
