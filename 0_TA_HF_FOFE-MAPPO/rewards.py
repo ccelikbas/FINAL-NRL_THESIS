@@ -312,7 +312,7 @@ class RewardConfig:
     # alone did). The coverage field above (w_j) decides WHICH striker; this only provides
     # reach + commitment. Keep escort_jammer_scale ≥ this so distribution wins on assignment.
     # Pure jammer↔striker → scales to any (ns,nj), symmetric or not. Set 0 to disable.
-    jammer_escort_approach_scale: float = 0.02   # w_a — [×0.5 rescale of 0.04] penalty per unit soft-nearest distance from a jammer to a striker (raised so a jammer is pulled ONTO its nearest striker, out of the symmetric middle, and tracks it through the split)
+    jammer_escort_approach_scale: float = 0.02   # was 0.02 w_a — [×0.5 rescale of 0.04] penalty per unit soft-nearest distance from a jammer to a striker (raised so a jammer is pulled ONTO its nearest striker, out of the symmetric middle, and tracks it through the split)
 
     # ─── STRIKER-TARGET COVERAGE FIELD  (MIRROR of JAMMER ESCORT, striker ↔ target) ──
     # The escort makes jammers DISTRIBUTE across strikers; this is its exact twin on

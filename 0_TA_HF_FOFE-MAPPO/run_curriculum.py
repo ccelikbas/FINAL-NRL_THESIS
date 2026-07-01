@@ -105,32 +105,41 @@ class CurriculumSection:
 
 CURRICULUM: List[CurriculumSection] = [
     CurriculumSection(
-        name="S2 - k0.05",
-        n_iters=250,
+        name="S2 - 2s4j k0.02",
+        n_iters=500,
         n_strikers=2, n_jammers=4,
         n_known_targets=2, n_unknown_targets=0,
         n_known_radars=6, n_unknown_radars=0,
         radar_kill_probability=0.02,
         scenario="S2"
     ), 
-    # CurriculumSection(
-    #     name="S2 - k0.1",
-    #     n_iters=1000,
-    #     n_strikers=1, n_jammers=2,
-    #     n_known_targets=(1,2), n_unknown_targets=(1,2),
-    #     n_known_radars=(2,3), n_unknown_radars=(2,3),
-    #     radar_kill_probability=0.1,
-    #     scenario="S2"
-    # ), 
-    # CurriculumSection(
-    #     name="S2 - k0.5",
-    #     n_iters=3000,
-    #     n_strikers=1, n_jammers=2,
-    #     n_known_targets=(1,2), n_unknown_targets=(1,2),
-    #     n_known_radars=(2,3), n_unknown_radars=(2,3),
-    #     radar_kill_probability=0.5,
-    #     scenario="S2"
-    # )
+    CurriculumSection(
+        name="S2 - 2s2-4j k0.02",
+        n_iters=1000,
+        n_strikers=2, n_jammers=(2,4),
+        n_known_targets=2, n_unknown_targets=0,
+        n_known_radars=6, n_unknown_radars=0,
+        radar_kill_probability=0.02,
+        scenario="S2"
+    ), 
+    CurriculumSection(
+        name="S2 - 2s2-4j k0.05",
+        n_iters=1000,
+        n_strikers=2, n_jammers=(2,4),
+        n_known_targets=2, n_unknown_targets=0,
+        n_known_radars=6, n_unknown_radars=0,
+        radar_kill_probability=0.05,
+        scenario="S2"
+    ), 
+    CurriculumSection(
+        name="S2 - 2s2-4j k0.1",
+        n_iters=2000,
+        n_strikers=2, n_jammers=(2,4),
+        n_known_targets=2, n_unknown_targets=0,
+        n_known_radars=6, n_unknown_radars=0,
+        radar_kill_probability=0.1,
+        scenario="S2"
+    ), 
 ]
 
 # check if this is configured correctly. 

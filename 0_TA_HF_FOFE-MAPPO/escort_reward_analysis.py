@@ -129,6 +129,8 @@ def rollout_seed(ckpt, ec, rc, ns, B, seed, device, capture_ts=False):
     off_esc = torch.zeros(B, device=device); env_esc = torch.zeros(B, device=device)
     ep_len = torch.zeros(B, device=device)
     ts_esc = np.full((T, B), np.nan) if capture_ts else None
+    ts_comp = defaultdict(lambda: np.zeros(T)) if capture_ts else None   # Σ over active envs, per step
+    ts_cnt = np.zeros(T) if capture_ts else None                          # #active envs, per step
     with torch.no_grad():
         td = env.reset()
         done = torch.zeros(B, dtype=torch.bool, device=device)
@@ -148,6 +150,9 @@ def rollout_seed(ckpt, ec, rc, ns, B, seed, device, capture_ts=False):
                 e = (tot * af).detach().cpu().numpy()
                 e[~active.detach().cpu().numpy()] = np.nan
                 ts_esc[t] = e
+                for k, v in env.last_reward_components.items():
+                    ts_comp[k][t] = float((v.sum(-1) * af).sum())
+                ts_cnt[t] = float(af.sum())
             ep_len += af
             done = done | td.get(("next", "done")).reshape(B).bool()
             if bool(done.all()):
@@ -157,7 +162,10 @@ def rollout_seed(ckpt, ec, rc, ns, B, seed, device, capture_ts=False):
     ca = {k: float(comp_abs[k].mean()) for k in comp_abs}
     ss = {k: float(sub_signed[k].mean()) for k in sub_signed}
     ratio = float(off_esc.sum() / env_esc.sum()) if float(env_esc.sum()) != 0 else float("nan")
-    return cs, ca, ss, ep_len.detach().cpu().numpy(), ratio, ts_esc
+    ts = None
+    if capture_ts:
+        ts = {"esc": ts_esc, "comp": {k: ts_comp[k] for k in ts_comp}, "cnt": ts_cnt}
+    return cs, ca, ss, ep_len.detach().cpu().numpy(), ratio, ts
 
 
 def main():
@@ -273,18 +281,19 @@ def main():
                       va="top" if ss_mean[k] < 0 else "bottom", fontsize=8)
 
     # (1,0) individual episodes (escort/step), each ending at its own length
-    T = ts_esc0.shape[0]
-    lens0 = np.array([np.max(np.where(~np.isnan(ts_esc0[:, b]))[0]) + 1 if np.any(~np.isnan(ts_esc0[:, b])) else 0
-                      for b in range(ts_esc0.shape[1])])
+    ts_esc = ts_esc0["esc"]
+    T = ts_esc.shape[0]
+    lens0 = np.array([np.max(np.where(~np.isnan(ts_esc[:, b]))[0]) + 1 if np.any(~np.isnan(ts_esc[:, b])) else 0
+                      for b in range(ts_esc.shape[1])])
     order = np.argsort(lens0)
     picks = order[np.linspace(0, len(order) - 1, 8).astype(int)]
     for b in picks:
         L = lens0[b]
-        ax[1, 0].plot(np.arange(L), ts_esc0[:L, b], lw=1.0, alpha=0.8, label=f"ep len {L}")
+        ax[1, 0].plot(np.arange(L), ts_esc[:L, b], lw=1.0, alpha=0.8, label=f"ep len {L}")
     # representative mean only where >=50% of envs still active
-    frac = np.mean(~np.isnan(ts_esc0), axis=1)
+    frac = np.mean(~np.isnan(ts_esc), axis=1)
     cut = int(np.argmax(frac < 0.5)) if np.any(frac < 0.5) else T
-    mean_active = np.nanmean(ts_esc0[:cut], axis=1)
+    mean_active = np.nanmean(ts_esc[:cut], axis=1)
     ax[1, 0].plot(np.arange(cut), mean_active, "k", lw=2.5, label="mean (≥50% active)")
     ax[1, 0].axvline(med_len, ls=":", color="gray"); ax[1, 0].text(med_len, ax[1, 0].get_ylim()[0], " median len", fontsize=7)
     ax[1, 0].set_title("escort reward / step — INDIVIDUAL episodes (seed 0)", fontsize=10)
@@ -304,6 +313,32 @@ def main():
     fig_path = out_dir / f"escort_analysis_{name}.png"
     fig.savefig(fig_path, dpi=120)
 
+    # ---- SEPARATE figure: ALL reward components per timestep (escort in context) ----
+    comp_ts = ts_esc0["comp"]; cnt = ts_esc0["cnt"]
+    win = int(np.argmax((cnt / args.num_envs) < 0.5)) if np.any((cnt / args.num_envs) < 0.5) else T
+    win = max(win, 5)
+    xs = np.arange(win); denom = np.clip(cnt[:win], 1, None)
+    per_step = {k: comp_ts[k][:win] / denom for k in comp_ts}
+    # rank dense components by mean |per-step| over the representative window; keep top 8 + escort
+    ranked = sorted(per_step, key=lambda k: -np.mean(np.abs(per_step[k])))
+    show = [k for k in ranked if np.mean(np.abs(per_step[k])) > 1e-4][:8]
+    if ESCORT_KEY not in show:
+        show.append(ESCORT_KEY)
+    fig2, bx = plt.subplots(1, 1, figsize=(11, 6))
+    for k in show:
+        bx.plot(xs, per_step[k], lw=2.6 if k == ESCORT_KEY else 1.4,
+                color="tab:red" if k == ESCORT_KEY else None,
+                zorder=5 if k == ESCORT_KEY else 2, label=k)
+    bx.axhline(0, color="k", lw=0.6)
+    bx.axvline(med_len, ls=":", color="gray"); bx.text(med_len, bx.get_ylim()[0], " median ep len", fontsize=8)
+    bx.set_title(f"Reward components per timestep — {name}  (mean over active envs, "
+                 f"shown while ≥50% active)\nescort (bold red) now ~{100*ca_mean[ESCORT_KEY]/total_abs:.0f}% of |reward|",
+                 fontsize=11)
+    bx.set_xlabel("timestep"); bx.set_ylabel("reward / step"); bx.legend(fontsize=9, ncol=2)
+    fig2.tight_layout()
+    fig2_path = out_dir / f"escort_analysis_{name}_components_per_step.png"
+    fig2.savefig(fig2_path, dpi=120)
+
     csv_path = out_dir / f"escort_analysis_{name}.csv"
     with open(csv_path, "w") as f:
         f.write("component,ep_signed,ep_absmag,absmag_std,pct_abs\n")
@@ -313,8 +348,9 @@ def main():
         for k in SUBS:
             f.write(f"{k},{ss_mean[k]:.4f},{ss_std[k]:.4f},{100*ss_mean[k]/esc_tot:.1f}\n")
         f.write(f"\nepisode_length_mean,{mean_len:.2f}\nepisode_length_median,{med_len:.2f}\n")
-    print(f"\nsaved figure -> {fig_path}")
-    print(f"saved CSV    -> {csv_path}")
+    print(f"\nsaved figure      -> {fig_path}")
+    print(f"saved components  -> {fig2_path}")
+    print(f"saved CSV         -> {csv_path}")
 
 
 if __name__ == "__main__":
