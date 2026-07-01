@@ -281,9 +281,9 @@ class RewardConfig:
     # are sluggish relative to the per-step control-effort cost (0.01).
     escort_kernel_length: float = 0.1     # ℓ — coverage kernel length (map units); long enough that a jammer FEELS an under-served striker that split to a far target (the attraction term below stops the long-range hovering)
     escort_capacity:      float = 2    # κ — desired jammers PER STRIKER (soft count). κ=2 → each striker prefers a 2-jammer escort; jammers distribute to give every striker 2, and merge formations when jammers are scarce (escort-first). Also sets emergent formation size.
-    escort_striker_scale: float = 0.035  # w_s — striker penalty per unit unmet demand. ESCORT-FIRST PRIORITY: kept > target_cover_scale (w_st) so an UNESCORTED striker is always worse than an UNCOVERED target. This makes the reward composition-agnostic: strikers spread across targets only as far as jammers can escort them → 2 formations with 2 jammers, ONE clump (all share the lone jammer) with 1 jammer.
-    escort_jammer_scale:  float = 0.025  # w_j — jammer penalty per unit of UNMET team escort demand (0 when all strikers escorted); decides WHICH striker (distribution). Keep ≥ approach scale below.
-    escort_over_scale:    float = 0.03   # w_over — jammer penalty per unit of OVER-coverage Σ_s(c_s−κ)₊. Makes the BALANCED split (each striker exactly κ jammers) the unique optimum, so a κ-th+1 jammer piling on one striker is pushed to an under-served one. Without it the escort only punishes under-coverage → 1-3 splits (not 2-2) when κ>1. Set 0 to disable (recovers under-only behaviour).
+    escort_striker_scale: float = 0.0175  # w_s — striker penalty per unit unmet demand. [×0.5 rescale of 0.035 to reduce escort's ~17%→~10% share; escort-internal ratios preserved] ESCORT-FIRST PRIORITY: kept > target_cover_scale (w_st) so an UNESCORTED striker is always worse than an UNCOVERED target. This makes the reward composition-agnostic: strikers spread across targets only as far as jammers can escort them → 2 formations with 2 jammers, ONE clump (all share the lone jammer) with 1 jammer.
+    escort_jammer_scale:  float = 0.0125  # w_j — [×0.5 rescale of 0.025] jammer penalty per unit of UNMET team escort demand (0 when all strikers escorted); decides WHICH striker (distribution). Keep ≥ approach scale below.
+    escort_over_scale:    float = 0.015   # w_over — [×0.5 rescale of 0.03] jammer penalty per unit of OVER-coverage Σ_s(c_s−κ)₊. Makes the BALANCED split (each striker exactly κ jammers) the unique optimum, so a κ-th+1 jammer piling on one striker is pushed to an under-served one. Without it the escort only punishes under-coverage → 1-3 splits (not 2-2) when κ>1. Set 0 to disable (recovers under-only behaviour).
     escort_commit_temp:   float = 0.01   # τ — softmax temperature for jammer→striker commitment (0=hard nearest; ≳striker spread=shared). Set very large to recover pure additive coverage.
     # ─── ESCORT KERNEL SHAPE ──────────────────────────────────────────────────
     # How each jammer's proximity to a striker maps to coverage k(d) ∈ (0,1]:
@@ -312,7 +312,7 @@ class RewardConfig:
     # alone did). The coverage field above (w_j) decides WHICH striker; this only provides
     # reach + commitment. Keep escort_jammer_scale ≥ this so distribution wins on assignment.
     # Pure jammer↔striker → scales to any (ns,nj), symmetric or not. Set 0 to disable.
-    jammer_escort_approach_scale: float = 0.04   # w_a — penalty per unit soft-nearest distance from a jammer to a striker (raised so a jammer is pulled ONTO its nearest striker, out of the symmetric middle, and tracks it through the split)
+    jammer_escort_approach_scale: float = 0.02   # w_a — [×0.5 rescale of 0.04] penalty per unit soft-nearest distance from a jammer to a striker (raised so a jammer is pulled ONTO its nearest striker, out of the symmetric middle, and tracks it through the split)
 
     # ─── STRIKER-TARGET COVERAGE FIELD  (MIRROR of JAMMER ESCORT, striker ↔ target) ──
     # The escort makes jammers DISTRIBUTE across strikers; this is its exact twin on
