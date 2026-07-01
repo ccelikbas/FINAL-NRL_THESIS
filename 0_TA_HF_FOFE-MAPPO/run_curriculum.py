@@ -106,8 +106,8 @@ class CurriculumSection:
 CURRICULUM: List[CurriculumSection] = [
     CurriculumSection(
         name="S2 - k0.05",
-        n_iters=50,
-        n_strikers=1, n_jammers=2,
+        n_iters=400,
+        n_strikers=2, n_jammers=4,
         n_known_targets=2, n_unknown_targets=0,
         n_known_radars=6, n_unknown_radars=0,
         radar_kill_probability=0.02,
