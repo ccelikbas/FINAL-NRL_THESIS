@@ -1,0 +1,16 @@
+scenario,kpi,kpi_label,direction,policy,role,mean,std,n_finite,n_episodes,base_seed,alternative,n_pairs,wilcoxon_stat,p_raw,p_adj,p_adjust,alpha,significant,mean_diff_vs_main,median_diff_vs_main,pct_diff_vs_main,note
+S1,completion,Task completion,higher,Complete,main,0.6766666666666666,0.4685302810952916,300,300,42,,,,,,none,0.05,,,,,reference policy
+S1,targets,Targets destroyed,higher,Complete,main,0.7816666666666666,0.3443241000012845,300,300,42,,,,,,none,0.05,,,,,reference policy
+S1,survival,Survival,higher,Complete,main,0.6116666666666667,0.43280668623268126,300,300,42,,,,,,none,0.05,,,,,reference policy
+S1,duration,Duration,lower,Complete,main,46.71333333333333,19.95524647207914,300,300,42,,,,,,none,0.05,,,,,reference policy
+S1,reward,Episode reward,higher,Complete,main,-5.18751568476359,9.14459009892013,300,300,42,,,,,,none,0.05,,,,,reference policy
+S2,completion,Task completion,higher,Complete,main,0.7933333333333333,0.4055908059796305,300,300,42,,,,,,none,0.05,,,,,reference policy
+S2,targets,Targets destroyed,higher,Complete,main,0.8683333333333333,0.2776463828961941,300,300,42,,,,,,none,0.05,,,,,reference policy
+S2,survival,Survival,higher,Complete,main,0.6946666718522707,0.38997241339450955,300,300,42,,,,,,none,0.05,,,,,reference policy
+S2,duration,Duration,lower,Complete,main,43.36,14.63366714281908,300,300,42,,,,,,none,0.05,,,,,reference policy
+S2,reward,Episode reward,higher,Complete,main,-5.066881932417552,9.463430851083103,300,300,42,,,,,,none,0.05,,,,,reference policy
+S3,completion,Task completion,higher,Complete,main,0.93,0.2555733275451653,300,300,42,,,,,,none,0.05,,,,,reference policy
+S3,targets,Targets destroyed,higher,Complete,main,0.9616666666666667,0.1452614603456864,300,300,42,,,,,,none,0.05,,,,,reference policy
+S3,survival,Survival,higher,Complete,main,0.8611111105481783,0.28326064140895535,300,300,42,,,,,,none,0.05,,,,,reference policy
+S3,duration,Duration,lower,Complete,main,37.943333333333335,9.028390128733413,300,300,42,,,,,,none,0.05,,,,,reference policy
+S3,reward,Episode reward,higher,Complete,main,-1.5086805629730224,8.081645218826246,300,300,42,,,,,,none,0.05,,,,,reference policy

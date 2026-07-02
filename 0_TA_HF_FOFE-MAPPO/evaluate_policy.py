@@ -18,7 +18,7 @@ comparisons) you simply get the value columns and no p-values.
 Hypotheses tested (H1 = what we hope holds for the MAIN policy):
     Completion, Targets, Survival, Reward   →  main is HIGHER than comparison
     Duration                                →  main is LOWER  than comparison
-Coalition fragmentation is collected but NOT tabulated/tested here.
+    Coalition fragmentation                 →  main ≠ comparison (two-sided)
 
 ──────────────────────────────────────────────────────────────────────────────
 WHY A *SIGNED-RANK* (PAIRED) TEST IS VALID HERE
@@ -130,12 +130,11 @@ class PolicyInput:
 
 
 # The MAIN policy — shown WITHOUT a p-value (the reference column).
-MAIN_POLICY = PolicyInput(name="Complete", policy_file="2s4j_V1.pt")
+MAIN_POLICY = PolicyInput(name="Complete", policy_file="2s2-4jV6.pt")
 
 # The COMPARISON policies — each shown WITH a one-sided Wilcoxon p-value vs MAIN.
 # Leave this list EMPTY to just tabulate the main policy (no tests, no p-values).
 COMPARISON_POLICIES: List[PolicyInput] = [
-    PolicyInput(name="Baseline", policy_file="2s4j_V1.pt")
     # PolicyInput(name="No FOFE",  policy_file="2s4j_no_fofe.pt"),
 ]
 
@@ -148,7 +147,27 @@ COMPARISON_POLICIES: List[PolicyInput] = [
 
 EVAL_SCENARIOS: List[CurriculumSection] = [
     CurriculumSection(
-        name="S1",
+        name="2s2j",
+        n_iters=1,  # not used
+        n_strikers=2, n_jammers=2,
+        n_known_targets=2, n_unknown_targets=0,
+        n_known_radars=6, n_unknown_radars=0,
+        radar_kill_probability=0.5,
+        scenario="S2",
+        communicate=True,
+    ), 
+    CurriculumSection(
+        name="2s3j",
+        n_iters=1,  # not used
+        n_strikers=2, n_jammers=3,
+        n_known_targets=2, n_unknown_targets=0,
+        n_known_radars=6, n_unknown_radars=0,
+        radar_kill_probability=0.5,
+        scenario="S2",
+        communicate=True,
+    ), 
+    CurriculumSection(
+        name="2s4j",
         n_iters=1,  # not used
         n_strikers=2, n_jammers=4,
         n_known_targets=2, n_unknown_targets=0,
@@ -188,22 +207,24 @@ class KPISpec:
     label: str        # human label / caption
     fmt: str          # value format, e.g. "{:.3f}"
     unit: str         # short sub-header, e.g. "rate" / "steps" / "reward"
-    direction: str    # "higher" or "lower"  (main is better when …)
+    direction: str    # "higher" / "lower" (main better when …) or "two-sided"
 
 
 KPIS: List[KPISpec] = [
-    KPISpec("completion", "mission_complete",     "Task completion",  "{:.3f}", "rate",   "higher"),
-    KPISpec("targets",    "targets_frac",         "Targets destroyed","{:.3f}", "rate",   "higher"),
-    KPISpec("survival",   "survival_frac",        "Survival",         "{:.3f}", "rate",   "higher"),
-    KPISpec("duration",   "duration",             "Duration",         "{:.1f}", "steps",  "lower"),
-    KPISpec("reward",     "episode_total_reward", "Episode reward",   "{:.2f}", "reward", "higher"),
+    KPISpec("completion",    "mission_complete",        "Task completion",  "{:.3f}", "rate",   "higher"),
+    KPISpec("targets",       "targets_frac",            "Targets destroyed","{:.3f}", "rate",   "higher"),
+    KPISpec("survival",      "survival_frac",           "Survival",         "{:.3f}", "rate",   "higher"),
+    KPISpec("duration",      "duration",                "Duration",         "{:.1f}", "steps",  "lower"),
+    KPISpec("reward",        "episode_total_reward",    "Episode reward",   "{:.2f}", "reward", "higher"),
+    # Neither more nor less fragmentation is universally "better", so it is
+    # tested TWO-SIDED (H1: main != comparison).
+    KPISpec("fragmentation", "coalition_fragmentation", "Coalition frag.",  "{:.3f}", "index",  "two-sided"),
 ]
 
-# Coalition fragmentation is still collected per episode (handy in the CSV) but
-# is NOT tabulated or tested. Kept separate so it never enters the KPI tables.
-_EXTRA_STAT_KEYS = [("fragmentation", "coalition_fragmentation")]
+# No untested extra stats: fragmentation is now a first-class KPI above.
+_EXTRA_STAT_KEYS: List[Tuple[str, str]] = []
 
-_ALT = {"higher": "greater", "lower": "less"}   # direction → scipy alternative
+_ALT = {"higher": "greater", "lower": "less", "two-sided": "two-sided"}  # direction → scipy alternative
 
 
 # =====================================================================
@@ -674,8 +695,11 @@ def _print_config(main_policy: PolicyInput, comparison_policies: List[PolicyInpu
     print(f"  Significance       : alpha={alpha:g}   correction: {p_adjust}")
     print("  Hypotheses (H1, main vs comparison):")
     for spec in KPIS:
-        rel = "higher" if spec.direction == "higher" else "lower"
-        print(f"      {spec.label:18s} main {rel:6s}  (alternative='{_ALT[spec.direction]}')")
+        if spec.direction == "two-sided":
+            print(f"      {spec.label:18s} main ≠ comparison  (alternative='two-sided')")
+        else:
+            rel = "higher" if spec.direction == "higher" else "lower"
+            print(f"      {spec.label:18s} main {rel:6s}  (alternative='{_ALT[spec.direction]}')")
     print("  Stars: * p<{a:g}   ** p<0.01   *** p<0.001".format(a=alpha))
     print("─" * 78)
 
@@ -726,7 +750,8 @@ def _print_kpi_console(spec: KPISpec, scenarios: List[CurriculumSection],
                        summary: Dict[Tuple[str, str, str], Tuple[float, float, int]],
                        tests: Dict[Tuple[str, str, str], Dict[str, Any]],
                        alpha: float, p_adjust: str) -> None:
-    better = "higher" if spec.direction == "higher" else "lower"
+    better = ("two-sided, no better direction" if spec.direction == "two-sided"
+              else f"{spec.direction} is better")
     headers = ["Scenario", f"{main_policy.name} ({spec.unit})"]
     for base in comparison_policies:
         headers += [f"{base.name} ({spec.unit}, Δ%)", "p"]
@@ -754,7 +779,7 @@ def _print_kpi_console(spec: KPISpec, scenarios: List[CurriculumSection],
                          for c, cell in enumerate(cells))
 
     sep = "  ".join("-" * w for w in widths)
-    print(f"\n  KPI: {spec.label}  ({better} is better)")
+    print(f"\n  KPI: {spec.label}  ({better})")
     print("  " + _fmt_row(headers))
     print("  " + sep)
     for row in table:
@@ -784,19 +809,26 @@ def _kpi_latex_table(spec: KPISpec, scenarios: List[CurriculumSection],
                      n_episodes: int, alpha: float, p_adjust: str) -> str:
     ncomp = len(comparison_policies)
     main_name = _tex_escape(main_policy.name)
-    better = "higher" if spec.direction == "higher" else "lower"
-    h1 = (r"main $>$ comparison" if spec.direction == "higher"
-          else r"main $<$ comparison")
+    if spec.direction == "two-sided":
+        better = "two-sided; no better direction"
+        h1 = r"main $\neq$ comparison"
+        test_txt = "two-sided Wilcoxon signed-rank"
+    else:
+        better = ("higher is better" if spec.direction == "higher"
+                  else "lower is better")
+        h1 = (r"main $>$ comparison" if spec.direction == "higher"
+              else r"main $<$ comparison")
+        test_txt = "one-sided Wilcoxon signed-rank"
     corr = ("Holm-corrected within each scenario" if p_adjust == "holm"
             else "uncorrected")
 
     caption = (
-        f"{spec.label} ({better} is better). "
+        f"{spec.label} ({better}). "
         f"Each cell is the mean over $N={n_episodes}$ paired episodes (common "
         f"random layouts). Comparison columns add, in parentheses, the relative "
         f"deviation from the {main_name} column as a percentage "
         f"($\\Delta\\%=100\\,(c-m)/|m|$; $m$={main_name}, $c$=comparison), and "
-        f"the one-sided Wilcoxon signed-rank $p$-value (H$_1$: {h1}). "
+        f"the {test_txt} $p$-value (H$_1$: {h1}). "
         f"Significance ({corr}): $^{{*}}p<{alpha:g}$, "
         f"$^{{**}}p<0.01$, $^{{***}}p<0.001$; $\\alpha={alpha:g}$."
     )
