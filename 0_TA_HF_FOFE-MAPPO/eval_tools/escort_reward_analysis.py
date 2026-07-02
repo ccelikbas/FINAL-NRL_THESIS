@@ -41,7 +41,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(_THIS_DIR.parent))
     if _PKG_NAME not in sys.modules:
         _pkg = types.ModuleType(_PKG_NAME)
-        _pkg.__path__ = [str(_THIS_DIR)]
+        _pkg.__path__ = [str(_THIS_DIR.parent), str(_THIS_DIR)]  # parent = sim modules, this dir = eval_tools
         _pkg.__package__ = _PKG_NAME
         _pkg.__file__ = str(_THIS_DIR / "__init__.py")
         sys.modules[_PKG_NAME] = _pkg
@@ -174,7 +174,7 @@ def main():
     ap.add_argument("--num_envs", type=int, default=256)
     ap.add_argument("--n_seeds", type=int, default=5)
     ap.add_argument("--seed0", type=int, default=100)
-    ap.add_argument("--out_dir", default=str(_THIS_DIR / "escort_analysis"))
+    ap.add_argument("--out_dir", default=str(_THIS_DIR.parent / "escort_analysis"))
     for k in ("n_strikers", "n_jammers", "n_known_radars", "n_known_targets", "max_steps"):
         ap.add_argument("--" + k, type=int, default=None)
     ap.add_argument("--radar_kill_probability", type=float, default=None)

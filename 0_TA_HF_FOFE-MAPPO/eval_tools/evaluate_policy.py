@@ -85,14 +85,15 @@ for _stream in (sys.stdout, sys.stderr):
         pass
 
 # ── package bootstrap (so the file runs as a script OR as -m fofe_mappo.*) ──
-_THIS_DIR = Path(__file__).resolve().parent
-_RUNS_DIR = _THIS_DIR / "runs"      # bare policy_file names resolve here
+_THIS_DIR = Path(__file__).resolve().parent          # .../0_TA_HF_FOFE-MAPPO/eval_tools
+_PKG_DIR = _THIS_DIR.parent                           # .../0_TA_HF_FOFE-MAPPO (sim modules + runs/ live here)
+_RUNS_DIR = _PKG_DIR / "runs"      # bare policy_file names resolve here
 _PKG_NAME = "fofe_mappo"
 if __package__ in (None, ""):
-    sys.path.insert(0, str(_THIS_DIR.parent))
+    sys.path.insert(0, str(_PKG_DIR.parent))
     if _PKG_NAME not in sys.modules:
         _pkg = types.ModuleType(_PKG_NAME)
-        _pkg.__path__ = [str(_THIS_DIR)]
+        _pkg.__path__ = [str(_PKG_DIR), str(_THIS_DIR)]  # search parent (sim) + eval_tools (analysis)
         _pkg.__package__ = _PKG_NAME
         _pkg.__file__ = str(_THIS_DIR / "__init__.py")
         sys.modules[_PKG_NAME] = _pkg
@@ -1016,7 +1017,7 @@ def main() -> None:
     print()
 
     # ── files ──
-    out_dir = Path(args.out_dir) if args.out_dir else (_THIS_DIR / "eval_results")
+    out_dir = Path(args.out_dir) if args.out_dir else (_PKG_DIR / "eval_results")
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 

@@ -30,7 +30,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(_THIS_DIR.parent))
     if _PKG_NAME not in sys.modules:
         _pkg = types.ModuleType(_PKG_NAME)
-        _pkg.__path__ = [str(_THIS_DIR)]
+        _pkg.__path__ = [str(_THIS_DIR.parent), str(_THIS_DIR)]  # parent = sim modules, this dir = eval_tools
         _pkg.__package__ = _PKG_NAME
         _pkg.__file__ = str(_THIS_DIR / "__init__.py")
         sys.modules[_PKG_NAME] = _pkg
