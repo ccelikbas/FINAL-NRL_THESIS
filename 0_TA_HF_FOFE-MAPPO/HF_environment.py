@@ -256,17 +256,47 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
     # Self-obs extension: expose beam state to the jammer policy
     # ------------------------------------------------------------------
 
+    def _striker_coverage_feature(self) -> torch.Tensor:
+        """Per-agent normalized soft jammer-count  c_i / kappa  for STRIKERS
+        (0 for jammers). c_i = Σ_j k(‖s_i − j_l‖)·alive_j is the SAME additive
+        escort coverage used by the escort reward; the kernel (exp / sigmoid) and
+        its parameters are read from self.reward_params so the observed feature
+        matches the reward exactly. Returns [B, A]; jammer columns are 0.
+        """
+        B = self.agent_pos.shape[0]
+        ns, nj = self.n_strikers, self.n_jammers
+        feat = torch.zeros(B, self.n_agents, device=self.device, dtype=torch.float32)
+        if ns == 0 or nj == 0:
+            return feat
+        rp = self.reward_params
+        kappa = max(float(getattr(rp, "escort_capacity", 2.0)), 1e-8)
+        d = torch.cdist(self.agent_pos[:, :ns, :], self.agent_pos[:, ns:, :])   # [B, ns, nj]
+        if str(getattr(rp, "escort_kernel_type", "exp")).lower() == "sigmoid":
+            R = float(getattr(rp, "escort_kernel_radius", 0.15))
+            s = max(float(getattr(rp, "escort_kernel_softness", 0.03)), 1e-6)
+            k = torch.sigmoid((R - d) / s)
+        else:
+            ell = max(float(getattr(rp, "escort_kernel_length", 0.1)), 1e-6)
+            k = torch.exp(-d / ell)
+        j_alive = self.agent_alive[:, ns:].to(k.dtype)                          # [B, nj]
+        c = (k * j_alive[:, None, :]).sum(dim=-1)                               # [B, ns]
+        feat[:, :ns] = c / kappa
+        return feat
+
     def _self_extra_dim(self) -> int:
-        # Two extra floats per agent: (beam_angle / pi, beam_rate / beam_dpsi_max).
-        # Both are zero for strikers (no beam).
-        return 2
+        # Three extra floats per agent:
+        #   col 0 — beam_angle / pi           (jammer beam offset; 0 for strikers)
+        #   col 1 — beam_rate / beam_dpsi_max (jammer beam rate;   0 for strikers)
+        #   col 2 — striker escort coverage c_i/kappa (soft jammer-count; 0 for jammers)
+        return 3
 
     def _build_self_extra(self, B: int, A: int) -> torch.Tensor:
-        extra = torch.zeros(B, A, 2, device=self.device, dtype=torch.float32)
+        extra = torch.zeros(B, A, 3, device=self.device, dtype=torch.float32)
         if self.n_jammers > 0:
             beam_dpsi = max(float(getattr(self, "_beam_dpsi_max", math.pi)), 1e-8)
             extra[:, self.n_strikers:, 0] = self.jammer_bearing / math.pi
             extra[:, self.n_strikers:, 1] = self.beam_rate / beam_dpsi
+        extra[:, :, 2] = self._striker_coverage_feature()   # c_i/kappa for strikers, 0 for jammers
         return extra
 
     # ------------------------------------------------------------------
@@ -275,14 +305,19 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
     # ------------------------------------------------------------------
 
     def _other_agent_extra_dim(self) -> int:
-        # Two extra floats per (observer, other-agent): (sin, cos) of the
-        # observed jammer's beam pointing direction, rotated into the
-        # observing agent's body frame. Both zero when the observed agent
-        # is a striker (no beam) or a dead jammer.
-        return 2
+        # Three extra floats per (observer, other-agent):
+        #   col 0,1 — (sin, cos) of the observed jammer's beam pointing direction,
+        #             rotated into the observing agent's body frame (0 for a striker
+        #             observed, or a dead jammer).
+        #   col 2  — the OBSERVED agent's striker escort coverage c_i/kappa
+        #             (0 for jammers); identical for every observer.
+        return 3
 
     def _build_other_agent_extra(self, B: int, A: int) -> torch.Tensor:
-        extra = torch.zeros(B, A, A, 2, device=self.device, dtype=torch.float32)
+        extra = torch.zeros(B, A, A, 3, device=self.device, dtype=torch.float32)
+        # col 2 — the observed agent's striker coverage c_i/kappa, broadcast over
+        # observers (a property of the observed agent, not the observer).
+        extra[..., 2] = self._striker_coverage_feature()[:, None, :]
         if self.n_jammers == 0:
             return extra
 
@@ -419,18 +454,19 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
     # ------------------------------------------------------------------
 
     def _critic_agent_extra_dim(self) -> int:
-        # Two extra floats per agent in crt_agents_feat:
-        #   col 0 — jammer_bearing / pi          (beam pointing offset from heading)
-        #   col 1 — beam_rate / beam_dpsi_max    (beam angular velocity)
-        # Both zero for strikers (no beam).
-        return 2
+        # Three extra floats per agent in crt_agents_feat (and the flat state):
+        #   col 0 — jammer_bearing / pi          (beam pointing offset; 0 for strikers)
+        #   col 1 — beam_rate / beam_dpsi_max    (beam angular velocity; 0 for strikers)
+        #   col 2 — striker escort coverage c_i/kappa (soft jammer-count; 0 for jammers)
+        return 3
 
     def _build_critic_agent_extra(self, B: int, A: int) -> torch.Tensor:
-        extra = torch.zeros(B, A, 2, device=self.device, dtype=torch.float32)
+        extra = torch.zeros(B, A, 3, device=self.device, dtype=torch.float32)
         if self.n_jammers > 0:
             beam_dpsi = max(float(getattr(self, "_beam_dpsi_max", math.pi)), 1e-8)
             extra[:, self.n_strikers:, 0] = self.jammer_bearing / math.pi
             extra[:, self.n_strikers:, 1] = self.beam_rate / beam_dpsi
+        extra[:, :, 2] = self._striker_coverage_feature()   # c_i/kappa for strikers, 0 for jammers
         return extra
 
     # ------------------------------------------------------------------
