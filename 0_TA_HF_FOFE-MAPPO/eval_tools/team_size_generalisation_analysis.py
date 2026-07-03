@@ -52,7 +52,7 @@ from .evaluate_policy import _LoadedCheckpoint, _build_policy_for_scenario
 # ===================================================================
 # CONFIG — edit these (CLI flags override)
 # ===================================================================
-POLICY_PATH = "runs/2s2-4jV6.pt"
+POLICY_PATH = "runs/2s2-4jV7.pt"
 STRIKERS = [1, 2, 3, 4]              # y-axis of the grid
 JAMMERS = [1, 2, 3, 4, 5, 6, 7, 8]  # x-axis of the grid
 N_RUNS = 128                         # parallel episodes per cell (per seed)

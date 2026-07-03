@@ -131,7 +131,7 @@ class PolicyInput:
 
 
 # The MAIN policy — shown WITHOUT a p-value (the reference column).
-MAIN_POLICY = PolicyInput(name="Complete", policy_file="2s2-4jV6.pt")
+MAIN_POLICY = PolicyInput(name="Complete", policy_file="2s2-4jV7.pt")
 
 # The COMPARISON policies — each shown WITH a one-sided Wilcoxon p-value vs MAIN.
 # Leave this list EMPTY to just tabulate the main policy (no tests, no p-values).
@@ -153,7 +153,7 @@ EVAL_SCENARIOS: List[CurriculumSection] = [
         n_strikers=2, n_jammers=2,
         n_known_targets=2, n_unknown_targets=0,
         n_known_radars=6, n_unknown_radars=0,
-        radar_kill_probability=0.5,
+        radar_kill_probability=0.1,
         scenario="S2",
         communicate=True,
     ), 
@@ -163,7 +163,7 @@ EVAL_SCENARIOS: List[CurriculumSection] = [
         n_strikers=2, n_jammers=3,
         n_known_targets=2, n_unknown_targets=0,
         n_known_radars=6, n_unknown_radars=0,
-        radar_kill_probability=0.5,
+        radar_kill_probability=0.1,
         scenario="S2",
         communicate=True,
     ), 
@@ -173,7 +173,7 @@ EVAL_SCENARIOS: List[CurriculumSection] = [
         n_strikers=2, n_jammers=4,
         n_known_targets=2, n_unknown_targets=0,
         n_known_radars=6, n_unknown_radars=0,
-        radar_kill_probability=0.5,
+        radar_kill_probability=0.1,
         scenario="S2",
         communicate=True,
     )
