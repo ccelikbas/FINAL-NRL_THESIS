@@ -146,7 +146,7 @@ class EnvConfig:
     n_jammers: int = 4
     n_known_targets: int = 2
     n_unknown_targets: int = 0
-    n_known_radars: int = 2
+    n_known_radars: int = 6
     n_unknown_radars: int = 0
     n_targets: int = 0
     n_radars: int = 0
@@ -216,7 +216,7 @@ class EnvConfig:
     # are dropped. These set the flat actor's obs_dim (see _compute_obs_dim);
     # the critic's global state is unaffected. Ignored when use_fofe=True (FOFE
     # encodes the full variable-size set). 0 disables that channel entirely.
-    n_other_agent_obs_slots: int = 6
+    n_other_agent_obs_slots: int = 9
     n_radar_obs_slots: int = 8
     n_target_obs_slots: int = 6
 
@@ -306,7 +306,7 @@ class EnvConfig:
 class PPOConfig:
     """Shared PPO hyperparameters for both striker and jammer MAPPO."""
     num_envs: int = 2048  #1048 (local) or 2048 (remote)
-    n_iters: int = 200
+    n_iters: int = 10
     frames_per_batch: Optional[int] = None
     num_epochs: int = 6
     minibatch_size: int = 16384  #8192 (local) or 16384 (remote)
@@ -433,7 +433,7 @@ class HFRadarConfig:
     jammer_tx_power: Optional[float] = None        # P_J [W], preferred name
     jammer_gain: Optional[float] = None            # G_J [dB], preferred name
     P_J: float = 1e1                              # legacy alias [W]
-    G_J: float = 10.0                              # legacy alias [dB]
+    G_J: float = 5.0                              # legacy alias [dB]
 
     # Angular lobe boundaries (degrees, converted to radians internally)
     theta_main_deg: float = 10    # full main-lobe width 
