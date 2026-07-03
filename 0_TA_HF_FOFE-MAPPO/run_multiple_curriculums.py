@@ -434,7 +434,11 @@ def main() -> None:
                    help="Eval cadence — eval mirrors the active section's DR.")
     p.add_argument("--seed", type=int, default=ppo_d.seed,
                    help="Same base seed for every run (fair ablation).")
-    p.add_argument("--save_dir", type=str, default="runs")
+    p.add_argument("--save_dir", type=str, default="runs",
+                   help="Checkpoint dir. RELATIVE paths resolve against this file's "
+                        "folder (0_TA_HF_FOFE-MAPPO/), NOT the CWD — so 'runs' always "
+                        "means 0_TA_HF_FOFE-MAPPO/runs/ where V6/V7 + eval_tools live, "
+                        "regardless of where you launch from.")
     p.add_argument("--only", type=str, default=None,
                    help="Comma-separated run names to execute (default: all). "
                         "E.g. --only baseline_S2_nofofe_nocomm")
@@ -448,6 +452,14 @@ def main() -> None:
                         "memory before committing the weekend). Outputs get a "
                         "'_smoke' suffix so real names stay clean.")
     args = p.parse_args()
+
+    # Resolve save_dir against THIS file's folder (0_TA_HF_FOFE-MAPPO), not the
+    # CWD, so checkpoints land in the same runs/ as V6/V7 and eval_tools defaults
+    # no matter where the script is launched from.
+    _save_dir = Path(args.save_dir)
+    if not _save_dir.is_absolute():
+        _save_dir = Path(__file__).resolve().parent / _save_dir
+    args.save_dir = str(_save_dir)
 
     selected = RUNS
     if args.only:
