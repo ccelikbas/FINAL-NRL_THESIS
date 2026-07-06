@@ -61,7 +61,7 @@ from .nlr_style import NLR_PRIMARY, NLR_ACCENT, NLR_DARKGRAY, NLR_GRAY
 
 # Policy to analyse. Relative paths are resolved against this file's folder
 # so it works regardless of the current working directory.
-POLICY_PATH = "runs/FINALV1/complete_S1_20260704/stage4of5_DR_j2-4_k0_1.pt"
+POLICY_PATH = "runs/FINALV1/complete_S1_20260704/stage5of5_DR_j2-4_k0_25_FINAL.pt"
 
 # Compositions to test, as (n_strikers, n_jammers). One dashboard column each.
 CONFIGS = [(2, 2), (2, 3), (2, 4)]
@@ -89,7 +89,7 @@ SCENARIO = "S2"
 
 # Target / radar counts. "known" = revealed to the agents at spawn,
 # "unknown" = hidden until sensed. Totals are known + unknown.
-N_KNOWN_TARGETS = 2
+N_KNOWN_TARGETS = 4
 N_UNKNOWN_TARGETS = 0
 N_KNOWN_RADARS = 6
 N_UNKNOWN_RADARS = 0
@@ -188,7 +188,13 @@ def _draw_radar_coverage(ax, fr, env):
 
 
 def draw_run(ax, frames, env, ns, nj):
-    """Render one rollout as a tactical-picture subplot. Returns seed-mean frag."""
+    """Render one rollout as a tactical-picture subplot.
+
+    Returns a dict of end-of-episode KPIs for this rollout:
+        frag              seed-mean coalition fragmentation
+        survival          fraction of agents still alive at the end
+        targets_destroyed fraction of targets destroyed at the end
+    """
     s_colors = _striker_colors(ns)
     j_colors = _jammer_colors(nj)
 
@@ -245,7 +251,15 @@ def draw_run(ax, frames, env, ns, nj):
     ax.set_aspect("equal", adjustable="box")
     ax.tick_params(labelsize=6)
     ax.grid(True, alpha=0.25)
-    return float(np.mean(fr_frag))
+
+    # --- End-of-episode KPIs (ta_end computed above) ---
+    survival = float(frames[-1]["agent_alive"].bool().numpy().mean())
+    targets_destroyed = float((~ta_end).mean())
+    return {
+        "frag": float(np.mean(fr_frag)),
+        "survival": survival,
+        "targets_destroyed": targets_destroyed,
+    }
 
 
 def _legend_handles():
@@ -296,23 +310,31 @@ def main():
     fig, axes = plt.subplots(A, N, figsize=(4.6 * N, 4.6 * A), squeeze=False)
 
     for ci, (ns, nj) in enumerate(CONFIGS):
-        cfg_frags = []
+        cfg_metrics = []
         for ri in range(A):
             ax = axes[ri, ci]
             frames, env = rollout_config(ckpt, ns, nj, seeds[ri], device)
-            mean_frag = draw_run(ax, frames, env, ns, nj)
-            cfg_frags.append(mean_frag)
-            ax.set_title(f"seed {seeds[ri]}   ·   frag={mean_frag:.2f}",
-                         fontsize=8)
+            m = draw_run(ax, frames, env, ns, nj)
+            cfg_metrics.append(m)
+            ax.set_title(
+                f"seed {seeds[ri]}   ·   tgt={m['targets_destroyed']:.2f}   ·   "
+                f"surv={m['survival']:.2f}   ·   frag={m['frag']:.2f}",
+                fontsize=8)
             if ci == 0:
                 ax.set_ylabel("Y (km)", fontsize=8)
             if ri == A - 1:
                 ax.set_xlabel("X (km)", fontsize=8)
-            print(f"  {ns}s{nj}j seed {seeds[ri]}: frag={mean_frag:.3f}")
+            print(f"  {ns}s{nj}j seed {seeds[ri]}: "
+                  f"tgt={m['targets_destroyed']:.3f}  surv={m['survival']:.3f}  "
+                  f"frag={m['frag']:.3f}")
 
         # Column header spanning the top subplot of each composition.
+        mean_td = np.mean([m["targets_destroyed"] for m in cfg_metrics])
+        mean_su = np.mean([m["survival"] for m in cfg_metrics])
+        mean_fr = np.mean([m["frag"] for m in cfg_metrics])
         axes[0, ci].annotate(
-            f"{ns} strikers · {nj} jammers   (mean frag={np.mean(cfg_frags):.2f})",
+            f"{ns} strikers · {nj} jammers\n"
+            f"mean: tgt={mean_td:.2f} · surv={mean_su:.2f} · frag={mean_fr:.2f}",
             xy=(0.5, 1.16), xycoords="axes fraction", ha="center", va="bottom",
             fontsize=12, fontweight="bold", color=NLR_PRIMARY,
         )
