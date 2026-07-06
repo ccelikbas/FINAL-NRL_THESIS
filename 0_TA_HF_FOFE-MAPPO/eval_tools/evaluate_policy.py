@@ -127,56 +127,81 @@ class PolicyInput:
     `policy_file` : checkpoint — bare name → runs/, path with sub-dirs (e.g.
                     "runs/FINALV1/…/x.pt") → relative to the project dir,
                     absolute path → as-is, None → the run's --checkpoint default.
+    `communicate` : per-policy communication flag. Set it to match how the
+                    model was trained (e.g. True for the complete model, False
+                    for a no-comms baseline) — communication is defined HERE,
+                    not on the scenarios. None → fall back to the checkpoint's
+                    own trained comms setting.
     """
     name: str
     policy_file: Optional[str] = None
+    communicate: Optional[bool] = None
 
 
 # The MAIN policy — shown WITHOUT a p-value (the reference column).
-MAIN_POLICY = PolicyInput(name="Complete", policy_file="runs/FINALV1/complete_S1_20260704/stage4of5_DR_j2-4_k0_1.pt")
+# Complete model: trained WITH communication → evaluate with comms on.
+MAIN_POLICY = PolicyInput(
+    name="Complete",
+    policy_file="runs/FINALV1/complete_S1_20260704/stage4of5_DR_j2-4_k0_1.pt",
+    communicate=True,
+)
 
 # The COMPARISON policies — each shown WITH a one-sided Wilcoxon p-value vs MAIN.
 # Leave this list EMPTY to just tabulate the main policy (no tests, no p-values).
 COMPARISON_POLICIES: List[PolicyInput] = [
-    # PolicyInput(name="No FOFE",  policy_file="2s4j_no_fofe.pt"),
+    # Baseline model: trained WITHOUT communication → evaluate with comms off.
+    PolicyInput(
+        name="Baseline",
+        policy_file="runs/FINALV1/baseline_S1_20260704/stage4of5_DR_j2-4_k0_1.pt",
+        communicate=False,
+    ),
 ]
 
 # =====================================================================
 #  >>>  EVAL SCENARIOS  (the ROWS of every KPI table)  <<<
 #  Same format as the CURRICULUM list in run_curriculum.py. The `policy_file`
 #  field is IGNORED here — policies come from the two blocks above.
+#  Communication is NOT set here on purpose: it is a per-policy property
+#  (see PolicyInput.communicate above), so each model is evaluated with the
+#  comms setting it was trained with, on the same scenario world.
 # =====================================================================
 
 EVAL_SCENARIOS: List[CurriculumSection] = [
     CurriculumSection(
+        name="S1 - Overall",
+        n_iters=1,  # not used
+        n_strikers=2, n_jammers=(2, 4),
+        n_known_targets=(2, 4), n_unknown_targets=0,
+        n_known_radars=(4, 6), n_unknown_radars=0,
+        radar_kill_probability=0.1,
+        scenario="S2",
+    ), 
+    CurriculumSection(
         name="2s2j",
         n_iters=1,  # not used
         n_strikers=2, n_jammers=2,
-        n_known_targets=2, n_unknown_targets=0,
-        n_known_radars=6, n_unknown_radars=0,
+        n_known_targets=(2, 4), n_unknown_targets=0,
+        n_known_radars=(4, 6), n_unknown_radars=0,
         radar_kill_probability=0.1,
         scenario="S2",
-        communicate=True,
     ), 
     CurriculumSection(
         name="2s3j",
         n_iters=1,  # not used
         n_strikers=2, n_jammers=3,
-        n_known_targets=2, n_unknown_targets=0,
-        n_known_radars=6, n_unknown_radars=0,
+        n_known_targets=(2, 4), n_unknown_targets=0,
+        n_known_radars=(4, 6), n_unknown_radars=0,
         radar_kill_probability=0.1,
         scenario="S2",
-        communicate=True,
     ), 
     CurriculumSection(
         name="2s4j",
         n_iters=1,  # not used
         n_strikers=2, n_jammers=4,
-        n_known_targets=2, n_unknown_targets=0,
-        n_known_radars=6, n_unknown_radars=0,
+        n_known_targets=(2, 4), n_unknown_targets=0,
+        n_known_radars=(4, 6), n_unknown_radars=0,
         radar_kill_probability=0.1,
         scenario="S2",
-        communicate=True,
     )
 ]
 
@@ -185,7 +210,7 @@ EVAL_SCENARIOS: List[CurriculumSection] = [
 #  >>>  TEST / EVALUATION CONFIG  (all the "inputs" for the test)  <<<
 # =====================================================================
 
-N_EPISODES   = 300        # paired episodes per policy per scenario (= the test N)
+N_EPISODES   = 500        # paired episodes per policy per scenario (= the test N)
 CHUNK_EPISODES = 300      # parallel envs per rollout (chunked to avoid OOM)
 BASE_SEED    = 42         # scenario s uses BASE_SEED + s*SEED_STRIDE for every policy
 SEED_STRIDE  = 1_000_000  # distinct layouts per scenario, identical across policies
@@ -316,6 +341,20 @@ def _resolve_policy_path(policy_file: Optional[str],
     if p.parent != Path("."):
         return _PKG_DIR / p
     return _RUNS_DIR / p
+
+
+def _env_cfg_for_policy(pol: "PolicyInput", section: "CurriculumSection",
+                        ckpt: "_LoadedCheckpoint"):
+    """EnvConfig for (policy, scenario), applying the policy's `communicate`
+    setting so each model is evaluated with the comms it was trained with.
+    Scenarios do not set comms; `pol.communicate is None` falls back to the
+    checkpoint's own trained value (via `_section_to_env_cfg`)."""
+    env_cfg = _section_to_env_cfg(
+        section, ckpt.base_env_cfg, ckpt.reward_cfg, ckpt.fofe_cfg
+    )
+    if pol.communicate is not None:
+        env_cfg.communicate = bool(pol.communicate)
+    return env_cfg
 
 
 def _build_policy_for_scenario(ckpt: _LoadedCheckpoint, env_cfg: EnvConfig,
@@ -589,9 +628,7 @@ def evaluate_comparison(
                     f"Policy '{pol.name}': checkpoint not found: {ckpt_path}"
                 )
             ckpt = _load_checkpoint(ckpt_path, device, cache)
-            env_cfg = _section_to_env_cfg(
-                section, ckpt.base_env_cfg, ckpt.reward_cfg, ckpt.fofe_cfg
-            )
+            env_cfg = _env_cfg_for_policy(pol, section, ckpt)
             max_steps_seen[pol.name] = int(env_cfg.max_steps)
             print(f"    [{pol.name:14s}] {ckpt_path.name:22s} "
                   f"{_section_label(section, env_cfg)}", flush=True)
@@ -741,8 +778,7 @@ def _print_policy_diagnostics(main_policy: PolicyInput,
                   f"({pol.policy_file})", flush=True)
             continue
         fofe_txt = "FOFE on" if ck.fofe_cfg.use_fofe else "FOFE off (flat MLP)"
-        comms = [bool(getattr(_section_to_env_cfg(
-                    s, ck.base_env_cfg, ck.reward_cfg, ck.fofe_cfg),
+        comms = [bool(getattr(_env_cfg_for_policy(pol, s, ck),
                     "communicate", True)) for s in scenarios]
         if all(comms):
             comm_txt = "communication on"
