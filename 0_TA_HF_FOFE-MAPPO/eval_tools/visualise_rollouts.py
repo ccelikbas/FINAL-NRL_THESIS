@@ -73,16 +73,16 @@ FINAL_CONFIG = CurriculumSection(
     name="final",
     n_iters=1,                       # unused here
     n_strikers=2, n_jammers=(2, 4),  # (lo, hi) → DR
-    n_known_targets=2, n_unknown_targets=0,
-    n_known_radars=6, n_unknown_radars=0,
+    n_known_targets=(2, 4), n_unknown_targets=0,
+    n_known_radars=(4, 6), n_unknown_radars=0,
     radar_kill_probability=0.25,
     scenario="S2",
 )
 
 # Number of GIFs to render (one rollout each).            [CLI: --n_rollouts]
-N_ROLLOUTS = 10
+N_ROLLOUTS = 20
 # Base seed; rollout i uses BASE_SEED + i for both the DR draw and the layout. [CLI: --base-seed]
-BASE_SEED = 999
+BASE_SEED = 99
 # Sample a fresh composition from the DR ranges per rollout (True), or render the
 # fixed maximum-count config (False, run_curriculum style).   [CLI: --no_dr]
 SAMPLE_DR = True

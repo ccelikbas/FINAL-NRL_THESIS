@@ -104,40 +104,67 @@ class CurriculumSection:
 
 
 CURRICULUM: List[CurriculumSection] = [
-    CurriculumSection(
-        name="S2 - 2s4j k0.02",
-        n_iters=200,
-        n_strikers=2, n_jammers=2,
-        n_known_targets=2, n_unknown_targets=0,
-        n_known_radars=6, n_unknown_radars=0,
-        radar_kill_probability=0.02,
-        scenario="S2"
-    ), 
-    CurriculumSection(
-        name="S2 - 2s2-4j k0.02",
-        n_iters=500,
-        n_strikers=2, n_jammers=(2,4),
-        n_known_targets=2, n_unknown_targets=0,
-        n_known_radars=6, n_unknown_radars=0,
-        radar_kill_probability=0.02,
-        scenario="S2"
-    ), 
-    CurriculumSection(
-        name="S2 - 2s2-4j k0.05",
-        n_iters=500,
-        n_strikers=2, n_jammers=(2,4),
-        n_known_targets=2, n_unknown_targets=0,
-        n_known_radars=6, n_unknown_radars=0,
-        radar_kill_probability=0.05,
-        scenario="S2"
-    ), 
+    # CurriculumSection(
+    #     name="S2 - 2s4j k0.02",
+    #     n_iters=250,
+    #     n_strikers=2, n_jammers=2,
+    #     n_known_targets=2, n_unknown_targets=0,
+    #     n_known_radars=6, n_unknown_radars=0,
+    #     radar_kill_probability=0.025,
+    #     scenario="S2"
+    # ), 
+    # CurriculumSection(
+    #     name="S2 - 2s2-4j k0.02",
+    #     n_iters=750,
+    #     n_strikers=2, n_jammers=(2,4),
+    #     n_known_targets=2, n_unknown_targets=0,
+    #     n_known_radars=6, n_unknown_radars=0,
+    #     radar_kill_probability=0.025,
+    #     scenario="S2"
+    # ), 
+    # CurriculumSection(
+    #     name="S2 - 2s2-4j k0.05",
+    #     n_iters=500,
+    #     n_strikers=2, n_jammers=(2,4),
+    #     n_known_targets=2, n_unknown_targets=0,
+    #     n_known_radars=6, n_unknown_radars=0,
+    #     radar_kill_probability=0.05,
+    #     scenario="S2"
+    # ), 
+    # CurriculumSection(
+    #     name="S2 - 2s2-4j k0.1",
+    #     n_iters=1000,
+    #     n_strikers=2, n_jammers=(2,4),
+    #     n_known_targets=2, n_unknown_targets=0,
+    #     n_known_radars=6, n_unknown_radars=0,
+    #     radar_kill_probability=0.1,
+    #     scenario="S2"
+    # ), 
+    # CurriculumSection(
+    #     name="S2 - 2s2-4j k0.1",
+    #     n_iters=1000,
+    #     n_strikers=2, n_jammers=(2,4),
+    #     n_known_targets=2, n_unknown_targets=0,
+    #     n_known_radars=6, n_unknown_radars=0,
+    #     radar_kill_probability=0.15,
+    #     scenario="S2"
+    # ), 
+    # CurriculumSection(
+    #     name="S2 - 2s2-4j k0.1",
+    #     n_iters=1000,
+    #     n_strikers=2, n_jammers=(2,4),
+    #     n_known_targets=2, n_unknown_targets=0,
+    #     n_known_radars=6, n_unknown_radars=0,
+    #     radar_kill_probability=0.20,
+    #     scenario="S2"
+    # ), 
     CurriculumSection(
         name="S2 - 2s2-4j k0.1",
         n_iters=4000,
         n_strikers=2, n_jammers=(2,4),
         n_known_targets=2, n_unknown_targets=0,
         n_known_radars=6, n_unknown_radars=0,
-        radar_kill_probability=0.1,
+        radar_kill_probability=0.25,
         scenario="S2"
     ), 
 ]
