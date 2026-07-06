@@ -142,7 +142,7 @@ class PolicyInput:
 # Complete model: trained WITH communication → evaluate with comms on.
 MAIN_POLICY = PolicyInput(
     name="Complete",
-    policy_file="runs/FINALV1/complete_S1_20260704/stage4of5_DR_j2-4_k0_1.pt",
+    policy_file="runs/FINALV1/complete_S1_20260704/stage5of5_DR_j2-4_k0_25_FINAL.pt",
     communicate=True,
 )
 
@@ -152,8 +152,8 @@ COMPARISON_POLICIES: List[PolicyInput] = [
     # Baseline model: trained WITHOUT communication → evaluate with comms off.
     PolicyInput(
         name="Baseline",
-        policy_file="runs/FINALV1/baseline_S1_20260704/stage4of5_DR_j2-4_k0_1.pt",
-        communicate=False,
+        policy_file="runs/FINALV1/complete_S1_20260704/stage4of5_DR_j2-4_k0_1.pt",
+        communicate=True,
     ),
 ]
 
