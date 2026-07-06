@@ -61,7 +61,7 @@ from .nlr_style import NLR_PRIMARY, NLR_ACCENT, NLR_DARKGRAY, NLR_GRAY
 
 # Policy to analyse. Relative paths are resolved against this file's folder
 # so it works regardless of the current working directory.
-POLICY_PATH = "runs/2s2-4jV7.pt"
+POLICY_PATH = "runs/FINALV1/complete_S1_20260704/stage4of5_DR_j2-4_k0_1.pt"
 
 # Compositions to test, as (n_strikers, n_jammers). One dashboard column each.
 CONFIGS = [(2, 2), (2, 3), (2, 4)]

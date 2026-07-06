@@ -46,10 +46,11 @@ HOW TO CONFIGURE  (edit the three blocks below)
                             format as run_curriculum.py. Its `policy_file` field
                             is IGNORED here — policies come from blocks 1 & 2.
 
-`policy_file` values resolve like before:
-    "BaselineV2.pt"          → under runs/ (the common case)
-    r"C:\\path\\to\\x.pt"      → absolute path, used as-is
-    None                     → falls back to the --checkpoint default
+`policy_file` values resolve like:
+    "BaselineV2.pt"                  → under runs/ (bare name, the common case)
+    "runs/FINALV1/…/stage4.pt"       → relative to the project dir 0_TA_.../
+    r"C:\\path\\to\\x.pt"              → absolute path, used as-is
+    None                             → falls back to the --checkpoint default
 
 Run it as a direct script with the project's venv python:
 
@@ -123,22 +124,22 @@ class PolicyInput:
     """One model variant = one column in every KPI table.
 
     `name`        : column header (e.g. "Complete", "No comm.").
-    `policy_file` : checkpoint — bare name → runs/, absolute path → as-is,
-                    None → the run's --checkpoint default.
+    `policy_file` : checkpoint — bare name → runs/, path with sub-dirs (e.g.
+                    "runs/FINALV1/…/x.pt") → relative to the project dir,
+                    absolute path → as-is, None → the run's --checkpoint default.
     """
     name: str
     policy_file: Optional[str] = None
 
 
 # The MAIN policy — shown WITHOUT a p-value (the reference column).
-MAIN_POLICY = PolicyInput(name="Complete", policy_file="2s2-4jV7.pt")
+MAIN_POLICY = PolicyInput(name="Complete", policy_file="runs/FINALV1/complete_S1_20260704/stage4of5_DR_j2-4_k0_1.pt")
 
 # The COMPARISON policies — each shown WITH a one-sided Wilcoxon p-value vs MAIN.
 # Leave this list EMPTY to just tabulate the main policy (no tests, no p-values).
 COMPARISON_POLICIES: List[PolicyInput] = [
     # PolicyInput(name="No FOFE",  policy_file="2s4j_no_fofe.pt"),
 ]
-
 
 # =====================================================================
 #  >>>  EVAL SCENARIOS  (the ROWS of every KPI table)  <<<
@@ -297,14 +298,24 @@ def _resolve_policy_path(policy_file: Optional[str],
                          default_path: Optional[Path]) -> Optional[Path]:
     """Resolve a `policy_file` to a concrete checkpoint path.
 
-    None              → the run's --checkpoint default (may be None).
-    bare name / rel.  → under runs/ (e.g. "BaselineV2.pt").
-    absolute path     → used as-is.
+    None                    → the run's --checkpoint default (may be None).
+    absolute path           → used as-is.
+    path with sub-dirs      → relative to the project dir 0_TA_.../ , so a value
+                              like "runs/FINALV1/complete/stage4.pt" works (same
+                              convention as compare_compositions.py).
+    bare name (no dirs)     → under runs/ (e.g. "BaselineV2.pt").
     """
     if policy_file is None:
         return default_path
     p = Path(policy_file)
-    return p if p.is_absolute() else (_RUNS_DIR / p)
+    if p.is_absolute():
+        return p
+    # A path that already carries directory components (e.g. "runs/…/x.pt") is
+    # taken relative to the project dir — otherwise prepending _RUNS_DIR would
+    # double the "runs/" segment. A bare filename still resolves under runs/.
+    if p.parent != Path("."):
+        return _PKG_DIR / p
+    return _RUNS_DIR / p
 
 
 def _build_policy_for_scenario(ckpt: _LoadedCheckpoint, env_cfg: EnvConfig,
