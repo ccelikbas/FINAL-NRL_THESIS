@@ -195,7 +195,7 @@ def _s2_continuation(
                           n_strikers=2, n_jammers=(2, 4),
                           radar_kill_probability=0.25, **world),
     ]
-s
+
 
 # Scenario worlds (per your spec):
 #   S1: 6-8 known radars, 2-4 known targets (all known).
