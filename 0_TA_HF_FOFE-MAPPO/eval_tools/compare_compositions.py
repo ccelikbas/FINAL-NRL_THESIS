@@ -89,7 +89,7 @@ SCENARIO = "S2"
 
 # Target / radar counts. "known" = revealed to the agents at spawn,
 # "unknown" = hidden until sensed. Totals are known + unknown.
-N_KNOWN_TARGETS = 4
+N_KNOWN_TARGETS = 2
 N_UNKNOWN_TARGETS = 0
 N_KNOWN_RADARS = 6
 N_UNKNOWN_RADARS = 0

@@ -88,7 +88,7 @@ EVAL_SCENARIOS: List[CurriculumSection] = [
     CurriculumSection(
         name="S1",
         n_iters=1,
-        n_strikers=2, n_jammers=(2, 4),
+        n_strikers=2, n_jammers=4,
         n_known_targets=(2, 4), n_unknown_targets=0,
         n_known_radars=(4, 6), n_unknown_radars=0,
         radar_kill_probability=0.25,
