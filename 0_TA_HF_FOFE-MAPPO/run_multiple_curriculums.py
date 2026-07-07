@@ -110,6 +110,30 @@ DATE_TAG = datetime.now().strftime("%Y%m%d")
 #  THE FOUR TRAINING RUNS  —  edit freely
 # =====================================================================
 
+# ---------------------------------------------------------------------
+#  >>>  WHAT TO RUN  —  toggle the four (model × scenario) combinations  <<<
+#  Each True trains that (model, phase); each False skips it. You do NOT need to
+#  touch the LINEAGES / curriculums below.
+#
+#  Phases run sequentially within a lineage carrying weights, so an S2 phase
+#  warm-starts from S1. If you enable an S2 phase but NOT its S1 in the SAME run,
+#  S2 warm-starts from the newest matching S1 checkpoint already on disk
+#  (runs/<model>_S1_*.pt); if none exists it trains from scratch (and warns).
+# ---------------------------------------------------------------------
+RUN_S1_COMPLETE = True
+RUN_S1_BASELINE = False
+RUN_S2_COMPLETE = False
+RUN_S2_BASELINE = False
+
+# (model name, phase tag) → toggle. Names/tags must match the LINEAGES/Phases below.
+_RUN_FLAGS: Dict[Tuple[str, str], bool] = {
+    ("complete", "S1"): RUN_S1_COMPLETE,
+    ("baseline", "S1"): RUN_S1_BASELINE,
+    ("complete", "S2"): RUN_S2_COMPLETE,
+    ("baseline", "S2"): RUN_S2_BASELINE,
+}
+
+
 @dataclass
 class Phase:
     """One scenario phase of a lineage — its own world + curriculum. Weights carry
@@ -152,24 +176,33 @@ def _make_curriculum(
         scenario=scenario, communicate=communicate, max_steps=150,
     )
     return [
-        CurriculumSection(name="warmup 2s2j k0.025", n_iters=250, #250
+        CurriculumSection(name="warmup 2s2j k0.025", n_iters=250, 
                           n_strikers=2, n_jammers=2,
                           radar_kill_probability=0.025, **world),
-        CurriculumSection(name="DR j2-4 k0.025", n_iters=750, #750
+        CurriculumSection(name="DR j2-4 k0.025", n_iters=750, 
                           n_strikers=2, n_jammers=(2, 4),
                           radar_kill_probability=0.025, **world),
-        CurriculumSection(name="DR j2-4 k0.05", n_iters=1000, #1000
+        CurriculumSection(name="DR j2-4 k0.05", n_iters=1000, 
                           n_strikers=2, n_jammers=(2, 4),
                           radar_kill_probability=0.05, **world),
-        CurriculumSection(name="DR j2-4 k0.1", n_iters=1000, #1000
+        CurriculumSection(name="DR j2-4 k0.1", n_iters=1000, 
                           n_strikers=2, n_jammers=(2, 4),   
                           radar_kill_probability=0.1, **world),
-        CurriculumSection(name="DR j2-4 k0.25", n_iters=2000, #2000
+        CurriculumSection(name="DR j2-4 k0.15", n_iters=1000, 
+                          n_strikers=2, n_jammers=(2, 4),   
+                          radar_kill_probability=0.15, **world),
+        CurriculumSection(name="DR j2-4 k0.2", n_iters=1000, 
+                          n_strikers=2, n_jammers=(2, 4),   
+                          radar_kill_probability=0.2, **world),
+        CurriculumSection(name="DR j2-4 k0.25", n_iters=1000, 
                           n_strikers=2, n_jammers=(2, 4),
                           radar_kill_probability=0.25, **world),
+        CurriculumSection(name="DR j2-4 k0.3", n_iters=2000, 
+                          n_strikers=2, n_jammers=(2, 4),
+                          radar_kill_probability=0.3, **world),
     ]
 
-s
+
 def _s2_continuation(
     scenario, n_known_targets, n_unknown_targets,
     n_known_radars, n_unknown_radars, communicate,
@@ -292,6 +325,51 @@ def _safe(s: str) -> str:
     return "".join(c if (c.isalnum() or c in "-") else "_" for c in str(s)).strip("_")
 
 
+def _find_prior_checkpoint(save_dir: Path, name: str, tag: str) -> Optional[Path]:
+    """Newest on-disk phase-final checkpoint runs/<name>_<tag>_*.pt (or None)."""
+    cands = sorted(Path(save_dir).glob(f"{name}_{tag}_*.pt"),
+                   key=lambda p: p.stat().st_mtime)
+    return cands[-1] if cands else None
+
+
+def _load_initial_checkpoint(path: Path) -> Dict[str, Any]:
+    """Load a phase-final .pt as warm-start weights (policy/critic/reward-norm)."""
+    ck = torch.load(path, map_location="cpu", weights_only=False)
+    return {
+        "policy_state_dict": ck["policy_state_dict"],
+        "critic_state_dict": ck["critic_state_dict"],
+        "reward_normalizer_state_dict": ck.get("reward_normalizer_state_dict"),
+    }
+
+
+def _apply_run_flags(lineages: List[Lineage], run_flags: Dict[Tuple[str, str], bool],
+                     save_dir: str) -> Tuple[List[Lineage], Dict[str, Optional[Path]]]:
+    """Keep only the phases whose (lineage, phase) toggle is True; drop lineages
+    left with no phases. Returns (selected_lineages, warmstart) where
+    warmstart[name] is the on-disk checkpoint a run whose first kept phase is NOT
+    the lineage's first phase should warm-start from (e.g. S2-only → its S1)."""
+    selected: List[Lineage] = []
+    warmstart: Dict[str, Optional[Path]] = {}
+    for lg in lineages:
+        kept_idx = [i for i, ph in enumerate(lg.phases)
+                    if run_flags.get((lg.name, ph.tag), False)]
+        if not kept_idx:
+            continue
+        selected.append(replace(lg, phases=[lg.phases[i] for i in kept_idx]))
+        first = kept_idx[0]
+        if first > 0:                      # a preceding phase was skipped this run
+            prev_tag = lg.phases[first - 1].tag
+            wp = _find_prior_checkpoint(Path(save_dir), lg.name, prev_tag)
+            warmstart[lg.name] = wp
+            if wp is None:
+                print(f"  [!] {lg.name}: running {lg.phases[first].tag} without {prev_tag} "
+                      f"and no {lg.name}_{prev_tag}_*.pt found in {save_dir} — it will "
+                      f"train from scratch (no warm-start).")
+        else:
+            warmstart[lg.name] = None
+    return selected, warmstart
+
+
 def _save_checkpoint(save_path: Path, checkpoint: Dict[str, Any], *,
                      net_cfg, fofe_cfg, ext_cfg, reward_cfg,
                      all_logs, curriculum_meta, section_bounds,
@@ -364,17 +442,23 @@ def _print_lineage_plan(lineage: Lineage, phase_resolved, save_dir: Path) -> Non
     print("=" * 78)
 
 
-def _train_one_lineage(lineage: Lineage, args, plots_dir: Path) -> Optional[Dict[str, List[float]]]:
+def _train_one_lineage(lineage: Lineage, args, plots_dir: Path,
+                       initial_ckpt_path: Optional[Path] = None) -> Optional[Dict[str, List[float]]]:
     """Train one lineage SEQUENTIALLY through its phases (S1 → S2 …), carrying the
     checkpoint (CPU weights) continuously so each phase warm-starts from the last.
-    Saves one canonical checkpoint + a per-stage backup folder PER PHASE. Returns
-    the merged logs spanning all phases (for the combined figure), or None on
-    failure."""
+    `initial_ckpt_path` warm-starts the FIRST phase from an on-disk checkpoint (used
+    when an S2-only run continues from a previously-trained S1). Saves one canonical
+    checkpoint + a per-stage backup folder PER PHASE. Returns the merged logs
+    spanning all phases (for the combined figure), or None on failure."""
     phase_resolved, fofe_cfg, ext_cfg, hf_radar_cfg, net_cfg, reward_cfg = _resolve_lineage(lineage)
     save_dir = Path(args.save_dir)
     _print_lineage_plan(lineage, phase_resolved, save_dir)
 
     checkpoint: Optional[Dict[str, Any]] = None      # carried across ALL phases
+    if initial_ckpt_path is not None:
+        checkpoint = _load_initial_checkpoint(initial_ckpt_path)
+        print(f"  warm-start: '{lineage.name}' first phase continues from "
+              f"{initial_ckpt_path.name}")
     all_logs: Dict[str, List[float]] = {}            # cumulative (whole lineage)
     section_bounds: List[Tuple[str, int, int]] = []  # cumulative
     curriculum_meta: List[Dict[str, Any]] = []       # cumulative
@@ -530,14 +614,16 @@ def main() -> None:
         _save_dir = Path(__file__).resolve().parent / _save_dir
     args.save_dir = str(_save_dir)
 
-    selected = LINEAGES
-    if args.only:
+    # Select which (model × phase) combinations to run from the RUN_* toggles at
+    # the top of the file, and resolve any on-disk warm-start (S2-only → its S1).
+    selected, warmstart = _apply_run_flags(LINEAGES, _RUN_FLAGS, args.save_dir)
+    if args.only:                          # optional extra restriction by lineage name
         wanted = {w.strip() for w in args.only.split(",")}
-        selected = [lg for lg in LINEAGES if lg.name in wanted]
-        unknown = wanted - {lg.name for lg in LINEAGES}
-        if unknown:
-            raise SystemExit(f"--only names not found: {sorted(unknown)}; "
-                             f"available lineages: {[lg.name for lg in LINEAGES]}")
+        selected = [lg for lg in selected if lg.name in wanted]
+    if not selected:
+        print("\n  Nothing to run — every RUN_* toggle is False (or --only excluded "
+              "all of them). Enable a toggle at the top of the file.")
+        return
 
     if args.smoke:
         # Same worlds / num_envs (so memory is representative), tiny iterations per
@@ -549,6 +635,7 @@ def main() -> None:
             ])
             for lg in selected
         ]
+        warmstart = {}                     # smoke is a pipeline test — no disk warm-start
         print(f"\n  SMOKE MODE: every section trimmed to {args.smoke} iters.")
 
     Path(args.save_dir).mkdir(parents=True, exist_ok=True)
@@ -580,7 +667,8 @@ def main() -> None:
     failures: List[str] = []
     for lg in selected:
         try:
-            logs = _train_one_lineage(lg, args, plots_dir)
+            logs = _train_one_lineage(lg, args, plots_dir,
+                                      initial_ckpt_path=warmstart.get(lg.name))
             if logs is not None:
                 lineage_logs[lg.name] = logs
         except Exception as exc:  # noqa: BLE001 — one failed lineage must not kill the batch
