@@ -85,8 +85,8 @@ NLR_SEQ.set_bad("#eeeeee"); NLR_DIV.set_bad("#eeeeee")
 # ===================================================================
 # CONFIG — edit these (CLI flags override)
 # ===================================================================
-POLICY_PATH = "runs/2s2-4jV7.pt"    # "complete" model (--checkpoint)
-BASELINE_PATH = "runs/2s2-4jV7.pt"  # "baseline" model (--baseline); None → single-policy mode
+POLICY_PATH = "runs/FINALV1/complete_S1_20260704/stage5of5_DR_j2-4_k0_25_FINAL.pt"    # "complete" model (--checkpoint)
+BASELINE_PATH = "runs/FINALV1/baseline_S1_20260704/stage5of5_DR_j2-4_k0_25_FINAL.pt"  # "baseline" model (--baseline); None → single-policy mode
 STRIKERS = [1, 2, 3]             # y-axis of the grid
 JAMMERS = [1, 2, 3, 4, 5, 6]  # x-axis of the grid
 N_RUNS = 100                         # parallel episodes per cell (per seed)
@@ -108,6 +108,9 @@ TRAIN_J = [2, 3, 4]
 
 OUT_PATH = "escort_analysis/team_size_generalisation.png"
 
+# Figure resolution (dots per inch). Higher = sharper output (larger files).
+DPI = 600
+
 # Per-episode KPI keys produced by run_cell (all length-B arrays).
 KPI_KEYS = ["survival", "completion", "targets_destroyed", "frag", "reward", "duration"]
 
@@ -126,7 +129,6 @@ KPIS = [
 COMPARE_KPIS = [
     ("targets_destroyed", "Targets destroyed", "viridis", "higher"),
     ("survival",          "Survival rate",     "viridis", "higher"),
-    ("duration",          "Duration (steps)",  "cividis", "lower"),
 ]
 
 
@@ -299,7 +301,7 @@ def plot_single_dashboard(grids, strikers, jammers, name, out, n_runs, n_seeds):
         _draw_heat(fig, ax, g, NLR_SEQ, vmin, vmax, strikers, jammers, title,
                    cbar_label=title)
     out.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out, dpi=300, bbox_inches="tight")
+    fig.savefig(out, dpi=DPI, bbox_inches="tight")
     plt.close(fig)
     print(f"\nsaved dashboard -> {out}")
 
@@ -331,7 +333,7 @@ def plot_comparison(grids_c, grids_b, strikers, jammers, name_c, name_b, out, n_
                    f"{title}\nΔ = Complete − Baseline",
                    cbar_label=f"Δ  ({better})", signed=True)
     out.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out, dpi=300, bbox_inches="tight")
+    fig.savefig(out, dpi=DPI, bbox_inches="tight")
     plt.close(fig)
     print(f"\nsaved comparison dashboard -> {out}")
 
@@ -413,7 +415,7 @@ def plot_pvalue_table(rows, out):
                  "n/a = no non-zero paired differences", fontsize=10)
     fig.tight_layout()
     out.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out, dpi=130)
+    fig.savefig(out, dpi=DPI)
     plt.close(fig)
     print(f"saved p-value table -> {out}")
 

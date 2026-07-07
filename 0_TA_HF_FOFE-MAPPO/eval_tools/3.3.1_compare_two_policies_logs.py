@@ -115,7 +115,7 @@ def plot_reward(policies, out, smooth):
     ax.axhline(0.0, color=NLR_DARKGRAY, lw=0.8, alpha=0.5)
     ax.set_xlabel("Global training iteration", fontsize=11)
     ax.set_ylabel("Mean episode reward (train)", fontsize=11)
-    ax.set_title("Training reward — policy comparison", fontsize=12, fontweight="bold")
+    # ax.set_title("Training reward — policy comparison", fontsize=12, fontweight="bold")
     if n_iter:
         ax.set_xlim(1, n_iter)
     ax.grid(True, alpha=0.3)

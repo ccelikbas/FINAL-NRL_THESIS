@@ -42,10 +42,25 @@ import torch
 
 from .evaluate_policy import (
     PolicyInput, evaluate_comparison, _LoadedCheckpoint, _resolve_policy_path,
-    _print_config, _print_policy_diagnostics, _p_used, KPIS,
-    N_EPISODES, CHUNK_EPISODES, BASE_SEED, ALPHA, P_ADJUST,
+    _print_config, _print_policy_diagnostics, _p_used, _wilcoxon_pair, _ALT, KPIS,
 )
 from .run_curriculum import CurriculumSection
+
+# =====================================================================
+#  >>>  TEST CONFIG  (how many runs, seeding, significance)  <<<
+# =====================================================================
+
+# Number of RUNS = paired episodes per policy per composition (test N and the
+# "n=" printed in the caption).                            [CLI: --n_episodes]
+N_EPISODES = 500
+# Parallel envs per rollout chunk (lower this if you hit GPU OOM). [CLI: --chunk]
+CHUNK_EPISODES = 300
+# Base RNG seed; both policies share it so episodes are paired 1:1.  [CLI: --seed]
+BASE_SEED = 42
+# Significance level for the tests.                                 [CLI: --alpha]
+ALPHA = 0.05
+# Multiplicity correction across comparison policies: "none" or "holm". [CLI: --p_adjust]
+P_ADJUST = "none"
 
 # =====================================================================
 #  >>>  POLICIES  (Complete = reference column, Baseline = compared)  <<<
@@ -103,12 +118,45 @@ EVAL_SCENARIOS: List[CurriculumSection] = [
 # KPIs shown (in column order). Keys must exist in evaluate_policy.KPIS.
 TABLE_KPIS = ["targets", "survival", "duration", "fragmentation"]
 
+# KPIs restricted to SUCCESSFUL episodes. For these, means and the (one-sided,
+# directional) test use only episode pairs where BOTH policies completed the
+# mission (all targets destroyed). Duration is only comparable between missions
+# that actually finished — a policy whose agents die early ends its episode early,
+# which would otherwise make it look "faster". (Fragmentation is left over all
+# episodes and stays two-sided via the engine.)
+SUCCESS_CONDITIONED_KPIS = {"duration"}
+
+# Per-episode success flag: "completion" == mission_complete == (~target_alive).all()
+# == "all targets destroyed" (see environment.py).
+SUCCESS_KEY = "completion"
+
 # Output .tex (relative paths resolved against the project dir 0_TA_...).
 OUT_PATH = "eval_results/emergent_team_behaviour.tex"
 
 # =====================================================================
 
 _KPI_BY_KEY = {s.key: s for s in KPIS}
+
+
+def _joint_success_mask(scn, main, base, samples) -> np.ndarray:
+    """Boolean mask over episodes where BOTH policies completed the mission."""
+    sc = np.asarray(samples[scn.name][main.name][SUCCESS_KEY], dtype=float) >= 0.5
+    sb = np.asarray(samples[scn.name][base.name][SUCCESS_KEY], dtype=float) >= 0.5
+    return sc & sb
+
+
+def _conditioned_stats(scn, key, main, base, samples) -> Tuple[float, float, float, int]:
+    """(complete_mean, baseline_mean, p, n) for a KPI over jointly-successful pairs,
+    using the KPI's own directional (one-sided) Wilcoxon alternative."""
+    mask = _joint_success_mask(scn, main, base, samples)
+    mv = np.asarray(samples[scn.name][main.name][key], dtype=float)
+    bv = np.asarray(samples[scn.name][base.name][key], dtype=float)
+    fin = mask & np.isfinite(mv) & np.isfinite(bv)
+    m, b = mv[fin], bv[fin]
+    if m.size == 0:
+        return float("nan"), float("nan"), float("nan"), 0
+    res = _wilcoxon_pair(m, b, _ALT[_KPI_BY_KEY[key].direction])
+    return float(m.mean()), float(b.mean()), res["pvalue"], int(m.size)
 
 
 def _fmt_val(key: str, mean: float) -> str:
@@ -123,16 +171,20 @@ def _fmt_p(p: float) -> str:
     return "<0.001" if p < 0.001 else f"{p:.3f}"
 
 
-def _complete_baseline_cells(scn, key, main, base, summary, tests, p_adjust) -> Tuple[str, str]:
+def _complete_baseline_cells(scn, key, main, base, summary, tests, samples, p_adjust) -> Tuple[str, str]:
     """(complete, 'baseline (p)') strings for one (composition, KPI). The baseline
-    cell is '' when there is no comparison policy."""
-    c = _fmt_val(key, summary[(scn.name, main.name, key)][0])
+    cell is '' when there is no comparison policy. Success-conditioned KPIs use
+    jointly-successful pairs for both the means and the (one-sided) test."""
     if base is None:
-        return c, ""
+        return _fmt_val(key, summary[(scn.name, main.name, key)][0]), ""
+    if key in SUCCESS_CONDITIONED_KPIS:
+        c_mean, b_mean, p, _n = _conditioned_stats(scn, key, main, base, samples)
+        return _fmt_val(key, c_mean), f"{_fmt_val(key, b_mean)} ({_fmt_p(p)})"
+    c = _fmt_val(key, summary[(scn.name, main.name, key)][0])
     b = _fmt_val(key, summary[(scn.name, base.name, key)][0])
     res = tests.get((scn.name, base.name, key))
-    p = _fmt_p(_p_used(res, p_adjust)) if res is not None else "--"
-    return c, f"{b} ({p})"
+    p = _p_used(res, p_adjust) if res is not None else float("nan")
+    return c, f"{b} ({_fmt_p(p)})"
 
 
 _HEADER = r"""\begin{table}[htbp]
@@ -169,14 +221,14 @@ _FOOTER = r"""            \bottomrule
 """
 
 
-def build_latex(scenarios, main, comparison, summary, tests, n_episodes, p_adjust) -> str:
+def build_latex(scenarios, main, comparison, summary, tests, samples, n_episodes, p_adjust) -> str:
     base = comparison[0] if comparison else None
     blocks = []
     for scn in scenarios:
-        t = _complete_baseline_cells(scn, "targets", main, base, summary, tests, p_adjust)
-        s = _complete_baseline_cells(scn, "survival", main, base, summary, tests, p_adjust)
-        d = _complete_baseline_cells(scn, "duration", main, base, summary, tests, p_adjust)
-        f = _complete_baseline_cells(scn, "fragmentation", main, base, summary, tests, p_adjust)
+        t = _complete_baseline_cells(scn, "targets", main, base, summary, tests, samples, p_adjust)
+        s = _complete_baseline_cells(scn, "survival", main, base, summary, tests, samples, p_adjust)
+        d = _complete_baseline_cells(scn, "duration", main, base, summary, tests, samples, p_adjust)
+        f = _complete_baseline_cells(scn, "fragmentation", main, base, summary, tests, samples, p_adjust)
         blocks.append(
             f"            ${scn.name}$\n"
             f"            & {t[0]} & {t[1]}\n"
@@ -223,14 +275,23 @@ def main() -> None:
     _print_policy_diagnostics(MAIN_POLICY, COMPARISON_POLICIES, EVAL_SCENARIOS,
                               default_ckpt_path, device, cache)
 
-    summary, tests, _samples = evaluate_comparison(
+    summary, tests, samples = evaluate_comparison(
         EVAL_SCENARIOS, MAIN_POLICY, COMPARISON_POLICIES, default_ckpt_path,
         n_episodes=args.n_episodes, chunk=args.chunk, base_seed=args.seed,
         p_adjust=args.p_adjust, device=device, cache=cache,
     )
 
     latex = build_latex(EVAL_SCENARIOS, MAIN_POLICY, COMPARISON_POLICIES,
-                        summary, tests, args.n_episodes, args.p_adjust)
+                        summary, tests, samples, args.n_episodes, args.p_adjust)
+
+    # Effective n for the success-conditioned KPIs (< nominal n=N_EPISODES).
+    if SUCCESS_CONDITIONED_KPIS and COMPARISON_POLICIES:
+        base = COMPARISON_POLICIES[0]
+        print(f"[note] {', '.join(sorted(SUCCESS_CONDITIONED_KPIS))} computed over "
+              f"jointly-successful episodes only (both policies completed the mission):")
+        for scn in EVAL_SCENARIOS:
+            n_ok = int(_joint_success_mask(scn, MAIN_POLICY, base, samples).sum())
+            print(f"         {scn.name}: {n_ok}/{args.n_episodes} pairs")
     print("\n" + latex)
 
     out = _resolve_out(args.out)
