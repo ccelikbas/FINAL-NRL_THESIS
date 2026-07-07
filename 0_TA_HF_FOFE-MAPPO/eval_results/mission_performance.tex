@@ -1,0 +1,30 @@
+\begin{table}[htbp]
+    \centering
+    \caption{Performance comparison across scenarios (n=500).}
+    \label{tab:mission-performence}
+    \small
+    \resizebox{\textwidth}{!}{%
+        \begin{tabular}{l*{9}{c}}
+            \toprule
+            \textbf{Configuration}
+            & \multicolumn{3}{c}{\textbf{Targets destroyed}}
+            & \multicolumn{3}{c}{\textbf{Survival}}
+            & \multicolumn{3}{c}{\textbf{Duration}} \\
+
+            \cmidrule(lr){2-4}
+            \cmidrule(lr){5-7}
+            \cmidrule(lr){8-10}
+
+            & Complete & Baseline & $p$-value
+            & Complete & Baseline & $p$-value
+            & Complete & Baseline & $p$-value \\
+            \midrule
+
+            $S1$
+            & 0.914 & 0.597 & <0.001
+            & 0.781 & 0.341 & <0.001
+            & 52.8 & 41.7 & 1.000 \\
+            \bottomrule
+        \end{tabular}%
+    }
+\end{table}

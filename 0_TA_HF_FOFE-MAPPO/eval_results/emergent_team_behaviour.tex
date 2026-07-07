@@ -1,0 +1,46 @@
+\begin{table}[htbp]
+    \centering
+    \caption{Performance comparison across different team compositions (n=6).}
+    \label{tab:team-composition-comparison}
+    \small
+    \resizebox{\textwidth}{!}{%
+        \begin{tabular}{l*{8}{c}}
+            \toprule
+            \textbf{Team Size}
+            & \multicolumn{2}{c}{\textbf{Targets destroyed}}
+            & \multicolumn{2}{c}{\textbf{Survival}}
+            & \multicolumn{2}{c}{\textbf{Duration}}
+            & \multicolumn{2}{c}{\textbf{Fragmentation}} \\
+
+            \cmidrule(lr){2-3}
+            \cmidrule(lr){4-5}
+            \cmidrule(lr){6-7}
+            \cmidrule(lr){8-9}
+
+            & Complete & Baseline ($p$)
+            & Complete & Baseline ($p$)
+            & Complete & Baseline ($p$)
+            & Complete & Baseline ($p$) \\
+            \midrule
+
+            $2S2J$
+            & 1.000 & 0.583 (0.062)
+            & 1.000 & 0.333 (0.062)
+            & 49.2 & 37.2 (1.000)
+            & 0.000 & 0.000 (1.000) \\
+
+            $2S3J$
+            & 0.917 & 0.750 (0.500)
+            & 0.800 & 0.567 (0.125)
+            & 62.7 & 36.3 (1.000)
+            & 0.012 & 0.013 (1.000) \\
+
+            $2S4J$
+            & 1.000 & 0.750 (0.125)
+            & 1.000 & 0.333 (0.031)
+            & 34.3 & 46.8 (0.062)
+            & 0.123 & 0.083 (0.438) \\
+            \bottomrule
+        \end{tabular}%
+    }
+\end{table}

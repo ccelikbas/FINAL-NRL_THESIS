@@ -1,0 +1,43 @@
+ROLLOUT FORENSICS — stage5of5_DR_j2-4_k0_25_FINAL.pt  (device=cuda)
+
+==========================================================================
+COMPOSITION 2s2j  (B=64, k=0.25, R_unc=0.211)
+==========================================================================
+deaths: 81 total in 64 eps  (strikers 47, jammers 34)
+  [S] n=47  depth@death mean=0.38 (p25=0.16 p75=0.56)
+      killing radar: agent-in-jam-shadow 17%  | radar jammed-by-someone 51%  | fully live radar 49%
+      dist to nearest alive jammer at death: mean=0.14
+      striker escort coverage c/kappa at death: mean=0.38  | <0.5 (uncovered) 72%  | >=1 (fully covered) 0%
+  [J] n=34  depth@death mean=0.31 (p25=0.14 p75=0.43)
+      killing radar: agent-in-jam-shadow 38%  | radar jammed-by-someone 38%  | fully live radar 62%
+      dist to nearest alive jammer at death: mean=0.02
+  ref: striker coverage while ALIVE mean=0.89  (<0.5: 4%)
+  exposure[S]: steps inside R_unc 57%  | deep (p>0.5) 13.8%  | very deep (p>0.75) 1.31%  | mean p (when inside) 0.35
+  exposure[J]: steps inside R_unc 59%  | deep (p>0.5) 13.8%  | very deep (p>0.75) 1.50%  | mean p (when inside) 0.34
+  beam: mean|dpoint| 0.107 rad/step  chatter(>0.3rad) 3.1% of steps
+      in-range    0 radar: chatter   1.3%  mean|dpoint| 0.079  (2831 steps)
+      in-range    1 radar: chatter   4.1%  mean|dpoint| 0.125  (3274 steps)
+      in-range >=2 radars: chatter   5.1%  mean|dpoint| 0.126  (966 steps)
+  outcomes: completion 0.73  survival 0.68  (n=64)
+  trajectories -> traj_2s2j.png
+
+==========================================================================
+COMPOSITION 2s4j  (B=64, k=0.25, R_unc=0.211)
+==========================================================================
+deaths: 53 total in 64 eps  (strikers 18, jammers 35)
+  [S] n=18  depth@death mean=0.44 (p25=0.18 p75=0.72)
+      killing radar: agent-in-jam-shadow 28%  | radar jammed-by-someone 50%  | fully live radar 50%
+      dist to nearest alive jammer at death: mean=0.07
+      striker escort coverage c/kappa at death: mean=0.56  | <0.5 (uncovered) 56%  | >=1 (fully covered) 0%
+  [J] n=35  depth@death mean=0.36 (p25=0.16 p75=0.52)
+      killing radar: agent-in-jam-shadow 23%  | radar jammed-by-someone 49%  | fully live radar 51%
+      dist to nearest alive jammer at death: mean=0.14
+  ref: striker coverage while ALIVE mean=1.22  (<0.5: 1%)
+  exposure[S]: steps inside R_unc 51%  | deep (p>0.5) 12.8%  | very deep (p>0.75) 0.96%  | mean p (when inside) 0.34
+  exposure[J]: steps inside R_unc 50%  | deep (p>0.5) 11.7%  | very deep (p>0.75) 1.05%  | mean p (when inside) 0.34
+  beam: mean|dpoint| 0.138 rad/step  chatter(>0.3rad) 3.9% of steps
+      in-range    0 radar: chatter   4.2%  mean|dpoint| 0.167  (5588 steps)
+      in-range    1 radar: chatter   3.0%  mean|dpoint| 0.106  (4253 steps)
+      in-range >=2 radars: chatter   4.8%  mean|dpoint| 0.123  (1531 steps)
+  outcomes: completion 0.92  survival 0.86  (n=64)
+  trajectories -> traj_2s4j.png

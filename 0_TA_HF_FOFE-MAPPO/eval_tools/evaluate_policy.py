@@ -152,8 +152,8 @@ COMPARISON_POLICIES: List[PolicyInput] = [
     # Baseline model: trained WITHOUT communication → evaluate with comms off.
     PolicyInput(
         name="Baseline",
-        policy_file="runs/FINALV1/complete_S1_20260704/stage4of5_DR_j2-4_k0_1.pt",
-        communicate=True,
+        policy_file="runs/FINALV1/baseline_S1_20260704/stage5of5_DR_j2-4_k0_25_FINAL.pt",
+        communicate=False,
     ),
 ]
 
@@ -173,7 +173,7 @@ EVAL_SCENARIOS: List[CurriculumSection] = [
         n_strikers=2, n_jammers=(2, 4),
         n_known_targets=(2, 4), n_unknown_targets=0,
         n_known_radars=(4, 6), n_unknown_radars=0,
-        radar_kill_probability=0.1,
+        radar_kill_probability=0.25,
         scenario="S2",
     ), 
     CurriculumSection(
@@ -182,7 +182,7 @@ EVAL_SCENARIOS: List[CurriculumSection] = [
         n_strikers=2, n_jammers=2,
         n_known_targets=(2, 4), n_unknown_targets=0,
         n_known_radars=(4, 6), n_unknown_radars=0,
-        radar_kill_probability=0.1,
+        radar_kill_probability=0.25,
         scenario="S2",
     ), 
     CurriculumSection(
@@ -191,7 +191,7 @@ EVAL_SCENARIOS: List[CurriculumSection] = [
         n_strikers=2, n_jammers=3,
         n_known_targets=(2, 4), n_unknown_targets=0,
         n_known_radars=(4, 6), n_unknown_radars=0,
-        radar_kill_probability=0.1,
+        radar_kill_probability=0.25,
         scenario="S2",
     ), 
     CurriculumSection(
@@ -200,7 +200,7 @@ EVAL_SCENARIOS: List[CurriculumSection] = [
         n_strikers=2, n_jammers=4,
         n_known_targets=(2, 4), n_unknown_targets=0,
         n_known_radars=(4, 6), n_unknown_radars=0,
-        radar_kill_probability=0.1,
+        radar_kill_probability=0.25,
         scenario="S2",
     )
 ]
