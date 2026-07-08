@@ -193,7 +193,7 @@ class EnvConfig:
 
     # Sensors
     # R_radar = +- 0.2 < R_obs < R_comm
-    R_obs: float = 0.35 
+    R_obs: float = 0.4 
     R_comm: float = 0.5 
     # Inter-agent communication. When True, agents within a connected R_comm
     # subgroup share observations (multi-hop). When False, each agent forms its
@@ -216,7 +216,7 @@ class EnvConfig:
     # are dropped. These set the flat actor's obs_dim (see _compute_obs_dim);
     # the critic's global state is unaffected. Ignored when use_fofe=True (FOFE
     # encodes the full variable-size set). 0 disables that channel entirely.
-    n_other_agent_obs_slots: int = 9
+    n_other_agent_obs_slots: int = 12
     n_radar_obs_slots: int = 8
     n_target_obs_slots: int = 6
 

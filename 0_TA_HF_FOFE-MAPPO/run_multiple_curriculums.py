@@ -197,7 +197,7 @@ def _make_curriculum(
         CurriculumSection(name="DR j2-4 k0.25", n_iters=1000, 
                           n_strikers=2, n_jammers=(2, 4),
                           radar_kill_probability=0.25, **world),
-        CurriculumSection(name="DR j2-4 k0.3", n_iters=2000, 
+        CurriculumSection(name="DR j2-4 k0.3", n_iters=4000, 
                           n_strikers=2, n_jammers=(2, 4),
                           radar_kill_probability=0.3, **world),
     ]
@@ -219,14 +219,26 @@ def _s2_continuation(
     )
     return [
         CurriculumSection(name="S2 DR j2-4 k0.05", n_iters=500,
+                          n_strikers=2, n_jammers=2,
+                          radar_kill_probability=0.05, **world),
+        CurriculumSection(name="S2 DR j2-4 k0.05", n_iters=1000,
                           n_strikers=2, n_jammers=(2, 4),
                           radar_kill_probability=0.05, **world),
-        CurriculumSection(name="S2 DR j2-4 k0.1", n_iters=500,
+        CurriculumSection(name="S2 DR j2-4 k0.1", n_iters=1000,
                           n_strikers=2, n_jammers=(2, 4),
                           radar_kill_probability=0.1, **world),
-        CurriculumSection(name="S2 DR j2-4 k0.25", n_iters=2000,
+        CurriculumSection(name="S2 DR j2-4 k0.15", n_iters=1000,
+                          n_strikers=2, n_jammers=(2, 4),
+                          radar_kill_probability=0.15, **world),                  
+        CurriculumSection(name="S2 DR j2-4 k0.25", n_iters=1000,
+                          n_strikers=2, n_jammers=(2, 4),
+                          radar_kill_probability=0.2, **world),
+        CurriculumSection(name="S2 DR j2-4 k0.25", n_iters=1000,
                           n_strikers=2, n_jammers=(2, 4),
                           radar_kill_probability=0.25, **world),
+        CurriculumSection(name="S2 DR j2-4 k0.25", n_iters=4000,
+                          n_strikers=2, n_jammers=(2, 4),
+                          radar_kill_probability=0.3, **world),
     ]
 
 
@@ -238,7 +250,7 @@ _S1 = dict(scenario="S2",
            n_known_radars=(4, 6), n_unknown_radars=0)
 _S2 = dict(scenario="S2",
            n_known_targets=(1, 2), n_unknown_targets=(1, 2),
-           n_known_radars=(2, 3), n_unknown_radars=(2, 3))
+           n_known_radars=(3, 4), n_unknown_radars=(1, 2))
 
 # S1's default radar_min_sep (0.5) cannot fit >2 radars in the S1 spawn band
 # [0.2,0.8]x[0.6,0.8] — layout pregeneration hard-fails (smoke-tested). 0.15 is
