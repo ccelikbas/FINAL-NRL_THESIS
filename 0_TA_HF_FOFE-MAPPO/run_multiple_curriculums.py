@@ -120,10 +120,10 @@ DATE_TAG = datetime.now().strftime("%Y%m%d")
 #  S2 warm-starts from the newest matching S1 checkpoint already on disk
 #  (runs/<model>_S1_*.pt); if none exists it trains from scratch (and warns).
 # ---------------------------------------------------------------------
-RUN_S1_COMPLETE = True
-RUN_S1_BASELINE = False
+RUN_S1_COMPLETE = False
+RUN_S1_BASELINE = True
 RUN_S2_COMPLETE = False
-RUN_S2_BASELINE = False
+RUN_S2_BASELINE = True
 
 # (model name, phase tag) → toggle. Names/tags must match the LINEAGES/Phases below.
 _RUN_FLAGS: Dict[Tuple[str, str], bool] = {
@@ -197,9 +197,18 @@ def _make_curriculum(
         CurriculumSection(name="DR j2-4 k0.25", n_iters=1000, 
                           n_strikers=2, n_jammers=(2, 4),
                           radar_kill_probability=0.25, **world),
-        CurriculumSection(name="DR j2-4 k0.3", n_iters=4000, 
+        CurriculumSection(name="DR j2-4 k0.25", n_iters=1000, 
                           n_strikers=2, n_jammers=(2, 4),
-                          radar_kill_probability=0.3, **world),
+                          radar_kill_probability=0.25, **world),
+        CurriculumSection(name="DR j2-4 k0.25", n_iters=1000, 
+                          n_strikers=2, n_jammers=(2, 4),
+                          radar_kill_probability=0.25, **world),
+        CurriculumSection(name="DR j2-4 k0.25", n_iters=1000, 
+                          n_strikers=2, n_jammers=(2, 4),
+                          radar_kill_probability=0.25, **world),
+        CurriculumSection(name="DR j2-4 k0.25", n_iters=1000, 
+                          n_strikers=2, n_jammers=(2, 4),
+                          radar_kill_probability=0.25, **world),
     ]
 
 
@@ -236,9 +245,15 @@ def _s2_continuation(
         CurriculumSection(name="S2 DR j2-4 k0.25", n_iters=1000,
                           n_strikers=2, n_jammers=(2, 4),
                           radar_kill_probability=0.25, **world),
-        CurriculumSection(name="S2 DR j2-4 k0.25", n_iters=4000,
+        CurriculumSection(name="S2 DR j2-4 k0.25", n_iters=1000,
                           n_strikers=2, n_jammers=(2, 4),
-                          radar_kill_probability=0.3, **world),
+                          radar_kill_probability=0.25, **world),
+        CurriculumSection(name="S2 DR j2-4 k0.25", n_iters=1000,
+                          n_strikers=2, n_jammers=(2, 4),
+                          radar_kill_probability=0.25, **world),
+        CurriculumSection(name="S2 DR j2-4 k0.25", n_iters=1000,
+                          n_strikers=2, n_jammers=(2, 4),
+                          radar_kill_probability=0.25, **world),
     ]
 
 
