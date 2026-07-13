@@ -53,8 +53,8 @@ from .nlr_style import NLR_PRIMARY, NLR_SECONDARY, NLR_ACCENT, NLR_DARKGRAY
 # ===================================================================
 
 # The two policies to compare (bare name → runs/, "runs/…/x.pt" → project dir, abs → as-is).
-POLICY_A = "runs/FINALV1/complete_S2_20260704/stage3of3_S2_DR_j2-4_k0_25_FINAL.pt"
-POLICY_B = "runs/FINALV1/baseline_S2_20260704/stage3of3_S2_DR_j2-4_k0_25_FINAL.pt"
+POLICY_A = "runs/FINALV2/complete_stage7of8_DR_j2-4_k0_25.pt"
+POLICY_B = "runs/FINALV2/baseline_stage11of11_DR_j2-4_k0_25_FINAL.pt"
 LABEL_A = "Complete"
 LABEL_B = "Baseline"
 
