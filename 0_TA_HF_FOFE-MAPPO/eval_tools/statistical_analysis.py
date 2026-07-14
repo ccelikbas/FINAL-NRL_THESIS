@@ -5,32 +5,29 @@ Two clearly separated workflows for a FROZEN FOFE-MAPPO policy's KPIs:
 
   ── PILOT  (--analysis_mode pilot) ── sample-size PLANNING ──────────────────
      Collect a large pool (e.g. 1000 episodes) and decide HOW MANY evaluation
-     episodes the final study needs. Everything here is a DIAGNOSTIC:
-       • coefficient-of-variation (CoV) stabilisation curves,
-       • precision curves: bootstrap CI half-width vs candidate sample size,
-       • one recommended common evaluation count  N_eval,
-       • EXPECTED sampling distributions of the KPI means at that proposed
-         N_eval (labelled as *expected* — NOT a final result).
-     Pilot means are the "pilot pooled mean" over the whole pool; pilot CIs are
-     planning estimates, never reported as final performance.
+     episodes the final study needs, using a PRECISION criterion: bootstrap the
+     mean at candidate sample sizes and pick the smallest n whose 95 % CI
+     half-width drops below a user-defined target (PRECISION_TARGETS). Outputs:
+       • the precision plot (CI half-width vs sample size) + console recommendation,
+       • the EXPECTED sampling distributions of the KPI means at the proposed
+         N_eval (histograms) — labelled *expected*, not a final result.
 
   ── FINAL  (--analysis_mode final --eval_episodes N) ── STATISTICAL INFERENCE ─
      Collect a NEW independent set of EXACTLY N evaluation episodes and report
-     the final KPI means and 95 % confidence intervals. All KPIs share ONE
-     common N (they come from the same episodes). The final mean is computed
-     from those N episodes; N is never chosen from the same final sample.
+     the final KPI means with 95 % bootstrap confidence intervals. All KPIs
+     share ONE common N (they come from the same episodes). Output: the
+     sampling distributions of the KPI means (histograms).
 
 ──────────────────────────────────────────────────────────────────────────────
-RAW DISTRIBUTIONS  vs  SAMPLING DISTRIBUTIONS OF THE MEAN
+WHAT THE HISTOGRAMS SHOW
 ──────────────────────────────────────────────────────────────────────────────
-Each evaluation episode is the experimental unit; one episode yields one value
-for every KPI. The raw episode-level distribution describes mission-to-mission
-variation (descriptive; it need not be normal). The SAMPLING distribution of the
-MEAN describes uncertainty in the estimated average performance; its standard
-deviation is the standard error of the mean (SEM = raw SD / √n). The bootstrap
-approximates it by resampling n episodes WITH replacement and recomputing the
-mean. The bootstrap SE is the SD of the bootstrap means (NOT divided by √B); the
-95 % CI is a percentile interval and does NOT require normality.
+The histogram dashboard shows the BOOTSTRAP SAMPLING DISTRIBUTION OF EACH KPI's
+MEAN. Its spread is the standard error of the mean (SEM = raw SD / √n); the
+bootstrap SE is the SD of those bootstrap means (NOT divided by √B). The 95 % CI
+is a percentile interval and does NOT require normality. Six KPIs are shown
+(completion is excluded):
+    Target-destruction rate, Survival rate, Failure-aware duration,
+    Duration among completed missions, Coalition fragmentation, Episode reward.
 
 ──────────────────────────────────────────────────────────────────────────────
 DURATION  (two metrics, failed missions never silently dropped)
@@ -39,28 +36,26 @@ DURATION  (two metrics, failed missions never silently dropped)
     the mission completed, else max_steps. Defined for every episode ⇒ same
     sample size as the other KPIs.
   • SECONDARY "Duration among completed missions" (duration_completed):
-    conditional on completion; reported WITH the completion rate so a policy
-    cannot look fast merely by completing only the easy missions. Its sample
-    size is the number of completed episodes, NOT the total.
+    conditional on completion; its sample size is the number of completed
+    episodes. Read it together with the completion rate — a policy can look fast
+    by completing only the easy missions.
 
 ──────────────────────────────────────────────────────────────────────────────
 SEEDS
 ──────────────────────────────────────────────────────────────────────────────
 --n_seeds are EVALUATION RNG seeds for one frozen checkpoint (extra independent
 episode pools) — NOT independently trained models. For a frozen policy the pools
-may be combined; episodes remain the sampling unit. The seed id is preserved in
-the raw CSV. Several INDEPENDENTLY TRAINED checkpoints need a separate
-HIERARCHICAL analysis:  episodes → mean per training seed → variation across
-training-seed means. Do NOT pool episodes across training seeds as if one policy.
+may be combined; episodes remain the sampling unit. Several INDEPENDENTLY
+TRAINED checkpoints need a separate HIERARCHICAL analysis:
+    episodes → mean per training seed → variation across training-seed means.
 
 ──────────────────────────────────────────────────────────────────────────────
 NORMALITY OF BOOTSTRAP MEANS  (diagnostic only, OFF by default)
 ──────────────────────────────────────────────────────────────────────────────
-A D'Agostino-Pearson test on B=10 000 bootstrap means is over-sensitive (B is
-not a count of independent experiments) and is NOT a valid rule for deciding
-whether the bootstrap CI holds. It is disabled unless
---run_bootstrap_normality_diagnostic is passed. Q-Q plots and skewness remain as
-visual shape diagnostics; the percentile CI is reported regardless.
+A D'Agostino-Pearson test on B bootstrap means is over-sensitive and is NOT a
+rule for deciding whether the bootstrap CI holds; it is only printed when
+--run_bootstrap_normality_diagnostic is passed. The percentile CI is reported
+regardless.
 
 ──────────────────────────────────────────────────────────────────────────────
 HOW TO USE
@@ -73,7 +68,7 @@ HOW TO USE
     .\.venv\Scripts\python.exe 0_TA_HF_FOFE-MAPPO\eval_tools\statistical_analysis.py ^
         --analysis_mode final --eval_episodes 100
 
-Edit SCENARIOS + PRECISION_TARGETS below. Outputs land in <script_dir>/stat_results.
+Edit SCENARIOS + PRECISION_TARGETS below. Figures land in <script_dir>/stat_results.
 """
 
 from __future__ import annotations
@@ -123,7 +118,7 @@ import matplotlib.pyplot as plt
 # NOTE: the "pynvml package is deprecated" FutureWarning at import time comes
 # from the PyTorch/CUDA dependency stack, not from this analysis. It is left
 # untouched on purpose (we do not suppress FutureWarnings globally).
-from scipy.stats import normaltest, probplot, skew
+from scipy.stats import normaltest, skew
 
 from .config import PPOConfig
 from .trainer import build_env
@@ -170,11 +165,6 @@ SEED_STRIDE    = 1_000_000
 FINAL_SEED_OFFSET = 7_000_000
 CHUNK_EPISODES = 250      # parallel envs per rollout (chunked to avoid OOM)
 
-# ── CoV stabilisation diagnostic (pilot) ─────────────────────────────
-N_ORDERINGS    = 64       # random shuffles → order-independent CoV curve
-STABILITY_TOL  = 0.05     # "stable" = CoV within ±5 % of its final value …
-STABILITY_MIN_N = 10      # … but ignore the very noisy n < this region
-
 # ── precision-based sample-size planning (pilot) ─────────────────────
 # User-defined PRACTICAL precision requirements: the target 95 % CI half-width
 # for each KPI's mean (same units as the KPI). Easy to edit.
@@ -183,7 +173,8 @@ PRECISION_TARGETS: Dict[str, float] = {
     "targets":         0.03,   # ±0.03 on the target-destruction fraction
     "survival":        0.03,   # ±0.03 on the survival fraction
     "fragmentation":   0.02,   # ±0.02 on coalition fragmentation
-    "duration_capped": 2.0,    # ±2 steps on failure-aware duration
+    "duration_capped": 3.0,    # ±3 steps on failure-aware duration
+    "duration_completed": 3.0, # ±3 steps on duration among completed missions
     "reward":          1.0,    # ±1.0 on episode reward
 }
 PRECISION_STEP      = 10      # candidate sample sizes 10, 20, 30, …, max_episodes
@@ -198,8 +189,7 @@ BOOTSTRAP_MAX_ELEMS = 20_000_000   # cap the [B, n] index matrix before chunking
 # ── normality diagnostic (OFF by default; not a decision rule) ───────
 NORMALITY_ALPHA = 0.05
 
-SAVE_RAW_DIST = True      # also save the descriptive raw episode-level histograms
-WILSON_Z      = 1.959963985   # z for a 95 % Wilson interval (completion, final mode)
+WILSON_Z = 1.959963985   # z for a 95 % Wilson interval (completion, final mode)
 
 
 # =====================================================================
@@ -220,26 +210,32 @@ RAW_STATS: List[Tuple[str, str]] = [
 class KpiSpec:
     key: str            # analysis key
     label: str          # display label
-    cov: bool           # part of the CoV stabilisation diagnostic (non-negative)
-    precision: bool     # part of the precision (CI half-width) planning
     conditional: bool = False   # conditional-on-completion (own sample size)
 
 
 #  Analysis KPIs used for means / bootstrap / plots. Duration is split into the
 #  failure-aware primary metric and the conditional secondary metric.
 ANALYSIS_KPIS: List[KpiSpec] = [
-    KpiSpec("completion",         "Completion rate",                   cov=True,  precision=True),
-    KpiSpec("targets",            "Target-destruction rate",           cov=True,  precision=True),
-    KpiSpec("survival",           "Survival rate",                     cov=True,  precision=True),
-    KpiSpec("fragmentation",      "Coalition fragmentation",           cov=True,  precision=True),
-    KpiSpec("duration_capped",    "Failure-aware duration",            cov=True,  precision=True),
-    KpiSpec("reward",             "Episode reward",                    cov=False, precision=True),
-    KpiSpec("duration_completed", "Duration among completed missions", cov=False, precision=False,
-            conditional=True),
+    KpiSpec("completion",         "Completion rate"),
+    KpiSpec("targets",            "Target-destruction rate"),
+    KpiSpec("survival",           "Survival rate"),
+    KpiSpec("fragmentation",      "Coalition fragmentation"),
+    KpiSpec("duration_capped",    "Failure-aware duration"),
+    KpiSpec("reward",             "Episode reward"),
+    KpiSpec("duration_completed", "Duration among completed missions", conditional=True),
 ]
-PRIMARY_KPIS   = [k for k in ANALYSIS_KPIS if not k.conditional]
-COV_KPIS       = [k for k in ANALYSIS_KPIS if k.cov]
-PRECISION_KPIS = [k for k in ANALYSIS_KPIS if k.precision]
+PRIMARY_KPIS = [k for k in ANALYSIS_KPIS if not k.conditional]
+KEY_TO_SPEC  = {k.key: k for k in ANALYSIS_KPIS}
+
+# The six KPIs shown in BOTH the histogram dashboards and the precision plot
+# (completion excluded; both duration metrics included) — same order/layout.
+HISTOGRAM_KEYS = ["targets", "survival", "duration_capped", "duration_completed",
+                  "fragmentation", "reward"]
+HISTOGRAM_SPECS = [KEY_TO_SPEC[k] for k in HISTOGRAM_KEYS]
+# Precision drives the recommended N_eval only via KPIs measured over ALL
+# episodes; the conditional duration is shown for reference (completed-mission
+# units) and does not size the total episode count.
+PRECISION_RECO_SPECS = [s for s in HISTOGRAM_SPECS if not s.conditional]
 
 SCENARIO_TOKEN_RE = re.compile(r"\bS([123])\b", re.IGNORECASE)
 
@@ -253,9 +249,6 @@ class RunOpts:
     n_seeds: int
     base_seed: int
     chunk: int
-    n_orderings: int
-    tol: float
-    min_n: int
     precision_step: int
     precision_bootstrap: int
     round_to: int
@@ -266,9 +259,10 @@ class RunOpts:
     scenario_name_check: str
     out_dir: Path
     stamp: str
-    write_csv: bool
-    write_bootstrap_csv: bool
-    save_raw_dist: bool
+
+    def scenario_index_hash(self) -> int:
+        """Reproducible per-scenario RNG offset (set on the opts during the loop)."""
+        return int(getattr(self, "_scenario_index", 0))
 
 
 # =====================================================================
@@ -413,87 +407,7 @@ def episode_counts(derived: Dict[str, np.ndarray]) -> Dict[str, int]:
 
 
 # =====================================================================
-#  STEP 2 — running coefficient of variation  c_v(n) = σ(n)/μ(n)  [UNCHANGED]
-# =====================================================================
-
-def _running_cov_shuffled(x: np.ndarray, n_orderings: int,
-                          rng: np.random.Generator) -> np.ndarray:
-    """E[c_v(n)] over `n_orderings` random orderings of the samples `x`."""
-    N = x.size
-    n = np.arange(1, N + 1, dtype=float)
-    denom = np.maximum(n - 1.0, 1.0)          # ddof=1; guard the n=1 prefix
-    acc = np.zeros(N)
-    cnt = np.zeros(N)
-    for _ in range(n_orderings):
-        xp = x[rng.permutation(N)]
-        csum = np.cumsum(xp)
-        csum2 = np.cumsum(xp * xp)
-        mean = csum / n
-        var = np.clip((csum2 - n * mean * mean) / denom, 0.0, None)  # FP guard
-        std = np.sqrt(var)
-        with np.errstate(divide="ignore", invalid="ignore"):
-            cov = std / mean
-        finite = np.isfinite(cov)
-        acc[finite] += cov[finite]
-        cnt[finite] += 1.0
-    with np.errstate(divide="ignore", invalid="ignore"):
-        out = acc / cnt
-    out[cnt == 0] = np.nan
-    return out
-
-
-def cov_curves(per_seed_derived: List[Dict[str, np.ndarray]], n_orderings: int,
-               rng: np.random.Generator) -> Dict[str, Dict[str, np.ndarray]]:
-    """Per CoV KPI: across-seed mean / min / max of the order-averaged CoV curve."""
-    curves: Dict[str, Dict[str, np.ndarray]] = {}
-    for spec in COV_KPIS:
-        seed_curves = []
-        for seed_arr in per_seed_derived:
-            x = seed_arr[spec.key]
-            x = x[np.isfinite(x)]          # drop episodes that never finished
-            if x.size >= 2:
-                seed_curves.append(_running_cov_shuffled(x, n_orderings, rng))
-        if not seed_curves:
-            continue
-        L = min(c.size for c in seed_curves)            # align lengths across seeds
-        stack = np.vstack([c[:L] for c in seed_curves])
-        curves[spec.key] = {
-            "n":    np.arange(1, L + 1),
-            "mean": np.nanmean(stack, axis=0),
-            "min":  np.nanmin(stack, axis=0),
-            "max":  np.nanmax(stack, axis=0),
-        }
-    return curves
-
-
-def _required_runs(n: np.ndarray, cov_mean: np.ndarray, tol: float,
-                   min_n: int) -> Optional[int]:
-    """Smallest n* (≥ min_n) past which |c_v(m) − c_v(∞)| ≤ tol·|c_v(∞)| for all m ≥ n*."""
-    N = cov_mean.size
-    if N == 0:
-        return None
-    finite = np.isfinite(cov_mean)
-    if not finite.any():
-        return None
-    final = cov_mean[np.where(finite)[0][-1]]
-    if final == 0:                          # constant KPI (σ=0): stable at once
-        return int(min(max(min_n, 1), N))
-    band = tol * abs(final)
-    dev = np.abs(cov_mean - final)
-    start = N
-    for i in range(N - 1, -1, -1):
-        if finite[i] and dev[i] <= band:
-            start = i
-        else:
-            break
-    if start >= N:
-        return None
-    idx = max(start, min_n - 1)
-    return int(n[idx]) if idx < N else None
-
-
-# =====================================================================
-#  STEP 3 — BOOTSTRAP of the sampling distribution of the mean
+#  STEP 2 — BOOTSTRAP of the sampling distribution of the mean
 # =====================================================================
 
 def bootstrap_sample_means(x: np.ndarray, sample_size: int, n_bootstrap: int,
@@ -653,9 +567,9 @@ def bootstrap_paired_diff_means(complete: np.ndarray, baseline: np.ndarray,
 
 def normality_tests_of_means(means_by_kpi: Dict[str, np.ndarray],
                              alpha: float) -> Dict[str, dict]:
-    """D'Agostino-Pearson on each KPI's bootstrap means (shape diagnostic only)."""
+    """D'Agostino-Pearson on each histogram KPI's bootstrap means (shape only)."""
     results: Dict[str, dict] = {}
-    for spec in ANALYSIS_KPIS:
+    for spec in HISTOGRAM_SPECS:
         x = np.asarray(means_by_kpi.get(spec.key, np.empty(0)), dtype=float)
         x = x[np.isfinite(x)]
         result = {"n": int(x.size), "statistic": None, "pvalue": None,
@@ -685,7 +599,7 @@ def _print_normality_of_means(results: Dict[str, dict]) -> None:
     print("         deviations from normality may produce small p-values. The "
           "bootstrap confidence", flush=True)
     print("         interval does not require normality.", flush=True)
-    for spec in ANALYSIS_KPIS:
+    for spec in HISTOGRAM_SPECS:
         r = results.get(spec.key, {})
         if r.get("is_normal") is None:
             print(f"           {spec.label:34s} not testable ({r.get('reason')})",
@@ -731,49 +645,27 @@ def resolve_display_scenario(section: CurriculumSection, mode: str) -> str:
 
 
 # =====================================================================
-#  PLOTS
+#  PLOTS  (only two figures: precision curves + means histograms)
 # =====================================================================
 
 def _safe_name(name: str) -> str:
     return "".join(c if c.isalnum() else "_" for c in name).strip("_")
 
 
-def plot_cov(curves: Dict[str, Dict[str, np.ndarray]], max_eps: int,
-             display: str, out_png: Path) -> None:
-    """Pilot diagnostic: c_v vs number of episodes, one line per CoV KPI."""
-    fig, ax = plt.subplots(figsize=(8.2, 5.2))
-    cap_vals = []
-    for spec, color in zip(COV_KPIS, NLR_CYCLE):
-        c = curves.get(spec.key)
-        if c is None:
-            continue
-        pm = c["n"] >= 2
-        nn = c["n"][pm]
-        ax.fill_between(nn, c["min"][pm], c["max"][pm], color=color, alpha=0.15, lw=0)
-        ax.plot(nn, c["mean"][pm], color=color, lw=1.9, label=spec.label)
-        stable = c["n"] >= max(STABILITY_MIN_N, 2)
-        if stable.any():
-            cap_vals.append(float(np.nanmax(c["max"][stable])))
-    ax.set_xlim(2, max_eps)
-    if cap_vals:
-        ax.set_ylim(0, max(cap_vals) * 1.15)
-    ax.set_xlabel("Number of evaluation episodes")
-    ax.set_ylabel(r"Coefficient of variation  $c_v = \sigma / \mu$")
-    ax.grid(True, alpha=0.4)
-    ax.legend(title="KPI (pilot diagnostic)", fontsize=8.5, framealpha=0.9)
-    ax.set_title(f"CoV stabilisation diagnostic — {display}", fontsize=11)
-    fig.tight_layout()
-    fig.savefig(out_png, dpi=150)
-    plt.close(fig)
-
-
 def plot_precision_curves(candidate_ns: np.ndarray,
                           hw_by_kpi: Dict[str, np.ndarray],
                           reqs: Dict[str, Optional[int]],
                           recommended: Optional[int],
-                          display: str, out_png: Path) -> None:
-    """Pilot diagnostic: CI half-width vs candidate sample size, one panel/KPI."""
-    specs = PRECISION_KPIS
+                          recommended_completed: Optional[int],
+                          out_png: Path) -> None:
+    """Pilot planning: CI half-width vs candidate sample size, one panel per KPI.
+
+    Panels match the histogram dashboard exactly (same six KPIs, same order:
+    completion excluded, both duration metrics included). The conditional
+    duration panel is sized in COMPLETED-mission units, so its recommended line
+    is the EXPECTED completed count at the recommended N_eval.
+    """
+    specs = HISTOGRAM_SPECS
     ncol = 3
     nrow = int(np.ceil(len(specs) / ncol))
     fig, axes = plt.subplots(nrow, ncol, figsize=(4.9 * ncol, 3.6 * nrow))
@@ -788,36 +680,33 @@ def plot_precision_curves(candidate_ns: np.ndarray,
             continue
         ax.plot(candidate_ns, hw, color=color, lw=1.9, marker="o", ms=2.5)
         if thr is not None:
-            ax.axhline(thr, color=NLR_ACCENT, ls="--", lw=1.3,
-                       label=f"target ±{thr:g}")
+            ax.axhline(thr, color=NLR_ACCENT, ls="--", lw=1.3, label=f"target ±{thr:g}")
         req = reqs.get(spec.key)
         if req is not None:
-            ax.axvline(req, color=NLR_REFERENCE, ls=":", lw=1.3,
-                       label=f"n*={req}")
-        if recommended is not None:
-            ax.axvline(recommended, color=NLR_SECONDARY, ls="-", lw=1.1, alpha=0.8)
+            ax.axvline(req, color=NLR_REFERENCE, ls=":", lw=1.3, label=f"n*={req}")
+        rec_line = recommended_completed if spec.conditional else recommended
+        if rec_line is not None:
+            ax.axvline(rec_line, color=NLR_SECONDARY, ls="-", lw=1.1, alpha=0.8,
+                       label=f"N_eval={rec_line}")
         ax.set_title(spec.label, fontsize=9.5)
-        ax.set_xlabel("evaluation episodes n")
+        ax.set_xlabel("completed missions n" if spec.conditional
+                      else "evaluation episodes n")
         ax.set_ylabel("95% CI half-width")
         ax.grid(True, alpha=0.3)
         ax.legend(fontsize=7.5, framealpha=0.9)
     for ax in axes[len(specs):]:
         ax.set_visible(False)
-    fig.suptitle("Precision planning: CI half-width vs sample size  "
-                 f"(blue line = recommended N_eval={recommended}) — {display}",
-                 fontsize=12)
-    fig.tight_layout(rect=(0, 0, 1, 0.94))
+    fig.tight_layout()
     fig.savefig(out_png, dpi=150)
     plt.close(fig)
 
 
-def plot_mean_sampling_distributions(display: str, summaries: Dict[str, dict],
-                                     n_bootstrap: int, mode: str, neval: int,
+def plot_mean_sampling_distributions(summaries: Dict[str, dict], mode: str,
                                      out_png: Path) -> None:
-    """Histograms of the bootstrap sample means (per KPI)."""
+    """Histograms of the bootstrap sample means for the six histogram KPIs."""
     pilot = (mode == "pilot")
     mean_label = "pilot pooled mean" if pilot else "final sample mean"
-    specs = ANALYSIS_KPIS
+    specs = HISTOGRAM_SPECS
     ncol = 3
     nrow = int(np.ceil(len(specs) / ncol))
     fig, axes = plt.subplots(nrow, ncol, figsize=(4.9 * ncol, 3.9 * nrow))
@@ -850,177 +739,9 @@ def plot_mean_sampling_distributions(display: str, summaries: Dict[str, dict],
             ax.legend(fontsize=7.0, framealpha=0.9)
     for ax in axes[len(specs):]:
         ax.set_visible(False)
-    if pilot:
-        sup = ("Expected sampling distributions of KPI means\n"
-               f"Pilot planning analysis, proposed N_eval = {neval}, "
-               f"B = {n_bootstrap:,} — {display}")
-    else:
-        sup = ("Sampling distributions of KPI means\n"
-               f"Final statistical inference, N_eval = {neval}, "
-               f"B = {n_bootstrap:,} bootstrap resamples — {display}")
-    fig.suptitle(sup, fontsize=12)
-    fig.tight_layout(rect=(0, 0, 1, 0.92))
+    fig.tight_layout()
     fig.savefig(out_png, dpi=150)
     plt.close(fig)
-
-
-def plot_qq_means(display: str, summaries: Dict[str, dict], out_png: Path) -> None:
-    """Q-Q dashboard of each KPI's bootstrap means vs a normal reference."""
-    specs = ANALYSIS_KPIS
-    ncol = 3
-    nrow = int(np.ceil(len(specs) / ncol))
-    fig, axes = plt.subplots(nrow, ncol, figsize=(4.7 * ncol, 3.7 * nrow))
-    axes = np.atleast_1d(axes).ravel()
-    for idx, spec in enumerate(specs):
-        ax = axes[idx]
-        s = summaries.get(spec.key)
-        if s is None or s["means"].size < 3 or np.ptp(s["means"]) == 0:
-            ax.set_visible(False)
-            continue
-        color = NLR_CYCLE[idx % len(NLR_CYCLE)]
-        (osm, osr), (slope, intercept, r) = probplot(s["means"], dist="norm")
-        ax.scatter(osm, osr, s=5, color=color, alpha=0.4, edgecolors="none")
-        ax.plot(osm, slope * osm + intercept, color=NLR_REFERENCE, lw=1.3)
-        ax.set_title(f"{spec.label}   (R²={r * r:.4f}, skew={s['skew']:.2g})",
-                     fontsize=8.5)
-        ax.set_xlabel("theoretical quantiles")
-        ax.set_ylabel("ordered sample means")
-        ax.grid(True, alpha=0.3)
-    for ax in axes[len(specs):]:
-        ax.set_visible(False)
-    fig.suptitle("Q-Q plots of the bootstrap sampling distributions of the mean\n"
-                 f"(visual shape diagnostic) — {display}", fontsize=12)
-    fig.tight_layout(rect=(0, 0, 1, 0.93))
-    fig.savefig(out_png, dpi=150)
-    plt.close(fig)
-
-
-def plot_raw_distributions(display: str, derived: Dict[str, np.ndarray],
-                           n_runs: int, out_png: Path) -> None:
-    """DESCRIPTIVE dashboard of raw episode-level KPI histograms."""
-    specs = ANALYSIS_KPIS
-    ncol = 3
-    nrow = int(np.ceil(len(specs) / ncol))
-    fig, axes = plt.subplots(nrow, ncol, figsize=(4.7 * ncol, 3.5 * nrow))
-    axes = np.atleast_1d(axes).ravel()
-    for idx, spec in enumerate(specs):
-        ax = axes[idx]
-        color = NLR_CYCLE[idx % len(NLR_CYCLE)]
-        x = derived[spec.key]
-        x = x[np.isfinite(x)]
-        if x.size == 0:
-            ax.set_visible(False)
-            continue
-        mu = float(x.mean())
-        sd = float(x.std(ddof=1)) if x.size > 1 else 0.0
-        if spec.key == "completion":                  # binary KPI → two bars
-            ax.hist(x, bins=[-0.5, 0.5, 1.5], density=True, color=color,
-                    alpha=0.85, edgecolor="white", linewidth=0.5, rwidth=0.9)
-            ax.set_xticks([0, 1])
-            ax.set_xticklabels(["fail", "complete"])
-        else:
-            ax.hist(x, bins=30, density=True, color=color, alpha=0.85,
-                    edgecolor="white", linewidth=0.3)
-        ax.axvline(mu, color=NLR_REFERENCE, ls="--", lw=1.2)
-        if spec.key != "reward" and mu != 0.0:
-            stat = rf"$\mu$={mu:.3g}   $\sigma$={sd:.3g}   $c_v$={sd / abs(mu):.3g}"
-        else:
-            stat = rf"$\mu$={mu:.3g}   $\sigma$={sd:.3g}"
-        ax.set_title(f"{spec.label}\n{stat}", fontsize=9)
-        ax.set_ylabel("density")
-        ax.grid(True, alpha=0.3)
-    for ax in axes[len(specs):]:
-        ax.set_visible(False)
-    fig.suptitle(f"Raw episode-level KPI distributions — {display}   "
-                 f"(descriptive; {n_runs} episodes)", fontsize=12)
-    fig.tight_layout(rect=(0, 0, 1, 0.95))
-    fig.savefig(out_png, dpi=150)
-    plt.close(fig)
-
-
-# =====================================================================
-#  CSV writers
-# =====================================================================
-
-def _write_samples_csv(per_seed: List[Dict[str, np.ndarray]],
-                       out_path: Path) -> None:
-    """Raw per-episode stats, one row per (evaluation RNG seed, episode)."""
-    import csv
-    keys = [k for k, _ in RAW_STATS]
-    with out_path.open("w", newline="") as fh:
-        w = csv.writer(fh)
-        w.writerow(["eval_rng_seed", "episode"] + keys)
-        for s_idx, seed_arr in enumerate(per_seed):
-            n = max((seed_arr[k].size for k in keys), default=0)
-            for i in range(n):
-                w.writerow([s_idx, i] + [
-                    (seed_arr[k][i] if i < seed_arr[k].size else "") for k in keys])
-
-
-def _write_bootstrap_means_csv(scenario: str, summaries: Dict[str, dict],
-                               out_path: Path) -> None:
-    import csv
-    with out_path.open("w", newline="") as fh:
-        w = csv.writer(fh)
-        w.writerow(["scenario", "kpi", "sample_size",
-                    "bootstrap_iteration", "bootstrap_mean"])
-        for spec in ANALYSIS_KPIS:
-            s = summaries.get(spec.key)
-            if s is None:
-                continue
-            n = s["sample_size"]
-            for b, m in enumerate(s["means"]):
-                w.writerow([scenario, spec.key, n, b, float(m)])
-
-
-def _write_summary_csv(scenario: str, policy: str, mode: str, total_eval: int,
-                       summaries: Dict[str, dict], counts: Dict[str, int],
-                       out_path: Path) -> None:
-    """Compact per-KPI summary of the sampling distribution of the mean."""
-    import csv
-    with out_path.open("w", newline="") as fh:
-        w = csv.writer(fh)
-        w.writerow(["scenario", "policy", "analysis_mode", "total_eval_episodes",
-                    "kpi", "n_available", "bootstrap_sample_size", "mean",
-                    "raw_sd", "theoretical_sem", "bootstrap_se",
-                    "ci_2_5", "ci_97_5", "ci_half_width",
-                    "completion_count", "failure_count",
-                    "n_completed", "conditional_on_completion"])
-        for spec in ANALYSIS_KPIS:
-            s = summaries.get(spec.key)
-            if s is None:
-                continue
-            w.writerow([
-                scenario, policy, mode, total_eval, spec.key,
-                s["n_available"], s["sample_size"], s["mean"], s["raw_sd"],
-                s["theoretical_sem"], s["bootstrap_se"], s["ci_lo"], s["ci_hi"],
-                s["ci_half_width"], counts["completed"], counts["failed"],
-                (counts["completed"] if spec.conditional else ""),
-                (True if spec.conditional else False),
-            ])
-
-
-def _write_recommendation_csv(scenario: str, cov_reqs: Dict[str, Optional[int]],
-                              prec_reqs: Dict[str, Optional[int]],
-                              cov_common: Optional[int],
-                              prec_common: Optional[int],
-                              recommended: Optional[int], out_path: Path) -> None:
-    import csv
-    with out_path.open("w", newline="") as fh:
-        w = csv.writer(fh)
-        w.writerow(["scenario", "kpi", "cov_required_n", "precision_threshold",
-                    "precision_required_n", "cov_common_n", "precision_common_n",
-                    "recommended_n_eval"])
-        for spec in ANALYSIS_KPIS:
-            if not (spec.cov or spec.precision):
-                continue
-            w.writerow([
-                scenario, spec.key, cov_reqs.get(spec.key, ""),
-                PRECISION_TARGETS.get(spec.key, ""), prec_reqs.get(spec.key, ""),
-                cov_common if cov_common is not None else "",
-                prec_common if prec_common is not None else "",
-                recommended if recommended is not None else "",
-            ])
 
 
 # =====================================================================
@@ -1042,24 +763,13 @@ def _run_pilot_scenario(section, display, ckpt, ckpt_path, env_cfg, policy,
     pooled = {k: np.concatenate([d[k] for d in per_seed_der]) for k in per_seed_der[0]}
     counts = episode_counts(pooled)
 
-    shuffle_rng = np.random.default_rng(opts.base_seed)
     boot_rng = np.random.default_rng(opts.bootstrap_seed + opts.scenario_index_hash())
 
-    # ── CoV diagnostic ──
-    curves = cov_curves(per_seed_der, opts.n_orderings, shuffle_rng)
-    cov_reqs = {spec.key: (_required_runs(curves[spec.key]["n"],
-                                          curves[spec.key]["mean"],
-                                          opts.tol, opts.min_n)
-                           if spec.key in curves else None)
-                for spec in COV_KPIS}
-    cov_common = max([r for r in cov_reqs.values() if r is not None], default=None)
-
-    print("\n  CoV diagnostic:", flush=True)
-    for spec in COV_KPIS:
-        r = cov_reqs.get(spec.key)
-        print(f"      {spec.label:34s} n*={str(r) if r else 'not reached'}", flush=True)
-
     # ── precision (CI half-width) planning ──
+    # Same six KPIs as the histogram dashboard (completion excluded; both
+    # duration metrics). The conditional duration is measured in COMPLETED-
+    # mission units, so it is reported for reference and does not size N_eval.
+    p_complete = float(np.nanmean(pooled["completion"])) if pooled["completion"].size else 0.0
     step = max(2, opts.precision_step)
     candidate_ns = np.arange(step, opts.max_episodes + 1, step, dtype=int)
     if candidate_ns.size == 0:
@@ -1067,38 +777,39 @@ def _run_pilot_scenario(section, display, ckpt, ckpt_path, env_cfg, policy,
     hw_by_kpi: Dict[str, np.ndarray] = {}
     prec_reqs: Dict[str, Optional[int]] = {}
     print("\n  Precision requirement (target 95% CI half-width):", flush=True)
-    for spec in PRECISION_KPIS:
-        pool = pooled[spec.key]
-        hw, _se = precision_curve(pool, candidate_ns, opts.precision_bootstrap, boot_rng)
+    for spec in HISTOGRAM_SPECS:
+        hw, _se = precision_curve(pooled[spec.key], candidate_ns,
+                                  opts.precision_bootstrap, boot_rng)
         thr = PRECISION_TARGETS.get(spec.key, float("inf"))
         req = precision_required_n(candidate_ns, hw, thr)
         hw_by_kpi[spec.key] = hw
         prec_reqs[spec.key] = req
-        print(f"      {spec.label:34s} n*={str(req) if req else 'not reached'}"
-              f"   (target ±{thr:g})", flush=True)
-    prec_common = max([r for r in prec_reqs.values() if r is not None], default=None)
+        unit = "completed missions" if spec.conditional else "episodes"
+        print(f"      {spec.label:34s} n*={str(req) if req else 'not reached':12s}"
+              f"  (target ±{thr:g}, {unit})", flush=True)
 
-    raw_reco = max([n for n in (cov_common, prec_common) if n is not None],
-                   default=opts.max_episodes)
+    # Only KPIs measured over ALL episodes size the total episode count.
+    prec_common = max([prec_reqs[s.key] for s in PRECISION_RECO_SPECS
+                       if prec_reqs.get(s.key) is not None], default=None)
+
+    raw_reco = prec_common if prec_common is not None else opts.max_episodes
     recommended = _round_up(raw_reco, opts.round_to)
     proposed = int(opts.eval_episodes) if opts.eval_episodes else int(recommended)
+    recommended_completed = max(2, int(round(p_complete * recommended)))
 
-    print(f"\n  CoV-based common count: "
-          f"{cov_common if cov_common is not None else 'not reached'}", flush=True)
-    print(f"  Precision-based common count: "
+    print(f"\n  Precision-based common count: "
           f"{prec_common if prec_common is not None else 'not reached'}", flush=True)
-    print(f"  CoV diagnostic suggests at least "
-          f"{cov_common if cov_common else '?'} episodes.", flush=True)
     print(f"  Precision analysis suggests at least "
           f"{prec_common if prec_common else '?'} episodes.", flush=True)
     print(f"  Recommended common final evaluation count: {recommended} episodes"
-          f"  (round-up of max to nearest {opts.round_to})", flush=True)
+          f"  (round-up to nearest {opts.round_to})", flush=True)
+    print(f"  (Duration among completed missions is shown for reference; its n is "
+          f"in completed-mission units and does not size N_eval.)", flush=True)
     if opts.eval_episodes:
         print(f"  (user override via --eval_episodes: using proposed N_eval="
               f"{proposed} for the expected distributions)", flush=True)
 
-    # ── EXPECTED sampling distributions at the proposed N_eval ──
-    p_complete = float(np.nanmean(pooled["completion"])) if pooled["completion"].size else 0.0
+    # ── EXPECTED sampling distributions of the KPI means at the proposed N_eval ──
     expected_completed = max(2, int(round(p_complete * proposed)))
     print(f"\n  Expected sampling distributions at N_eval={proposed}"
           f"  (B={opts.n_bootstrap:,} bootstrap resamples):", flush=True)
@@ -1109,7 +820,7 @@ def _run_pilot_scenario(section, display, ckpt, ckpt_path, env_cfg, policy,
           f"N_eval): {expected_completed}", flush=True)
 
     summaries: Dict[str, dict] = {}
-    for spec in ANALYSIS_KPIS:
+    for spec in HISTOGRAM_SPECS:
         size = expected_completed if spec.conditional else proposed
         s = summarise_mean_distribution(spec, pooled[spec.key], size,
                                         opts.n_bootstrap, boot_rng)
@@ -1127,50 +838,21 @@ def _run_pilot_scenario(section, display, ckpt, ckpt_path, env_cfg, policy,
         print(f"          expected 95% CI = [{s['ci_lo']:.4g}, {s['ci_hi']:.4g}]  "
               f"(half-width {s['ci_half_width']:.3g})", flush=True)
 
-    # ── figures ──
+    # ── figures (precision plot + means histograms) ──
     tag = _safe_name(display)
-    cov_png = opts.out_dir / f"pilot_cov_{tag}_{opts.stamp}.png"
-    plot_cov(curves, opts.max_episodes, display, cov_png)
-    print(f"\n      saved CoV diagnostic     : {cov_png}", flush=True)
-
     prec_png = opts.out_dir / f"pilot_precision_{tag}_{opts.stamp}.png"
-    plot_precision_curves(candidate_ns, hw_by_kpi, prec_reqs, recommended, display, prec_png)
-    print(f"      saved precision curves   : {prec_png}", flush=True)
+    plot_precision_curves(candidate_ns, hw_by_kpi, prec_reqs, recommended,
+                          recommended_completed, prec_png)
+    print(f"\n      saved precision curves   : {prec_png}", flush=True)
 
     mean_png = opts.out_dir / f"pilot_expected_means_{tag}_{opts.stamp}.png"
-    plot_mean_sampling_distributions(display, summaries, opts.n_bootstrap,
-                                     "pilot", proposed, mean_png)
+    plot_mean_sampling_distributions(summaries, "pilot", mean_png)
     print(f"      saved expected means     : {mean_png}", flush=True)
-
-    qq_png = opts.out_dir / f"pilot_qq_{tag}_{opts.stamp}.png"
-    plot_qq_means(display, summaries, qq_png)
-    print(f"      saved Q-Q of means       : {qq_png}", flush=True)
-
-    if opts.save_raw_dist:
-        raw_png = opts.out_dir / f"pilot_raw_dist_{tag}_{opts.stamp}.png"
-        plot_raw_distributions(display, pooled, counts["total"], raw_png)
-        print(f"      saved raw distributions  : {raw_png}", flush=True)
 
     if opts.run_normality:
         norm = normality_tests_of_means({k: summaries[k]["means"] for k in summaries},
                                         opts.normality_alpha)
         _print_normality_of_means(norm)
-
-    # ── CSVs ──
-    if opts.write_csv:
-        samp_csv = opts.out_dir / f"pilot_samples_{tag}_{opts.stamp}.csv"
-        _write_samples_csv(per_seed_raw, samp_csv)
-        print(f"      saved raw samples CSV    : {samp_csv}", flush=True)
-
-        reco_csv = opts.out_dir / f"pilot_recommendation_{tag}_{opts.stamp}.csv"
-        _write_recommendation_csv(display, cov_reqs, prec_reqs, cov_common,
-                                  prec_common, recommended, reco_csv)
-        print(f"      saved recommendation CSV : {reco_csv}", flush=True)
-
-        if opts.write_bootstrap_csv:
-            boot_csv = opts.out_dir / f"pilot_bootstrap_means_{tag}_{opts.stamp}.csv"
-            _write_bootstrap_means_csv(display, summaries, boot_csv)
-            print(f"      saved bootstrap CSV      : {boot_csv}", flush=True)
 
 
 # =====================================================================
@@ -1251,42 +933,16 @@ def _run_final_scenario(section, display, ckpt, ckpt_path, env_cfg, policy,
     print("      (report the completion rate alongside this metric: a policy can "
           "look fast by\n       completing only the easy missions.)", flush=True)
 
-    # ── figures ──
+    # ── figure (means histograms, six KPIs) ──
     tag = _safe_name(display)
     mean_png = opts.out_dir / f"final_means_{tag}_{opts.stamp}.png"
-    plot_mean_sampling_distributions(display, summaries, opts.n_bootstrap,
-                                     "final", N, mean_png)
+    plot_mean_sampling_distributions(summaries, "final", mean_png)
     print(f"\n      saved final means        : {mean_png}", flush=True)
-
-    qq_png = opts.out_dir / f"final_qq_{tag}_{opts.stamp}.png"
-    plot_qq_means(display, summaries, qq_png)
-    print(f"      saved Q-Q of means       : {qq_png}", flush=True)
-
-    if opts.save_raw_dist:
-        raw_png = opts.out_dir / f"final_raw_dist_{tag}_{opts.stamp}.png"
-        plot_raw_distributions(display, derived, counts["total"], raw_png)
-        print(f"      saved raw distributions  : {raw_png}", flush=True)
 
     if opts.run_normality:
         norm = normality_tests_of_means({k: summaries[k]["means"] for k in summaries},
                                         opts.normality_alpha)
         _print_normality_of_means(norm)
-
-    # ── CSVs ──
-    if opts.write_csv:
-        samp_csv = opts.out_dir / f"final_samples_{tag}_{opts.stamp}.csv"
-        _write_samples_csv(per_seed_raw, samp_csv)
-        print(f"      saved raw samples CSV    : {samp_csv}", flush=True)
-
-        summ_csv = opts.out_dir / f"final_summary_{tag}_{opts.stamp}.csv"
-        _write_summary_csv(display, ckpt_path.name, "final", N, summaries, counts,
-                           summ_csv)
-        print(f"      saved final summary CSV  : {summ_csv}", flush=True)
-
-        if opts.write_bootstrap_csv:
-            boot_csv = opts.out_dir / f"final_bootstrap_means_{tag}_{opts.stamp}.csv"
-            _write_bootstrap_means_csv(display, summaries, boot_csv)
-            print(f"      saved bootstrap CSV      : {boot_csv}", flush=True)
 
 
 # =====================================================================
@@ -1336,18 +992,10 @@ def analyse_scenarios(scenarios: List[CurriculumSection],
             torch.cuda.empty_cache()
 
 
-# small helper attached to RunOpts for a reproducible per-scenario RNG offset
-def _scenario_index_hash(self: RunOpts) -> int:
-    return int(getattr(self, "_scenario_index", 0))
-
-
-RunOpts.scenario_index_hash = _scenario_index_hash   # type: ignore[attr-defined]
-
-
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="Pilot sample-size PLANNING and FINAL statistical INFERENCE "
-        "for the SCENARIOS defined at the top of this file.")
+        description="Pilot sample-size PLANNING (precision-based) and FINAL "
+        "statistical INFERENCE for the SCENARIOS defined at the top of this file.")
     p.add_argument("--analysis_mode", choices=["pilot", "final"], default="pilot",
                    help="'pilot' plans the sample size; 'final' runs the study "
                         "at a fixed --eval_episodes (default: pilot).")
@@ -1365,12 +1013,6 @@ def _build_parser() -> argparse.ArgumentParser:
                    help=f"Evaluation RNG base seed (default: {BASE_SEED}).")
     p.add_argument("--chunk", type=int, default=CHUNK_EPISODES,
                    help=f"Parallel envs per rollout (default: {CHUNK_EPISODES}).")
-    p.add_argument("--n_orderings", type=int, default=N_ORDERINGS,
-                   help=f"Shuffles for order-independent CoV (default: {N_ORDERINGS}).")
-    p.add_argument("--tol", type=float, default=STABILITY_TOL,
-                   help=f"Relative stability band around final CoV (default: {STABILITY_TOL}).")
-    p.add_argument("--min_n", type=int, default=STABILITY_MIN_N,
-                   help=f"Ignore n below this when detecting CoV n* (default: {STABILITY_MIN_N}).")
     p.add_argument("--precision_step", type=int, default=PRECISION_STEP,
                    help=f"Candidate sample-size step for precision curves (default: {PRECISION_STEP}).")
     p.add_argument("--precision_bootstrap", type=int, default=PRECISION_BOOTSTRAP,
@@ -1394,9 +1036,6 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Torch device, e.g. 'cpu' or 'cuda:0'. Default: auto.")
     p.add_argument("--out_dir", type=str, default=None,
                    help="Output dir (default: <script_dir>/stat_results).")
-    p.add_argument("--no_csv", action="store_true", help="Do not write any CSV.")
-    p.add_argument("--no_bootstrap_csv", action="store_true",
-                   help="Skip the (large) per-iteration bootstrap-means CSV.")
     return p
 
 
@@ -1428,16 +1067,13 @@ def main() -> None:
     opts = RunOpts(
         analysis_mode=args.analysis_mode, max_episodes=args.max_episodes,
         eval_episodes=args.eval_episodes, n_seeds=args.n_seeds, base_seed=args.seed,
-        chunk=args.chunk, n_orderings=args.n_orderings, tol=args.tol,
-        min_n=args.min_n, precision_step=args.precision_step,
+        chunk=args.chunk, precision_step=args.precision_step,
         precision_bootstrap=args.precision_bootstrap, round_to=args.round_to,
         n_bootstrap=args.n_bootstrap, bootstrap_seed=args.bootstrap_seed,
         normality_alpha=args.normality_alpha,
         run_normality=args.run_bootstrap_normality_diagnostic,
         scenario_name_check=args.scenario_name_check,
         out_dir=out_dir, stamp=datetime.now().strftime("%Y%m%d_%H%M%S"),
-        write_csv=not args.no_csv, write_bootstrap_csv=not args.no_bootstrap_csv,
-        save_raw_dist=SAVE_RAW_DIST,
     )
 
     print("─" * 70)
@@ -1449,7 +1085,7 @@ def main() -> None:
               f"evaluation RNG seed(s)")
     else:
         print(f"  Final N_eval  : {args.eval_episodes} episodes (1 evaluation RNG seed)")
-    print(f"  Primary KPIs  : " + ", ".join(k.label for k in PRIMARY_KPIS))
+    print(f"  Histogram KPIs: " + ", ".join(k.label for k in HISTOGRAM_SPECS))
     print(f"  Bootstrap     : B={args.n_bootstrap}, seed={args.bootstrap_seed}")
     print(f"  Normality     : "
           + ("ON (optional diagnostic)" if args.run_bootstrap_normality_diagnostic

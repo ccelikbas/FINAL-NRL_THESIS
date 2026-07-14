@@ -12,10 +12,11 @@ In the eval-rates plot the COLOUR encodes the metric and the LINE STYLE encodes 
 policy (solid = policy A, dashed = policy B), so the two policies sit on one axis
 without eight indistinguishable colours. NLR house colours throughout.
 
-Either policy can optionally STITCH a CONTINUATION checkpoint (for resumed
-training): the base logs up to their last iteration, then the continuation's logs
-from that point onward, on one continuous x-axis. See POLICY_A_CONT / POLICY_B_CONT
-(or --cont-a / --cont-b).
+Either policy can optionally STITCH one or more CONTINUATION checkpoints (for
+resumed training), given as an ORDERED list: the base logs, then each
+continuation's logs appended in turn, on one continuous x-axis (a hard section
+cut marks every join). See POLICY_A_CONT / POLICY_B_CONT (or --cont-a / --cont-b,
+which each accept several paths in the order to stitch them).
 
 Lines are smoothed with a per-section running average (curriculum transitions stay
 sharp); see --smooth. Outputs use stable names (overwritten each run).
@@ -63,12 +64,13 @@ POLICY_B = "runs/FINALV2/baseline_stage11of11_DR_j2-4_k0_25_FINAL.pt"
 LABEL_A = "Complete"
 LABEL_B = "Baseline"
 
-# Optional CONTINUATION checkpoint per policy (for RESUMED training). If set, that
-# policy's curve is STITCHED: the base logs up to their last iteration, then the
-# continuation's logs from that point onward (x-axis continues; a hard section cut
-# marks the join). None = no continuation.          [CLI: --cont-a / --cont-b]
-POLICY_A_CONT: str | None = None
-POLICY_B_CONT: str | None = "runs/FINALV2/FINAL_baseline_s1_cont.pt"
+# Optional CONTINUATION checkpoints per policy (for RESUMED training). Give an
+# ORDERED list — each is stitched on AFTER the previous, so a chain of resumed
+# runs joins into one continuous x-axis (a hard section cut marks every join).
+# Order matters: [first_resume.pt, second_resume.pt, ...]. Use [] for none; a
+# single "path.pt" string is also accepted.        [CLI: --cont-a / --cont-b]
+POLICY_A_CONT: list[str] = []
+POLICY_B_CONT: list[str] = ["runs/FINALV2/FINAL_baseline_s1_cont.pt", "runs/FINALV2/Final_Baseline_Cont_2.pt"]
 
 # Running-average window (datapoints); resets at each curriculum section so
 # transitions stay sharp. 1 = raw.                        [CLI: --smooth]
@@ -140,18 +142,39 @@ def _stitch_logs(base_logs, base_bounds, cont_logs, cont_bounds):
     return stitched, merged_bounds
 
 
-def _maybe_stitch(base_logs, base_bounds, cont_path_str, who):
-    """If a continuation checkpoint is configured, load and stitch it on."""
-    if not cont_path_str:
+def _as_cont_list(spec) -> list[str]:
+    """Normalise a continuation spec (None / str / list[str]) to an ordered list."""
+    if spec is None:
+        return []
+    if isinstance(spec, str):
+        return [spec]
+    return [s for s in spec if s]
+
+
+def _maybe_stitch(base_logs, base_bounds, cont_spec, who):
+    """Stitch an ORDERED chain of continuation checkpoints after the base run.
+
+    Each continuation is appended onto the running (already-stitched) result, so
+    a sequence of resumed runs joins into one continuous x-axis in the order given.
+    Accepts None, a single path string, or a list of path strings.
+    """
+    cont_paths = _as_cont_list(cont_spec)
+    if not cont_paths:
         return base_logs, base_bounds
-    cont_path = _resolve_policy_path(cont_path_str, None)
-    if cont_path is None or not cont_path.exists():
-        raise FileNotFoundError(f"continuation checkpoint not found: {cont_path}")
-    cont_logs, cont_bounds = _load_logs(cont_path)
-    stitched, bounds = _stitch_logs(base_logs, base_bounds, cont_logs, cont_bounds)
-    print(f"  {who}: stitched +{cont_path.name} "
-          f"(base {_series_len(base_logs)} iters → +{_series_len(cont_logs)} continuation)")
-    return stitched, bounds
+    logs, bounds = base_logs, base_bounds
+    n = len(cont_paths)
+    for i, cont_path_str in enumerate(cont_paths, 1):
+        cont_path = _resolve_policy_path(cont_path_str, None)
+        if cont_path is None or not cont_path.exists():
+            raise FileNotFoundError(f"continuation checkpoint not found: {cont_path}")
+        cont_logs, cont_bounds = _load_logs(cont_path)
+        prev_len = _series_len(logs)
+        logs, bounds = _stitch_logs(logs, bounds, cont_logs, cont_bounds)
+        print(f"  {who}: stitched +{cont_path.name}  "
+              f"(step {i}/{n}: {prev_len} iters → +{_series_len(cont_logs)} continuation)")
+    if n > 1:
+        print(f"  {who}: total after {n} continuations = {_series_len(logs)} iters")
+    return logs, bounds
 
 
 def plot_reward(policies, out, smooth, dpi=DPI):
@@ -233,10 +256,11 @@ def main():
     ap.add_argument("policy_b", nargs="?", default=POLICY_B, help="second checkpoint .pt")
     ap.add_argument("--label-a", default=None, help="legend label for policy A")
     ap.add_argument("--label-b", default=None, help="legend label for policy B")
-    ap.add_argument("--cont-a", default=None,
-                    help="continuation checkpoint to stitch after policy A (resumed training)")
-    ap.add_argument("--cont-b", default=None,
-                    help="continuation checkpoint to stitch after policy B (resumed training)")
+    ap.add_argument("--cont-a", nargs="+", default=None, metavar="CKPT",
+                    help="continuation checkpoint(s) to stitch after policy A, in "
+                         "order (resumed training); e.g. --cont-a cont1.pt cont2.pt")
+    ap.add_argument("--cont-b", nargs="+", default=None, metavar="CKPT",
+                    help="continuation checkpoint(s) to stitch after policy B, in order")
     ap.add_argument("--smooth", type=int, default=SMOOTH_WINDOW,
                     help="running-average window (1 = raw); resets at each curriculum section")
     ap.add_argument("--dpi", type=int, default=DPI, help="output resolution (dots per inch)")
