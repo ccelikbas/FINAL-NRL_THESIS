@@ -12,6 +12,11 @@ In the eval-rates plot the COLOUR encodes the metric and the LINE STYLE encodes 
 policy (solid = policy A, dashed = policy B), so the two policies sit on one axis
 without eight indistinguishable colours. NLR house colours throughout.
 
+Either policy can optionally STITCH a CONTINUATION checkpoint (for resumed
+training): the base logs up to their last iteration, then the continuation's logs
+from that point onward, on one continuous x-axis. See POLICY_A_CONT / POLICY_B_CONT
+(or --cont-a / --cont-b).
+
 Lines are smoothed with a per-section running average (curriculum transitions stay
 sharp); see --smooth. Outputs use stable names (overwritten each run).
 
@@ -58,6 +63,13 @@ POLICY_B = "runs/FINALV2/baseline_stage11of11_DR_j2-4_k0_25_FINAL.pt"
 LABEL_A = "Complete"
 LABEL_B = "Baseline"
 
+# Optional CONTINUATION checkpoint per policy (for RESUMED training). If set, that
+# policy's curve is STITCHED: the base logs up to their last iteration, then the
+# continuation's logs from that point onward (x-axis continues; a hard section cut
+# marks the join). None = no continuation.          [CLI: --cont-a / --cont-b]
+POLICY_A_CONT: str | None = None
+POLICY_B_CONT: str | None = "runs/FINALV2/FINAL_baseline_s1_cont.pt"
+
 # Running-average window (datapoints); resets at each curriculum section so
 # transitions stay sharp. 1 = raw.                        [CLI: --smooth]
 SMOOTH_WINDOW = 25
@@ -65,6 +77,9 @@ SMOOTH_WINDOW = 25
 # Output PNGs (relative paths resolved against the project dir 0_TA_...).
 REWARD_OUT = "eval_results/compare_reward_curves.png"
 RATES_OUT = "eval_results/compare_eval_rates.png"
+
+# Figure resolution (dots per inch). Higher = sharper output (larger files). [CLI: --dpi]
+DPI = 600
 
 # ===================================================================
 
@@ -98,7 +113,48 @@ def _load_logs(path: Path):
     return logs, (ck.get("section_bounds") or [])
 
 
-def plot_reward(policies, out, smooth):
+def _series_len(logs) -> int:
+    """Number of logged iterations (max over all series)."""
+    return max((len(v) for v in logs.values()), default=0)
+
+
+def _stitch_logs(base_logs, base_bounds, cont_logs, cont_bounds):
+    """Concatenate a continuation run's logs AFTER the base run's, so the plot
+    continues from the base's last iteration. Every series is padded to its run's
+    length first (keeping 1:1 iteration alignment), then base+continuation are
+    concatenated. Section bounds are merged with the continuation shifted by the
+    base length, so per-section smoothing keeps a hard cut at the join too."""
+    base_len, cont_len = _series_len(base_logs), _series_len(cont_logs)
+
+    def _pad(seq, n):
+        seq = list(seq)
+        return seq + [float("nan")] * (n - len(seq))
+
+    stitched = {
+        k: _pad(base_logs.get(k, []), base_len) + _pad(cont_logs.get(k, []), cont_len)
+        for k in (set(base_logs) | set(cont_logs))
+    }
+    merged_bounds = list(base_bounds) + [
+        (name, int(s) + base_len, int(e) + base_len) for (name, s, e) in cont_bounds
+    ]
+    return stitched, merged_bounds
+
+
+def _maybe_stitch(base_logs, base_bounds, cont_path_str, who):
+    """If a continuation checkpoint is configured, load and stitch it on."""
+    if not cont_path_str:
+        return base_logs, base_bounds
+    cont_path = _resolve_policy_path(cont_path_str, None)
+    if cont_path is None or not cont_path.exists():
+        raise FileNotFoundError(f"continuation checkpoint not found: {cont_path}")
+    cont_logs, cont_bounds = _load_logs(cont_path)
+    stitched, bounds = _stitch_logs(base_logs, base_bounds, cont_logs, cont_bounds)
+    print(f"  {who}: stitched +{cont_path.name} "
+          f"(base {_series_len(base_logs)} iters → +{_series_len(cont_logs)} continuation)")
+    return stitched, bounds
+
+
+def plot_reward(policies, out, smooth, dpi=DPI):
     """One (train) reward curve per policy on a shared axis."""
     fig, ax = plt.subplots(figsize=(13, 6))
     n_iter = 0
@@ -122,12 +178,12 @@ def plot_reward(policies, out, smooth):
     ax.legend(loc="lower right", fontsize=10, frameon=True, title="policy")
     fig.tight_layout()
     out.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out, dpi=200, bbox_inches="tight")
+    fig.savefig(out, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
     print(f"saved reward comparison -> {out}")
 
 
-def plot_eval_rates(policies, out, smooth):
+def plot_eval_rates(policies, out, smooth, dpi=DPI):
     """Every eval KPI for both policies: colour = metric, line style = policy."""
     fig, ax = plt.subplots(figsize=(13, 6.5))
     n_iter = 0
@@ -165,7 +221,7 @@ def plot_eval_rates(policies, out, smooth):
                      bbox_to_anchor=(1.01, 0.30), fontsize=9, frameon=True)
     out.parent.mkdir(parents=True, exist_ok=True)
     # bbox_extra_artists ensures BOTH outside legends are inside the saved crop.
-    fig.savefig(out, dpi=200, bbox_inches="tight", bbox_extra_artists=[leg1, leg2])
+    fig.savefig(out, dpi=dpi, bbox_inches="tight", bbox_extra_artists=[leg1, leg2])
     plt.close(fig)
     print(f"saved eval-rates comparison -> {out}")
 
@@ -177,8 +233,13 @@ def main():
     ap.add_argument("policy_b", nargs="?", default=POLICY_B, help="second checkpoint .pt")
     ap.add_argument("--label-a", default=None, help="legend label for policy A")
     ap.add_argument("--label-b", default=None, help="legend label for policy B")
+    ap.add_argument("--cont-a", default=None,
+                    help="continuation checkpoint to stitch after policy A (resumed training)")
+    ap.add_argument("--cont-b", default=None,
+                    help="continuation checkpoint to stitch after policy B (resumed training)")
     ap.add_argument("--smooth", type=int, default=SMOOTH_WINDOW,
                     help="running-average window (1 = raw); resets at each curriculum section")
+    ap.add_argument("--dpi", type=int, default=DPI, help="output resolution (dots per inch)")
     ap.add_argument("--reward-out", default=REWARD_OUT)
     ap.add_argument("--rates-out", default=RATES_OUT)
     args = ap.parse_args()
@@ -203,13 +264,19 @@ def main():
     logs_a, bounds_a = _load_logs(path_a)
     logs_b, bounds_b = _load_logs(path_b)
 
+    # Optional continuation stitch (resumed training) — CLI flag wins, else config.
+    cont_a = args.cont_a if args.cont_a is not None else POLICY_A_CONT
+    cont_b = args.cont_b if args.cont_b is not None else POLICY_B_CONT
+    logs_a, bounds_a = _maybe_stitch(logs_a, bounds_a, cont_a, f"A/{label_a}")
+    logs_b, bounds_b = _maybe_stitch(logs_b, bounds_b, cont_b, f"B/{label_b}")
+
     policies = [
         (label_a, logs_a, bounds_a, POLICY_COLORS[0]),
         (label_b, logs_b, bounds_b, POLICY_COLORS[1]),
     ]
 
-    plot_reward(policies, _resolve_out(args.reward_out), args.smooth)
-    plot_eval_rates(policies, _resolve_out(args.rates_out), args.smooth)
+    plot_reward(policies, _resolve_out(args.reward_out), args.smooth, args.dpi)
+    plot_eval_rates(policies, _resolve_out(args.rates_out), args.smooth, args.dpi)
 
 
 if __name__ == "__main__":
