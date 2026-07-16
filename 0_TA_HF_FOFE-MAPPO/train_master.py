@@ -149,10 +149,12 @@ RUNS: List[Run] = [
     # Run(tag="V3b", jobs=ALL_JOBS, seed=1),
 
     # ── Example: only the complete S1→S2 lineage (chained, no paths). ──
-    Run(tag="complete_only", jobs=["complete_s1", "complete_s2"], seed=0),
+    Run(tag="V3_complete_S1", jobs=["complete_s1"], seed=0),
 
-    # ── Example: retrain ONLY complete_s2 from an EXPLICIT existing checkpoint. ──
-    Run(tag="redo_s2", jobs=["baseline_s2"], seed=0,
+    Run(tag="V3_complete_S2", jobs=["complete_s2"], seed=0,
+        checkpoints={"complete_s2": "runs/FINALV2/complete_stage7of8_DR_j2-4_k0_25.pt"}),
+
+    Run(tag="V3_baseline_S2", jobs=["baseline_s2"], seed=0,
         checkpoints={"baseline_s2": "runs/FINALV2/Final_Baseline_Cont_4.pt"}),
 ]
 
