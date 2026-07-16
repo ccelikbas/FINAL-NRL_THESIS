@@ -124,6 +124,24 @@ RATES_OUT_S1 = "eval_results/compare_eval_rates_S1.png"
 REWARD_OUT_S2 = "eval_results/compare_reward_curves_S2.png"
 RATES_OUT_S2 = "eval_results/compare_eval_rates_S2.png"
 
+# Convergence-comparison LaTeX table (Complete vs Baseline, rows S1 & S2), written
+# in ADDITION to the figures. For each (scenario, model), computed on the SAME
+# stitched + start_iter-rebased series as the reward plot:
+#   Iterations (#) : the iteration at which the MAX training reward is reached —
+#                    counted from 0 in S1, and from the re-based S2 start in S2.
+#   Time (h)       : SUM of the per-iteration TRAINING time (iter_time_excl_eval_s,
+#                    i.e. eval time excluded — already stored per-iter in the .pt)
+#                    over iterations 0..peak, reported in HOURS.
+#   Reward         : the maximum training reward over all iterations.
+# Complete vs Baseline are matched per group by an optional `model="complete"` /
+# "baseline" key on the policy dict, else inferred from a label containing
+# "complete"/"baseline".
+TABLE_OUT = "eval_results/convergence_comparison.tex"
+# Window for locating the reward PEAK: 1 = RAW reward (the literal "maximum
+# achieved reward"); set to SMOOTH_WINDOW to find the peak on the SMOOTHED curve
+# drawn in the plots (steadier, ignores single-iteration spikes). [CLI: --table-smooth]
+TABLE_SMOOTH_WINDOW = 1
+
 # Figure resolution (dots per inch). Higher = sharper output (larger files). [CLI: --dpi]
 DPI = 600
 
@@ -143,8 +161,10 @@ PKILL_STAGES = [
 
 # ===================================================================
 
-# The (non-eval) training reward series.
+# The (non-eval) training reward series, and the per-iteration TRAINING-only wall
+# time (eval already subtracted) — both logged every iteration and stored in the .pt.
 TRAIN_REWARD_KEY = "train_mean_episode_total_reward"
+TRAIN_TIME_KEY = "iter_time_excl_eval_s"
 
 # Eval-rate series (key, label, NLR colour). All bounded in [0, 1] → one axis.
 EVAL_RATES = [
@@ -362,13 +382,28 @@ def _specs_from_cli(args) -> list[dict]:
             for i, p in enumerate(args.policies)]
 
 
-def _run_group(specs, reward_out, rates_out, smooth, dpi, tag, title_suffix="") -> None:
-    """Load + stitch + plot ONE policy group into its own pair of figures. An
-    empty group is skipped (nothing to plot). `tag` names the group in the log;
-    `title_suffix` is appended to the eval-rates title (e.g. ' (S2)')."""
+def _policy_model(spec) -> "str | None":
+    """Classify a policy as 'complete' / 'baseline' for the convergence table.
+    Prefers an explicit `model` key on the dict; else infers from the label."""
+    m = spec.get("model")
+    if m:
+        return str(m).strip().lower()
+    lbl = (spec.get("label") or "").lower()
+    if "baseline" in lbl:
+        return "baseline"
+    if "complete" in lbl:
+        return "complete"
+    return None
+
+
+def _run_group(specs, reward_out, rates_out, smooth, dpi, tag, title_suffix="") -> list[dict]:
+    """Load + stitch + plot ONE policy group into its own pair of figures, and
+    RETURN the per-policy data (label / model / stitched+rebased logs / bounds) so
+    the convergence table can be built. An empty group is skipped. `tag` names the
+    group in the log; `title_suffix` is appended to the eval-rates title."""
     if not specs:
         print(f"[{tag}] no policies configured — skipping (no figures written).")
-        return
+        return []
 
     print(f"[{tag}] policies:")
     # Load + stitch each policy in order.
@@ -390,8 +425,11 @@ def _run_group(specs, reward_out, rates_out, smooth, dpi, tag, title_suffix="") 
             x[0] = f"{x[0]} ({chr(65 + i)})"
 
     policies = []
+    entries: list[dict] = []
     for i, (label, logs, bounds, name) in enumerate(loaded):
         policies.append((label, logs, bounds, POLICY_COLORS[i % len(POLICY_COLORS)]))
+        entries.append({"label": label, "model": _policy_model(specs[i]),
+                        "logs": logs, "bounds": bounds})
         print(f"  {chr(65 + i)}: {label}  [{name}]")
 
     if len(policies) > len(POLICY_STYLES):
@@ -401,6 +439,114 @@ def _run_group(specs, reward_out, rates_out, smooth, dpi, tag, title_suffix="") 
 
     plot_reward(policies, _resolve_out(reward_out), smooth, dpi)
     plot_eval_rates(policies, _resolve_out(rates_out), smooth, dpi, title_suffix)
+    return entries
+
+
+# =====================================================================
+# Convergence-comparison table (Complete vs Baseline; rows S1 & S2)
+# =====================================================================
+
+def _convergence_stats(entry: dict, smooth_window: int) -> "dict | None":
+    """For one policy's (already stitched + start_iter-rebased) logs, return
+    {iters, hours, reward}:
+      iters  = 1-based iteration at which the peak training reward occurs (from 0
+               in S1, from the re-based S2 start in S2);
+      hours  = summed TRAINING time (eval excluded) over iterations 0..peak / 3600;
+      reward = the reward at that peak.
+    `smooth_window` > 1 locates the peak on the section-smoothed curve; 1 = raw."""
+    logs, bounds = entry["logs"], entry["bounds"]
+    rew = np.asarray(logs.get(TRAIN_REWARD_KEY, []), dtype=float)
+    if rew.size == 0 or not np.any(np.isfinite(rew)):
+        return None
+    if smooth_window and smooth_window > 1:
+        xs = np.arange(1, rew.size + 1)
+        series = np.asarray(_smooth_sectioned(xs, rew, bounds, smooth_window), dtype=float)
+    else:
+        series = rew
+    finite = np.where(np.isfinite(series))[0]
+    peak = int(finite[np.argmax(series[finite])])           # 0-based peak index
+    t = np.asarray(logs.get(TRAIN_TIME_KEY, []), dtype=float)
+    hours = None
+    if t.size:
+        hours = float(np.nansum(t[:min(peak + 1, t.size)])) / 3600.0
+    return {"iters": peak + 1, "hours": hours, "reward": float(series[peak])}
+
+
+def _pick_model(entries: list, model: str) -> "dict | None":
+    for e in entries or []:
+        if e.get("model") == model:
+            return e
+    return None
+
+
+def _fmt_iters(s): return "--" if s is None else str(int(s["iters"]))
+def _fmt_time(s):  return "--" if (s is None or s["hours"] is None) else f"{s['hours']:.2f}"
+def _fmt_reward(s): return "--" if s is None else f"{s['reward']:.2f}"
+
+
+def build_convergence_table(rows: list) -> str:
+    """rows: list of (scenario_str, complete_stats|None, baseline_stats|None)."""
+    body = []
+    for scen, comp, base in rows:
+        body.append(
+            f"        {scen} & {_fmt_iters(comp)} & {_fmt_time(comp)} & {_fmt_reward(comp)} "
+            f"& {_fmt_iters(base)} & {_fmt_time(base)} & {_fmt_reward(base)} " + r"\\")
+    return "\n".join([
+        r"\begin{table}[htbp]",
+        r"    \centering",
+        r"    \caption{Convergence comparison between the complete and baseline models in Scenarios~S1 and~S2.}",
+        r"    \label{tab:convergence_comparison}",
+        r"    \small",
+        r"    \begin{tabular}{lcccccc}",
+        r"        \toprule",
+        r"        & \multicolumn{3}{c}{\textbf{Complete}}",
+        r"        & \multicolumn{3}{c}{\textbf{Baseline}} \\",
+        r"        \cmidrule(lr){2-4}",
+        r"        \cmidrule(lr){5-7}",
+        r"        \textbf{Scenario}",
+        r"        & \textbf{Iterations (\#)}",
+        r"        & \textbf{Time (h)}",
+        r"        & \textbf{Reward}",
+        r"        & \textbf{Iterations (\#)}",
+        r"        & \textbf{Time (h)}",
+        r"        & \textbf{Reward} \\",
+        r"        \midrule",
+        *body,
+        r"        \bottomrule",
+        r"    \end{tabular}",
+        r"\end{table}",
+    ])
+
+
+def write_convergence_table(s1_entries: list, s2_entries: list,
+                            smooth_window: int, out_path: Path) -> None:
+    """Build + print + save the S1/S2 Complete-vs-Baseline convergence table."""
+    rows = []
+    for scen, entries in (("S1", s1_entries), ("S2", s2_entries)):
+        comp, base = _pick_model(entries, "complete"), _pick_model(entries, "baseline")
+        if entries and comp is None:
+            print(f"  ! convergence table: no 'complete' policy identified in {scen} "
+                  f"(add model='complete' or use a label containing 'complete').")
+        if entries and base is None:
+            print(f"  ! convergence table: no 'baseline' policy identified in {scen} "
+                  f"(add model='baseline' or use a label containing 'baseline').")
+        rows.append((scen, _convergence_stats(comp, smooth_window) if comp else None,
+                     _convergence_stats(base, smooth_window) if base else None))
+
+    mode = "raw" if not (smooth_window and smooth_window > 1) else f"smoothed(w={smooth_window})"
+    print(f"\nConvergence comparison (peak reward located on {mode} curve; "
+          f"time = training-only hours to peak):")
+    print(f"  {'':4s}  {'Complete (iters / h / reward)':32s}  Baseline (iters / h / reward)")
+    for scen, comp, base in rows:
+        def _cell(s):
+            return "--" if s is None else f"{_fmt_iters(s):>6s} / {_fmt_time(s):>6s} / {_fmt_reward(s):>7s}"
+        print(f"  {scen:4s}  {_cell(comp):32s}  {_cell(base)}")
+
+    tex = build_convergence_table(rows)
+    print("\n" + tex + "\n")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(tex, encoding="utf-8")
+    print(f"saved convergence table -> {out_path}")
 
 
 def main():
@@ -420,10 +566,14 @@ def main():
     ap.add_argument("--rates-out-s1", default=RATES_OUT_S1)
     ap.add_argument("--reward-out-s2", default=REWARD_OUT_S2)
     ap.add_argument("--rates-out-s2", default=RATES_OUT_S2)
+    ap.add_argument("--table-out", default=TABLE_OUT)
+    ap.add_argument("--table-smooth", type=int, default=TABLE_SMOOTH_WINDOW,
+                    help="window for the convergence-table peak (1 = raw max reward; "
+                         "SMOOTH_WINDOW = locate the peak on the smoothed curve)")
     args = ap.parse_args()
 
     # CLI positional paths → an ad-hoc single group, drawn to the S1 outputs
-    # (exactly the old behaviour). No S2 group in this mode.
+    # (exactly the old behaviour). No S2 group / convergence table in this mode.
     if args.policies:
         _run_group(_specs_from_cli(args), args.reward_out_s1, args.rates_out_s1,
                    args.smooth, args.dpi, tag="CLI", title_suffix=" (S1)")
@@ -433,10 +583,16 @@ def main():
     if not POLICIES_S1 and not POLICIES_S2:
         raise SystemExit("No policies to plot — populate POLICIES_S1 / POLICIES_S2 "
                          "or pass paths on the CLI.")
-    _run_group([dict(s) for s in POLICIES_S1], args.reward_out_s1, args.rates_out_s1,
-               args.smooth, args.dpi, tag="S1", title_suffix=" (S1)")
-    _run_group([dict(s) for s in POLICIES_S2], args.reward_out_s2, args.rates_out_s2,
-               args.smooth, args.dpi, tag="S2", title_suffix=" (S2)")
+    s1_entries = _run_group([dict(s) for s in POLICIES_S1], args.reward_out_s1,
+                            args.rates_out_s1, args.smooth, args.dpi, tag="S1",
+                            title_suffix=" (S1)")
+    s2_entries = _run_group([dict(s) for s in POLICIES_S2], args.reward_out_s2,
+                            args.rates_out_s2, args.smooth, args.dpi, tag="S2",
+                            title_suffix=" (S2)")
+
+    # Convergence-comparison table (Complete vs Baseline, rows S1 & S2).
+    write_convergence_table(s1_entries, s2_entries, args.table_smooth,
+                            _resolve_out(args.table_out))
 
 
 if __name__ == "__main__":

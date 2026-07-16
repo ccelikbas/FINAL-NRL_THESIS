@@ -323,7 +323,7 @@ class PPOConfig:
     max_iter_time_s: Optional[float] = 250.0   # safety timeout per iteration (None = disabled)
 
     seed: int = 0
-    log_every: int = 10
+    log_every: int = 50
     device: torch.device = field(default_factory=lambda: torch.device("cuda" if torch.cuda.is_available() else "cpu"))
 
     # ── Hardware optimization flags ─────────────────────────────────
