@@ -1,30 +1,30 @@
-"""compare_two_policies_logs.py — overlay the TRAINING LOGS of TWO checkpoints.
+"""compare_two_policies_logs.py — overlay the TRAINING LOGS of TWO OR MORE checkpoints.
 
-Pass two policy .pt files; the script reads the logs stored in each checkpoint and
-draws two comparison figures, with BOTH policies on the same axes:
+List any number of policies (A, B, C, D, …) in the POLICIES config below; the
+script reads the logs stored in each checkpoint and draws two comparison figures,
+with ALL policies on the same axes:
 
   1. Reward curve      — the (non-eval) training reward `train_mean_episode_total_reward`,
-                         one curve per policy.
+                         one curve per policy (colour = policy).
   2. Eval-rates plot   — the eval KPIs (survival / task completion / targets-destroyed /
-                         coalition fragmentation), each shown for both policies.
+                         coalition fragmentation), shown for every policy.
 
 In the eval-rates plot the COLOUR encodes the metric and the LINE STYLE encodes the
-policy (solid = policy A, dashed = policy B), so the two policies sit on one axis
-without eight indistinguishable colours. NLR house colours throughout.
+policy (solid = A, dashed = B, dash-dot = C, dotted = D), so the policies sit on one
+axis without a wall of indistinguishable colours. NLR house colours throughout.
+(Line styles cycle after four policies, so ≤4 stay cleanly distinguishable.)
 
-Either policy can optionally STITCH one or more CONTINUATION checkpoints (for
-resumed training), given as an ORDERED list: the base logs, then each
-continuation's logs appended in turn, on one continuous x-axis (a hard section
-cut marks every join). See POLICY_A_CONT / POLICY_B_CONT (or --cont-a / --cont-b,
-which each accept several paths in the order to stitch them).
+Each policy can optionally STITCH one or more CONTINUATION checkpoints (for resumed
+training) via its `cont` list: the base logs, then each continuation's logs appended
+in turn, on one continuous x-axis (a hard section cut marks every join). Order matters.
 
 Lines are smoothed with a per-section running average (curriculum transitions stay
 sharp); see --smooth. Outputs use stable names (overwritten each run).
 
-Run (repo root, project venv):
+Run (repo root, project venv) — no args uses the POLICIES config; or pass paths:
   .venv\\Scripts\\python.exe 0_TA_HF_FOFE-MAPPO\\eval_tools\\compare_two_policies_logs.py \\
-      runs/FINALV1/complete_S1_20260704/stage5of5_DR_j2-4_k0_25_FINAL.pt \\
-      runs/FINALV1/baseline_S1_20260704/stage5of5_...pt  --label-a Complete --label-b Baseline
+      runs/.../complete_FINAL.pt runs/.../baseline_FINAL.pt runs/.../policy_c_FINAL.pt \\
+      --labels Complete Baseline "Policy C"
 """
 from __future__ import annotations
 import argparse, sys, types
@@ -52,25 +52,38 @@ from matplotlib.lines import Line2D
 # Reuse the checkpoint path resolver and the finite / per-section smoothing helpers.
 from .evaluate_policy import _resolve_policy_path
 from .plot_reward_components import _finite_xy, _smooth_sectioned
-from .nlr_style import NLR_PRIMARY, NLR_SECONDARY, NLR_ACCENT, NLR_DARKGRAY
+from .nlr_style import (NLR_PRIMARY, NLR_SECONDARY, NLR_ACCENT, NLR_DARKGRAY,
+                        NLR_GRAY, NLR_CYCLE)
 
 # ===================================================================
 # CONFIG — edit these (CLI flags / positional args override)
 # ===================================================================
 
-# The two policies to compare (bare name → runs/, "runs/…/x.pt" → project dir, abs → as-is).
-POLICY_A = "runs/FINALV2/complete_stage7of8_DR_j2-4_k0_25.pt"
-POLICY_B = "runs/FINALV2/baseline_stage11of11_DR_j2-4_k0_25_FINAL.pt"
-LABEL_A = "Complete"
-LABEL_B = "Baseline"
-
-# Optional CONTINUATION checkpoints per policy (for RESUMED training). Give an
-# ORDERED list — each is stitched on AFTER the previous, so a chain of resumed
-# runs joins into one continuous x-axis (a hard section cut marks every join).
-# Order matters: [first_resume.pt, second_resume.pt, ...]. Use [] for none; a
-# single "path.pt" string is also accepted.        [CLI: --cont-a / --cont-b]
-POLICY_A_CONT: list[str] = []
-POLICY_B_CONT: list[str] = ["runs/FINALV2/FINAL_baseline_s1_cont.pt", "runs/FINALV2/Final_Baseline_Cont_2.pt"]
+# The policies to compare — add as many as you like (C, D, …); one curve each.
+# Each entry is a dict:
+#   path  : base checkpoint  (bare name → runs/, "runs/…/x.pt" → project dir, abs → as-is)
+#   label : legend label     (defaults to the checkpoint stem if omitted)
+#   cont  : ORDERED list of CONTINUATION checkpoints for RESUMED training — each is
+#           stitched on AFTER the previous, joining into one continuous x-axis (a
+#           hard section cut marks every join). Order matters; [] = no continuation,
+#           a single "path.pt" string is also accepted.
+POLICIES: list[dict] = [
+    dict(path="runs/FINALV1/complete_s1_20260704/stage5of5_DR_j2-4_k0_25_FINAL.pt",
+         label="Complete V1",
+         cont=[]),
+    dict(path="runs/FINALV2/complete_stage7of8_DR_j2-4_k0_25.pt",
+         label="Complete V2",
+         cont=[]),
+    dict(path="runs/FINALV2/baseline_stage11of11_DR_j2-4_k0_25_FINAL.pt",
+         label="Baseline V2",
+         cont=["runs/FINALV2/FINAL_baseline_s1_cont.pt",
+               "runs/FINALV2/Final_Baseline_Cont_2.pt",
+               "runs/FINALV2/Final_Baseline_Cont_3.pt", 
+               "runs/FINALV2/Final_Baseline_Cont_4.pt", 
+               "runs/FINALV2/Final_Baseline_Cont_5.pt"]),
+    # dict(path="runs/.../policy_c.pt", label="Policy C", cont=[]),
+    # dict(path="runs/.../policy_d.pt", label="Policy D", cont=[]),
+]
 
 # Running-average window (datapoints); resets at each curriculum section so
 # transitions stay sharp. 1 = raw.                        [CLI: --smooth]
@@ -82,6 +95,20 @@ RATES_OUT = "eval_results/compare_eval_rates.png"
 
 # Figure resolution (dots per inch). Higher = sharper output (larger files). [CLI: --dpi]
 DPI = 600
+
+# Curriculum radar-kill-probability (P_kill) stages: (start_iter, p_kill). Each
+# stage runs until the next stage's start (the last runs to the end of training).
+# Annotated as small, slightly-gray dashed markers with a tiny value label low on
+# the axis — deliberately subtle so they don't overpower the curves.
+SHOW_PKILL_STAGES = False
+PKILL_STAGES = [
+    (0,    0.025),
+    (1000, 0.05),
+    (2000, 0.10),
+    (3000, 0.15),
+    (4000, 0.20),
+    (5000, 0.25),
+]
 
 # ===================================================================
 
@@ -96,9 +123,9 @@ EVAL_RATES = [
     ("eval_coalition_fragmentation", "coalition fragmentation (frag)", NLR_DARKGRAY),
 ]
 
-# Per-policy encodings.
-POLICY_COLORS = [NLR_PRIMARY, NLR_ACCENT]   # reward plot: one colour per policy
-POLICY_STYLES = ["-", "--"]                 # eval plot: line style per policy
+# Per-policy encodings (cycle when there are more policies than entries).
+POLICY_COLORS = NLR_CYCLE                    # reward plot: one colour per policy
+POLICY_STYLES = ["-", "--", "-.", ":"]      # eval plot: line style per policy
 
 
 def _resolve_out(path_str: str) -> Path:
@@ -177,6 +204,30 @@ def _maybe_stitch(base_logs, base_bounds, cont_spec, who):
     return logs, bounds
 
 
+def _annotate_pkill(ax, n_iter):
+    """Mark the P_kill curriculum stages subtly, low on the axis.
+
+    Draws a short slightly-gray dashed vertical at each stage boundary and a tiny
+    value label centred under each stage, so the markers stay unobtrusive and do
+    not overpower the curves. Uses a blended transform (x in data coordinates, y
+    in axes fraction) so it also works on the reward axis (arbitrary y range)."""
+    if not (SHOW_PKILL_STAGES and n_iter):
+        return
+    trans = ax.get_xaxis_transform()        # x = data, y = axes fraction (0=bottom)
+    n_stages = len(PKILL_STAGES)
+    for i, (start, pk) in enumerate(PKILL_STAGES):
+        if start > n_iter:
+            break
+        end = min(PKILL_STAGES[i + 1][0] if i + 1 < n_stages else n_iter, n_iter)
+        if start > 0:                       # short boundary marker (skip the x=0 edge)
+            ax.plot([start, start], [0.0, 0.05], transform=trans, color=NLR_GRAY,
+                    lw=0.7, ls="--", alpha=0.6, clip_on=False, zorder=1)
+        ax.text((start + end) / 2.0, 0.012, f"{pk:g}", transform=trans, ha="center",
+                va="bottom", fontsize=6.0, color=NLR_GRAY, alpha=0.9, zorder=1)
+    ax.text(0.004, 0.052, "P_kill", transform=ax.transAxes, ha="left", va="bottom",
+            fontsize=6.0, color=NLR_GRAY, alpha=0.9, style="italic")
+
+
 def plot_reward(policies, out, smooth, dpi=DPI):
     """One (train) reward curve per policy on a shared axis."""
     fig, ax = plt.subplots(figsize=(13, 6))
@@ -198,6 +249,7 @@ def plot_reward(policies, out, smooth, dpi=DPI):
     if n_iter:
         ax.set_xlim(1, n_iter)
     ax.grid(True, alpha=0.3)
+    _annotate_pkill(ax, n_iter)
     ax.legend(loc="lower right", fontsize=10, frameon=True, title="policy")
     fig.tight_layout()
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -207,7 +259,7 @@ def plot_reward(policies, out, smooth, dpi=DPI):
 
 
 def plot_eval_rates(policies, out, smooth, dpi=DPI):
-    """Every eval KPI for both policies: colour = metric, line style = policy."""
+    """Every eval KPI for every policy: colour = metric, line style = policy."""
     fig, ax = plt.subplots(figsize=(13, 6.5))
     n_iter = 0
     plotted_metrics = set()
@@ -230,6 +282,7 @@ def plot_eval_rates(policies, out, smooth, dpi=DPI):
     if n_iter:
         ax.set_xlim(1, n_iter)
     ax.grid(True, alpha=0.3)
+    _annotate_pkill(ax, n_iter)
 
     # Two legends: colour → metric, line style → policy.
     kpi_handles = [Line2D([0], [0], color=c, lw=1.8, label=l)
@@ -249,18 +302,26 @@ def plot_eval_rates(policies, out, smooth, dpi=DPI):
     print(f"saved eval-rates comparison -> {out}")
 
 
+def _policy_specs_from_args(args) -> list[dict]:
+    """Ordered list of policy specs (path/label/cont). CLI positional paths, if
+    given, override the config POLICIES list (no stitching via the CLI — configure
+    continuations in POLICIES). Otherwise the config list is used verbatim."""
+    if args.policies:
+        labels = args.labels or []
+        return [dict(path=p, label=(labels[i] if i < len(labels) else None), cont=[])
+                for i, p in enumerate(args.policies)]
+    return [dict(s) for s in POLICIES]
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("policy_a", nargs="?", default=POLICY_A, help="first checkpoint .pt")
-    ap.add_argument("policy_b", nargs="?", default=POLICY_B, help="second checkpoint .pt")
-    ap.add_argument("--label-a", default=None, help="legend label for policy A")
-    ap.add_argument("--label-b", default=None, help="legend label for policy B")
-    ap.add_argument("--cont-a", nargs="+", default=None, metavar="CKPT",
-                    help="continuation checkpoint(s) to stitch after policy A, in "
-                         "order (resumed training); e.g. --cont-a cont1.pt cont2.pt")
-    ap.add_argument("--cont-b", nargs="+", default=None, metavar="CKPT",
-                    help="continuation checkpoint(s) to stitch after policy B, in order")
+    ap.add_argument("policies", nargs="*", default=None, metavar="CKPT",
+                    help="base checkpoint(s) to compare, in order; overrides the "
+                         "config POLICIES list. For continuations, edit POLICIES.")
+    ap.add_argument("--labels", nargs="+", default=None, metavar="LABEL",
+                    help="legend labels for the positional policies, in order "
+                         "(default: the checkpoint stem)")
     ap.add_argument("--smooth", type=int, default=SMOOTH_WINDOW,
                     help="running-average window (1 = raw); resets at each curriculum section")
     ap.add_argument("--dpi", type=int, default=DPI, help="output resolution (dots per inch)")
@@ -268,36 +329,36 @@ def main():
     ap.add_argument("--rates-out", default=RATES_OUT)
     args = ap.parse_args()
 
-    path_a = _resolve_policy_path(args.policy_a, None)
-    path_b = _resolve_policy_path(args.policy_b, None)
-    for p in (path_a, path_b):
-        if p is None or not p.exists():
-            raise FileNotFoundError(f"checkpoint not found: {p}")
+    specs = _policy_specs_from_args(args)
+    if not specs:
+        raise SystemExit("No policies to plot — populate POLICIES or pass paths on the CLI.")
 
-    # Labels: explicit flag wins; else the config default when the config path was
-    # used, otherwise the checkpoint stem. Disambiguate if the two collide.
-    label_a = args.label_a if args.label_a is not None else (
-        LABEL_A if args.policy_a == POLICY_A else path_a.stem)
-    label_b = args.label_b if args.label_b is not None else (
-        LABEL_B if args.policy_b == POLICY_B else path_b.stem)
-    if label_a == label_b:
-        label_a, label_b = f"{label_a} (A)", f"{label_b} (B)"
+    # Load + stitch each policy in order.
+    loaded = []   # [label, logs, bounds, ckpt_name]
+    for i, spec in enumerate(specs):
+        path = _resolve_policy_path(spec["path"], None)
+        if path is None or not path.exists():
+            raise FileNotFoundError(f"checkpoint not found: {path}")
+        label = spec.get("label") or path.stem
+        logs, bounds = _load_logs(path)
+        logs, bounds = _maybe_stitch(logs, bounds, spec.get("cont"), f"{chr(65 + i)}/{label}")
+        loaded.append([label, logs, bounds, path.name])
 
-    print(f"A: {label_a}  [{path_a.name}]")
-    print(f"B: {label_b}  [{path_b.name}]")
-    logs_a, bounds_a = _load_logs(path_a)
-    logs_b, bounds_b = _load_logs(path_b)
+    # Disambiguate any duplicate labels with the policy letter.
+    labels = [x[0] for x in loaded]
+    if len(set(labels)) < len(labels):
+        for i, x in enumerate(loaded):
+            x[0] = f"{x[0]} ({chr(65 + i)})"
 
-    # Optional continuation stitch (resumed training) — CLI flag wins, else config.
-    cont_a = args.cont_a if args.cont_a is not None else POLICY_A_CONT
-    cont_b = args.cont_b if args.cont_b is not None else POLICY_B_CONT
-    logs_a, bounds_a = _maybe_stitch(logs_a, bounds_a, cont_a, f"A/{label_a}")
-    logs_b, bounds_b = _maybe_stitch(logs_b, bounds_b, cont_b, f"B/{label_b}")
+    policies = []
+    for i, (label, logs, bounds, name) in enumerate(loaded):
+        policies.append((label, logs, bounds, POLICY_COLORS[i % len(POLICY_COLORS)]))
+        print(f"{chr(65 + i)}: {label}  [{name}]")
 
-    policies = [
-        (label_a, logs_a, bounds_a, POLICY_COLORS[0]),
-        (label_b, logs_b, bounds_b, POLICY_COLORS[1]),
-    ]
+    if len(policies) > len(POLICY_STYLES):
+        print(f"  ! {len(policies)} policies but only {len(POLICY_STYLES)} line "
+              f"styles — eval-rates styles will repeat (curves may be hard to tell "
+              f"apart). Reduce policies or add styles to POLICY_STYLES.")
 
     plot_reward(policies, _resolve_out(args.reward_out), args.smooth, args.dpi)
     plot_eval_rates(policies, _resolve_out(args.rates_out), args.smooth, args.dpi)

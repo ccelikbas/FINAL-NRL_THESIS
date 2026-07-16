@@ -1,6 +1,10 @@
 \begin{table}[htbp]
     \centering
-    \caption{Performance comparison across scenarios (n=500).}
+    \caption{Mission performance across scenarios (n=600 paired episodes;
+    one-sided \emph{paired} $t$-test on common-random-number pairs; Duration is
+    conditioned on jointly-successful episodes, $n_\mathrm{dur}=321$). Baseline cells give the
+    value with its difference from Complete in parentheses (rates in percentage
+    points, pp; Duration in steps).}
     \label{tab:mission-performence}
     \small
     \resizebox{\textwidth}{!}{%
@@ -21,9 +25,9 @@
             \midrule
 
             $S1$
-            & 0.963 & 0.680 & <0.001
-            & 0.833 & 0.439 & <0.001
-            & 41.4 & 43.8 & <0.001 \\
+            & 0.966 & 0.687 (-27.9 pp) & <0.001
+            & 0.862 & 0.499 (-36.3 pp) & <0.001
+            & 41.3 & 54.6 (+13.2 steps) & <0.001 \\
             \bottomrule
         \end{tabular}%
     }
