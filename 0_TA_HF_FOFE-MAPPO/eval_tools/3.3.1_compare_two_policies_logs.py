@@ -18,10 +18,15 @@ Each policy can optionally STITCH one or more CONTINUATION checkpoints (for resu
 training) via its `cont` list: the base logs, then each continuation's logs appended
 in turn, on one continuous x-axis (a hard section cut marks every join). Order matters.
 
+Two INDEPENDENT policy groups are configured below: POLICIES_S1 (→ the *_S1 PNGs)
+and POLICIES_S2 (→ the *_S2 PNGs). Each group draws its OWN pair of figures with
+identical styling; leave POLICIES_S2 empty to skip the S2 plots. The groups do not
+interact — the S1 figures are never affected by what you put in the S2 group.
+
 Lines are smoothed with a per-section running average (curriculum transitions stay
 sharp); see --smooth. Outputs use stable names (overwritten each run).
 
-Run (repo root, project venv) — no args uses the POLICIES config; or pass paths:
+Run (repo root, project venv) — no args uses the POLICIES_S1/POLICIES_S2 config; or pass paths:
   .venv\\Scripts\\python.exe 0_TA_HF_FOFE-MAPPO\\eval_tools\\compare_two_policies_logs.py \\
       runs/.../complete_FINAL.pt runs/.../baseline_FINAL.pt runs/.../policy_c_FINAL.pt \\
       --labels Complete Baseline "Policy C"
@@ -67,10 +72,18 @@ from .nlr_style import (NLR_PRIMARY, NLR_SECONDARY, NLR_ACCENT, NLR_DARKGRAY,
 #           stitched on AFTER the previous, joining into one continuous x-axis (a
 #           hard section cut marks every join). Order matters; [] = no continuation,
 #           a single "path.pt" string is also accepted.
-POLICIES: list[dict] = [
-    dict(path="runs/FINALV1/complete_s1_20260704/stage5of5_DR_j2-4_k0_25_FINAL.pt",
-         label="Complete V1",
-         cont=[]),
+#   start_iter : (optional) drop the first N iterations and re-base the x-axis to 0.
+#           Use it when a policy's early iterations belong to a different phase that
+#           should not show here — e.g. iters 0→10k were trained on S1 before the S2
+#           run: set start_iter=10_000 so the curve starts at the S2 beginning. It is
+#           applied AFTER stitching, and may differ per policy — each still starts at
+#           0 on the graph. Omit or 0 = keep the whole history.
+#
+# ── S1 GROUP ──  (draws the *_S1 PNGs; leave as-is — these are the good S1 policies)
+POLICIES_S1: list[dict] = [
+    # dict(path="runs/FINALV1/complete_s1_20260704/stage5of5_DR_j2-4_k0_25_FINAL.pt",
+    #      label="Complete V1",
+    #      cont=[]),
     dict(path="runs/FINALV2/complete_stage7of8_DR_j2-4_k0_25.pt",
          label="Complete V2",
          cont=[]),
@@ -78,20 +91,38 @@ POLICIES: list[dict] = [
          label="Baseline V2",
          cont=["runs/FINALV2/FINAL_baseline_s1_cont.pt",
                "runs/FINALV2/Final_Baseline_Cont_2.pt",
-               "runs/FINALV2/Final_Baseline_Cont_3.pt", 
-               "runs/FINALV2/Final_Baseline_Cont_4.pt", 
+               "runs/FINALV2/Final_Baseline_Cont_3.pt",
+               "runs/FINALV2/Final_Baseline_Cont_4.pt",
                "runs/FINALV2/Final_Baseline_Cont_5.pt"]),
     # dict(path="runs/.../policy_c.pt", label="Policy C", cont=[]),
     # dict(path="runs/.../policy_d.pt", label="Policy D", cont=[]),
+]
+
+# ── S2 GROUP ──  (draws the *_S2 PNGs; SAME dict format as POLICIES_S1 above).
+# Fill in your S2 checkpoints here. Leave the list empty to skip the S2 plots
+# entirely — the S1 figures are unaffected either way.
+POLICIES_S2: list[dict] = [
+    dict(path="runs/FINALV1/complete_S2_20260704/stage3of3_S2_DR_j2-4_k0_25_FINAL.pt",
+         label="OLD - Complete S2",
+         start_iter=5000,          # set to e.g. 10_000 to drop the S1 phase (0→10k)
+         cont=[]),
+    dict(path="runs/FINALV2/S2_Baseline_stage9of9_S2_DR_j2-4_k0_25_FINAL.pt",
+         label="Baseline S2",
+         start_iter=10000,          # may differ per policy; each still starts at 0 on the graph
+         cont=[]),
 ]
 
 # Running-average window (datapoints); resets at each curriculum section so
 # transitions stay sharp. 1 = raw.                        [CLI: --smooth]
 SMOOTH_WINDOW = 25
 
-# Output PNGs (relative paths resolved against the project dir 0_TA_...).
-REWARD_OUT = "eval_results/compare_reward_curves.png"
-RATES_OUT = "eval_results/compare_eval_rates.png"
+# Output PNGs (relative paths resolved against the project dir 0_TA_...). One pair
+# per group; the S1 and S2 figures are written to distinct files so neither group
+# overwrites the other.
+REWARD_OUT_S1 = "eval_results/compare_reward_curves_S1.png"
+RATES_OUT_S1 = "eval_results/compare_eval_rates_S1.png"
+REWARD_OUT_S2 = "eval_results/compare_reward_curves_S2.png"
+RATES_OUT_S2 = "eval_results/compare_eval_rates_S2.png"
 
 # Figure resolution (dots per inch). Higher = sharper output (larger files). [CLI: --dpi]
 DPI = 600
@@ -204,6 +235,27 @@ def _maybe_stitch(base_logs, base_bounds, cont_spec, who):
     return logs, bounds
 
 
+def _trim_start(logs, bounds, start_iter, who=""):
+    """Drop the first `start_iter` iterations of a (stitched) policy and RE-BASE its
+    x-axis to 0. Use it when a policy's early iterations belong to a DIFFERENT phase
+    (e.g. 0→10k trained on S1) that should not appear on this plot: after trimming,
+    iteration `start_iter` becomes the first point, so two policies with DIFFERENT
+    start_iter values both begin at the left edge (0) of the graph.
+
+    Every log series is sliced from `start_iter` onward (index i == iteration i, so
+    the slice is iteration-aligned), and section bounds are shifted by -start_iter;
+    sections lying entirely in the trimmed-away region are dropped."""
+    t = int(start_iter or 0)
+    if t <= 0:
+        return logs, bounds
+    trimmed = {k: list(v)[t:] for k, v in logs.items()}
+    shifted = [(name, int(s) - t, int(e) - t) for (name, s, e) in bounds if int(e) > t]
+    if who:
+        print(f"  {who}: start_iter={t} → dropped first {t} iters, re-based to 0 "
+              f"({_series_len(trimmed)} iters remain)")
+    return trimmed, shifted
+
+
 def _annotate_pkill(ax, n_iter):
     """Mark the P_kill curriculum stages subtly, low on the axis.
 
@@ -258,7 +310,7 @@ def plot_reward(policies, out, smooth, dpi=DPI):
     print(f"saved reward comparison -> {out}")
 
 
-def plot_eval_rates(policies, out, smooth, dpi=DPI):
+def plot_eval_rates(policies, out, smooth, dpi=DPI, title_suffix=""):
     """Every eval KPI for every policy: colour = metric, line style = policy."""
     fig, ax = plt.subplots(figsize=(13, 6.5))
     n_iter = 0
@@ -277,7 +329,7 @@ def plot_eval_rates(policies, out, smooth, dpi=DPI):
 
     ax.set_xlabel("Global training iteration", fontsize=11)
     ax.set_ylabel("Rate", fontsize=11)
-    ax.set_title("Eval rates — policy comparison", fontsize=12, fontweight="bold")
+    ax.set_title(f"Eval rates — policy comparison{title_suffix}", fontsize=12, fontweight="bold")
     ax.set_ylim(0.0, 1.05)
     if n_iter:
         ax.set_xlim(1, n_iter)
@@ -302,37 +354,23 @@ def plot_eval_rates(policies, out, smooth, dpi=DPI):
     print(f"saved eval-rates comparison -> {out}")
 
 
-def _policy_specs_from_args(args) -> list[dict]:
-    """Ordered list of policy specs (path/label/cont). CLI positional paths, if
-    given, override the config POLICIES list (no stitching via the CLI — configure
-    continuations in POLICIES). Otherwise the config list is used verbatim."""
-    if args.policies:
-        labels = args.labels or []
-        return [dict(path=p, label=(labels[i] if i < len(labels) else None), cont=[])
-                for i, p in enumerate(args.policies)]
-    return [dict(s) for s in POLICIES]
+def _specs_from_cli(args) -> list[dict]:
+    """Ordered list of policy specs (path/label/cont) from CLI positional paths
+    (no stitching via the CLI — configure continuations in the config groups)."""
+    labels = args.labels or []
+    return [dict(path=p, label=(labels[i] if i < len(labels) else None), cont=[])
+            for i, p in enumerate(args.policies)]
 
 
-def main():
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("policies", nargs="*", default=None, metavar="CKPT",
-                    help="base checkpoint(s) to compare, in order; overrides the "
-                         "config POLICIES list. For continuations, edit POLICIES.")
-    ap.add_argument("--labels", nargs="+", default=None, metavar="LABEL",
-                    help="legend labels for the positional policies, in order "
-                         "(default: the checkpoint stem)")
-    ap.add_argument("--smooth", type=int, default=SMOOTH_WINDOW,
-                    help="running-average window (1 = raw); resets at each curriculum section")
-    ap.add_argument("--dpi", type=int, default=DPI, help="output resolution (dots per inch)")
-    ap.add_argument("--reward-out", default=REWARD_OUT)
-    ap.add_argument("--rates-out", default=RATES_OUT)
-    args = ap.parse_args()
-
-    specs = _policy_specs_from_args(args)
+def _run_group(specs, reward_out, rates_out, smooth, dpi, tag, title_suffix="") -> None:
+    """Load + stitch + plot ONE policy group into its own pair of figures. An
+    empty group is skipped (nothing to plot). `tag` names the group in the log;
+    `title_suffix` is appended to the eval-rates title (e.g. ' (S2)')."""
     if not specs:
-        raise SystemExit("No policies to plot — populate POLICIES or pass paths on the CLI.")
+        print(f"[{tag}] no policies configured — skipping (no figures written).")
+        return
 
+    print(f"[{tag}] policies:")
     # Load + stitch each policy in order.
     loaded = []   # [label, logs, bounds, ckpt_name]
     for i, spec in enumerate(specs):
@@ -342,6 +380,7 @@ def main():
         label = spec.get("label") or path.stem
         logs, bounds = _load_logs(path)
         logs, bounds = _maybe_stitch(logs, bounds, spec.get("cont"), f"{chr(65 + i)}/{label}")
+        logs, bounds = _trim_start(logs, bounds, spec.get("start_iter"), f"{chr(65 + i)}/{label}")
         loaded.append([label, logs, bounds, path.name])
 
     # Disambiguate any duplicate labels with the policy letter.
@@ -353,15 +392,51 @@ def main():
     policies = []
     for i, (label, logs, bounds, name) in enumerate(loaded):
         policies.append((label, logs, bounds, POLICY_COLORS[i % len(POLICY_COLORS)]))
-        print(f"{chr(65 + i)}: {label}  [{name}]")
+        print(f"  {chr(65 + i)}: {label}  [{name}]")
 
     if len(policies) > len(POLICY_STYLES):
         print(f"  ! {len(policies)} policies but only {len(POLICY_STYLES)} line "
               f"styles — eval-rates styles will repeat (curves may be hard to tell "
               f"apart). Reduce policies or add styles to POLICY_STYLES.")
 
-    plot_reward(policies, _resolve_out(args.reward_out), args.smooth, args.dpi)
-    plot_eval_rates(policies, _resolve_out(args.rates_out), args.smooth, args.dpi)
+    plot_reward(policies, _resolve_out(reward_out), smooth, dpi)
+    plot_eval_rates(policies, _resolve_out(rates_out), smooth, dpi, title_suffix)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("policies", nargs="*", default=None, metavar="CKPT",
+                    help="base checkpoint(s) to compare, in order; when given, these "
+                         "override the config groups and are drawn to the *_S1 PNGs "
+                         "(only). For continuations / the S2 group, edit the config.")
+    ap.add_argument("--labels", nargs="+", default=None, metavar="LABEL",
+                    help="legend labels for the positional policies, in order "
+                         "(default: the checkpoint stem)")
+    ap.add_argument("--smooth", type=int, default=SMOOTH_WINDOW,
+                    help="running-average window (1 = raw); resets at each curriculum section")
+    ap.add_argument("--dpi", type=int, default=DPI, help="output resolution (dots per inch)")
+    ap.add_argument("--reward-out-s1", default=REWARD_OUT_S1)
+    ap.add_argument("--rates-out-s1", default=RATES_OUT_S1)
+    ap.add_argument("--reward-out-s2", default=REWARD_OUT_S2)
+    ap.add_argument("--rates-out-s2", default=RATES_OUT_S2)
+    args = ap.parse_args()
+
+    # CLI positional paths → an ad-hoc single group, drawn to the S1 outputs
+    # (exactly the old behaviour). No S2 group in this mode.
+    if args.policies:
+        _run_group(_specs_from_cli(args), args.reward_out_s1, args.rates_out_s1,
+                   args.smooth, args.dpi, tag="CLI", title_suffix=" (S1)")
+        return
+
+    # Default: run BOTH config groups, each to its own pair of figures.
+    if not POLICIES_S1 and not POLICIES_S2:
+        raise SystemExit("No policies to plot — populate POLICIES_S1 / POLICIES_S2 "
+                         "or pass paths on the CLI.")
+    _run_group([dict(s) for s in POLICIES_S1], args.reward_out_s1, args.rates_out_s1,
+               args.smooth, args.dpi, tag="S1", title_suffix=" (S1)")
+    _run_group([dict(s) for s in POLICIES_S2], args.reward_out_s2, args.rates_out_s2,
+               args.smooth, args.dpi, tag="S2", title_suffix=" (S2)")
 
 
 if __name__ == "__main__":

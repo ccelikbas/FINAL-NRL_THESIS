@@ -42,7 +42,7 @@ from .evaluate_policy import _LoadedCheckpoint
 #  Bare name → runs/ ; or a repo-root-relative / absolute path.
 #  (The --checkpoint CLI flag, if given, overrides this.)
 # ═══════════════════════════════════════════════════════════════════
-POLICY_PATH = "2s2-4jV6.pt"
+POLICY_PATH = "FINALV2/S2_Baseline_stage9of9_DR_j2-4_k0_25_FINAL.pt"
 
 W = 66  # display width
 
