@@ -25,6 +25,8 @@ and — optionally — explicit warm-start checkpoints. This expresses everythin
 WHERE AN S2 JOB'S CHECKPOINT COMES FROM  (two ways — this is the key bit)
 ──────────────────────────────────────────────────────────────────────────────
 For each S2 job the warm-start checkpoint is resolved in this order:
+  0. FORCED SCRATCH — `from_scratch=True` on the Run trains every job in it from
+     random init, ignoring everything below (use to train an S2 job from scratch).
   1. EXPLICIT — `checkpoints={"complete_s2": "runs/V3/complete_S1_FINAL.pt"}`
      on the Run wins (path relative to 0_TA_HF_FOFE-MAPPO/, or absolute).
   2. CHAINED  — otherwise it CONTINUES from its S1 sibling trained EARLIER in
@@ -131,11 +133,15 @@ class Run:
     checkpoints : optional {job_key: checkpoint_path} to FORCE an S2 job's warm-
                   start (path relative to 0_TA_HF_FOFE-MAPPO/, or absolute).
                   Omit to CHAIN from the S1 sibling trained earlier / on disk.
+    from_scratch: True → force EVERY job in this Run to train from random init,
+                  ignoring checkpoints / chaining / on-disk S1 (overrides the
+                  Job's own from_scratch). Use to train an S2 job from scratch.
     """
     tag: str
     jobs: List[str] = field(default_factory=lambda: list(ALL_JOBS))
     seed: int = 42
     checkpoints: Dict[str, str] = field(default_factory=dict)
+    from_scratch: bool = False
 
 
 # EDIT THIS. Each Run runs top-to-bottom. See the header for the checkpoint rules.
@@ -149,13 +155,11 @@ RUNS: List[Run] = [
     # Run(tag="V3b", jobs=ALL_JOBS, seed=1),
 
     # ── Example: only the complete S1→S2 lineage (chained, no paths). ──
-    Run(tag="V3_complete_S1", jobs=["complete_s1"], seed=0),
+    # Run(tag="V3_complete_S1", jobs=["complete_s1"], seed=0),
 
-    Run(tag="V3_complete_S2", jobs=["complete_s2"], seed=0,
-        checkpoints={"complete_s2": "runs/FINALV2/complete_stage7of8_DR_j2-4_k0_25.pt"}),
+    Run(tag="V4_complete_S2", jobs=["complete_s2"], seed=0, from_scratch=True),
 
-    Run(tag="V3_baseline_S2", jobs=["baseline_s2"], seed=0,
-        checkpoints={"baseline_s2": "runs/FINALV2/Final_Baseline_Cont_4.pt"}),
+    Run(tag="V4_baseline_S2", jobs=["baseline_s2"], seed=0, from_scratch=True),
 ]
 
 
@@ -245,6 +249,9 @@ def _resolve_warmstart(job: Job, run: Run, produced: Dict[str, Path],
                        save_root: Path) -> Tuple[Optional[Path], str]:
     """Resolve an S2 job's warm-start checkpoint (see the module header for the
     order). Returns (path_or_None, human_source)."""
+    # 0. forced from scratch on the Run — overrides all fallbacks below.
+    if run.from_scratch:
+        return None, "from scratch (forced by Run)"
     # 1. explicit path on the Run.
     spec = run.checkpoints.get(job.key)
     if spec:

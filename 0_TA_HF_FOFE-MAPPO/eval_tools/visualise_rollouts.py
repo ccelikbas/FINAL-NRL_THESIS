@@ -58,7 +58,7 @@ from .HF_visualization import HFTestRunner, hf_animate_rollout
 # ===================================================================
 
 # Policy to visualise. Bare name → runs/, "runs/…/x.pt" → project dir, abs → as-is.
-POLICY_PATH = "runs/FINALV1/complete_S1_20260704/stage5of5_DR_j2-4_k0_25_FINAL.pt"
+POLICY_PATH = "runs/FINALV3/complete_S2_FINAL.pt"
 
 # Communication used at evaluation — set it to match how the policy was TRAINED
 # (True for the complete/comms model, False for a no-comms baseline).
@@ -73,8 +73,8 @@ FINAL_CONFIG = CurriculumSection(
     name="final",
     n_iters=1,                       # unused here
     n_strikers=2, n_jammers=(2, 4),  # (lo, hi) → DR
-    n_known_targets=(2, 4), n_unknown_targets=0,
-    n_known_radars=(4, 6), n_unknown_radars=0,
+    n_known_targets=(1, 2), n_unknown_targets=(1, 2),
+    n_known_radars=(3, 4), n_unknown_radars=(1, 2),
     radar_kill_probability=0.25,
     scenario="S2",
 )

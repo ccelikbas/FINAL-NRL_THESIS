@@ -127,8 +127,9 @@ KPIS = [
 # Comparison dashboard rows: (key, title, colormap, direction). "higher"/"lower" = which
 # way is BETTER for the policy, driving the one-sided Wilcoxon alternative.
 COMPARE_KPIS = [
-    ("targets_destroyed", "Targets destroyed", "viridis", "higher"),
-    ("survival",          "Survival rate",     "viridis", "higher"),
+    ("targets_destroyed", "Targets destroyed",     "viridis", "higher"),
+    ("survival",          "Survival rate",         "viridis", "higher"),
+    ("duration",          "Mean duration (steps)", "cividis", "lower"),
 ]
 
 
