@@ -84,18 +84,18 @@ POLICIES_S1: list[dict] = [
     # dict(path="runs/FINALV1/complete_s1_20260704/stage5of5_DR_j2-4_k0_25_FINAL.pt",
     #      label="Complete V1",
     #      cont=[]),
-    dict(path="runs/FINALV2/complete_stage7of8_DR_j2-4_k0_25.pt",
-         label="Complete V2",
-         cont=[]),
-    dict(path="runs/FINALV2/baseline_stage11of11_DR_j2-4_k0_25_FINAL.pt",
-         label="Baseline V2",
-         cont=["runs/FINALV2/FINAL_baseline_s1_cont.pt",
-               "runs/FINALV2/Final_Baseline_Cont_2.pt",
-               "runs/FINALV2/Final_Baseline_Cont_3.pt",
-               "runs/FINALV2/Final_Baseline_Cont_4.pt",
-               "runs/FINALV2/Final_Baseline_Cont_5.pt"]),
-    # dict(path="runs/.../policy_c.pt", label="Policy C", cont=[]),
-    # dict(path="runs/.../policy_d.pt", label="Policy D", cont=[]),
+
+    # S1 scenarios
+    # dict(path="runs/FINALV2/complete_stage7of8_DR_j2-4_k0_25.pt",
+    #      label="Complete V2",
+    #      cont=[]),
+    # dict(path="runs/FINALV2/baseline_stage11of11_DR_j2-4_k0_25_FINAL.pt",
+    #      label="Baseline V2",
+    #      cont=["runs/FINALV2/FINAL_baseline_s1_cont.pt",
+    #            "runs/FINALV2/Final_Baseline_Cont_2.pt",
+    #            "runs/FINALV2/Final_Baseline_Cont_3.pt",
+    #            "runs/FINALV2/Final_Baseline_Cont_4.pt",
+    #            "runs/FINALV2/Final_Baseline_Cont_5.pt"]),
 ]
 
 # ── S2 GROUP ──  (draws the *_S2 PNGs; SAME dict format as POLICIES_S1 above).
@@ -132,7 +132,8 @@ RATES_OUT_S2 = "eval_results/compare_eval_rates_S2.png"
 #   Time (h)       : SUM of the per-iteration TRAINING time (iter_time_excl_eval_s,
 #                    i.e. eval time excluded — already stored per-iter in the .pt)
 #                    over iterations 0..peak, reported in HOURS.
-#   Reward         : the maximum training reward over all iterations.
+#   Reward         : the maximum training reward after the final-stage start
+#                    (S1 >= 5000, S2 >= 4000 on the plotted/re-based x-axis).
 # Complete vs Baseline are matched per group by an optional `model="complete"` /
 # "baseline" key on the policy dict, else inferred from a label containing
 # "complete"/"baseline".
@@ -141,6 +142,11 @@ TABLE_OUT = "eval_results/convergence_comparison.tex"
 # achieved reward"); set to SMOOTH_WINDOW to find the peak on the SMOOTHED curve
 # drawn in the plots (steadier, ignores single-iteration spikes). [CLI: --table-smooth]
 TABLE_SMOOTH_WINDOW = 1
+
+# The final curriculum stage starts here on the plotted/re-based x-axis. The
+# convergence table searches for the peak reward only from this point onward, and
+# the figures mark the same point with a subtle vertical guide.
+FINAL_STATE_START_ITER = {"S1": 5000, "S2": 4000}
 
 # Figure resolution (dots per inch). Higher = sharper output (larger files). [CLI: --dpi]
 DPI = 600
@@ -300,7 +306,21 @@ def _annotate_pkill(ax, n_iter):
             fontsize=6.0, color=NLR_GRAY, alpha=0.9, style="italic")
 
 
-def plot_reward(policies, out, smooth, dpi=DPI):
+def _annotate_final_state_start(ax, n_iter, start_iter, label=None):
+    """Mark the first iteration included in the convergence-table peak search."""
+    if start_iter is None:
+        return
+    start = int(start_iter)
+    if start <= 0 or not n_iter or start > n_iter:
+        return
+    trans = ax.get_xaxis_transform()
+    ax.axvline(start, color=NLR_DARKGRAY, lw=1.0, ls="--", alpha=0.65, zorder=1.5)
+    ax.text(start, 0.985, label or f"final stage start ({start:,})", transform=trans,
+            ha="right", va="top", rotation=90, fontsize=8.0,
+            color=NLR_DARKGRAY, alpha=0.9, zorder=2)
+
+
+def plot_reward(policies, out, smooth, dpi=DPI, final_start_iter=None, final_start_label=None):
     """One (train) reward curve per policy on a shared axis."""
     fig, ax = plt.subplots(figsize=(13, 6))
     n_iter = 0
@@ -322,6 +342,7 @@ def plot_reward(policies, out, smooth, dpi=DPI):
         ax.set_xlim(1, n_iter)
     ax.grid(True, alpha=0.3)
     _annotate_pkill(ax, n_iter)
+    _annotate_final_state_start(ax, n_iter, final_start_iter, final_start_label)
     ax.legend(loc="lower right", fontsize=10, frameon=True, title="policy")
     fig.tight_layout()
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -330,7 +351,7 @@ def plot_reward(policies, out, smooth, dpi=DPI):
     print(f"saved reward comparison -> {out}")
 
 
-def plot_eval_rates(policies, out, smooth, dpi=DPI, title_suffix=""):
+def plot_eval_rates(policies, out, smooth, dpi=DPI, title_suffix="", final_start_iter=None, final_start_label=None):
     """Every eval KPI for every policy: colour = metric, line style = policy."""
     fig, ax = plt.subplots(figsize=(13, 6.5))
     n_iter = 0
@@ -355,6 +376,7 @@ def plot_eval_rates(policies, out, smooth, dpi=DPI, title_suffix=""):
         ax.set_xlim(1, n_iter)
     ax.grid(True, alpha=0.3)
     _annotate_pkill(ax, n_iter)
+    _annotate_final_state_start(ax, n_iter, final_start_iter, final_start_label)
 
     # Two legends: colour → metric, line style → policy.
     kpi_handles = [Line2D([0], [0], color=c, lw=1.8, label=l)
@@ -396,7 +418,7 @@ def _policy_model(spec) -> "str | None":
     return None
 
 
-def _run_group(specs, reward_out, rates_out, smooth, dpi, tag, title_suffix="") -> list[dict]:
+def _run_group(specs, reward_out, rates_out, smooth, dpi, tag, title_suffix="", final_start_iter=None) -> list[dict]:
     """Load + stitch + plot ONE policy group into its own pair of figures, and
     RETURN the per-policy data (label / model / stitched+rebased logs / bounds) so
     the convergence table can be built. An empty group is skipped. `tag` names the
@@ -429,7 +451,8 @@ def _run_group(specs, reward_out, rates_out, smooth, dpi, tag, title_suffix="") 
     for i, (label, logs, bounds, name) in enumerate(loaded):
         policies.append((label, logs, bounds, POLICY_COLORS[i % len(POLICY_COLORS)]))
         entries.append({"label": label, "model": _policy_model(specs[i]),
-                        "logs": logs, "bounds": bounds})
+                        "logs": logs, "bounds": bounds,
+                        "final_start_iter": final_start_iter})
         print(f"  {chr(65 + i)}: {label}  [{name}]")
 
     if len(policies) > len(POLICY_STYLES):
@@ -437,8 +460,12 @@ def _run_group(specs, reward_out, rates_out, smooth, dpi, tag, title_suffix="") 
               f"styles — eval-rates styles will repeat (curves may be hard to tell "
               f"apart). Reduce policies or add styles to POLICY_STYLES.")
 
-    plot_reward(policies, _resolve_out(reward_out), smooth, dpi)
-    plot_eval_rates(policies, _resolve_out(rates_out), smooth, dpi, title_suffix)
+    final_label = None
+    if final_start_iter:
+        final_label = f"final stage start ({int(final_start_iter / 1000)}k)"
+    plot_reward(policies, _resolve_out(reward_out), smooth, dpi, final_start_iter, final_label)
+    plot_eval_rates(policies, _resolve_out(rates_out), smooth, dpi, title_suffix,
+                    final_start_iter, final_label)
     return entries
 
 
@@ -446,13 +473,15 @@ def _run_group(specs, reward_out, rates_out, smooth, dpi, tag, title_suffix="") 
 # Convergence-comparison table (Complete vs Baseline; rows S1 & S2)
 # =====================================================================
 
-def _convergence_stats(entry: dict, smooth_window: int) -> "dict | None":
+def _convergence_stats(entry: dict, smooth_window: int, final_start_iter: int = 1) -> "dict | None":
     """For one policy's (already stitched + start_iter-rebased) logs, return
     {iters, hours, reward}:
       iters  = 1-based iteration at which the peak training reward occurs (from 0
                in S1, from the re-based S2 start in S2);
       hours  = summed TRAINING time (eval excluded) over iterations 0..peak / 3600;
       reward = the reward at that peak.
+    The peak search ignores curriculum ramp-up by considering only samples with
+    plotted_iteration >= final_start_iter.
     `smooth_window` > 1 locates the peak on the section-smoothed curve; 1 = raw."""
     logs, bounds = entry["logs"], entry["bounds"]
     rew = np.asarray(logs.get(TRAIN_REWARD_KEY, []), dtype=float)
@@ -463,13 +492,20 @@ def _convergence_stats(entry: dict, smooth_window: int) -> "dict | None":
         series = np.asarray(_smooth_sectioned(xs, rew, bounds, smooth_window), dtype=float)
     else:
         series = rew
+    min_iter = max(1, int(final_start_iter or 1))
     finite = np.where(np.isfinite(series))[0]
-    peak = int(finite[np.argmax(series[finite])])           # 0-based peak index
+    eligible = finite[(finite + 1) >= min_iter]
+    if eligible.size == 0:
+        print(f"  ! convergence table: {entry.get('label', 'policy')} has no "
+              f"finite reward samples at/after iteration {min_iter}; skipped.")
+        return None
+    peak = int(eligible[np.argmax(series[eligible])])       # 0-based peak index
     t = np.asarray(logs.get(TRAIN_TIME_KEY, []), dtype=float)
     hours = None
     if t.size:
         hours = float(np.nansum(t[:min(peak + 1, t.size)])) / 3600.0
-    return {"iters": peak + 1, "hours": hours, "reward": float(series[peak])}
+    return {"iters": peak + 1, "hours": hours, "reward": float(series[peak]),
+            "search_start_iter": min_iter}
 
 
 def _pick_model(entries: list, model: str) -> "dict | None":
@@ -494,7 +530,7 @@ def build_convergence_table(rows: list) -> str:
     return "\n".join([
         r"\begin{table}[htbp]",
         r"    \centering",
-        r"    \caption{Convergence comparison between the complete and baseline models in Scenarios~S1 and~S2.}",
+        r"    \caption{Convergence comparison between the complete and baseline models in Scenarios~S1 and~S2. The peak reward is searched only after the final curriculum stage starts (S1: iteration~5000; S2: iteration~4000).}",
         r"    \label{tab:convergence_comparison}",
         r"    \small",
         r"    \begin{tabular}{lcccccc}",
@@ -530,12 +566,14 @@ def write_convergence_table(s1_entries: list, s2_entries: list,
         if entries and base is None:
             print(f"  ! convergence table: no 'baseline' policy identified in {scen} "
                   f"(add model='baseline' or use a label containing 'baseline').")
-        rows.append((scen, _convergence_stats(comp, smooth_window) if comp else None,
-                     _convergence_stats(base, smooth_window) if base else None))
+        start_iter = FINAL_STATE_START_ITER.get(scen, 1)
+        rows.append((scen, _convergence_stats(comp, smooth_window, start_iter) if comp else None,
+                     _convergence_stats(base, smooth_window, start_iter) if base else None))
 
     mode = "raw" if not (smooth_window and smooth_window > 1) else f"smoothed(w={smooth_window})"
-    print(f"\nConvergence comparison (peak reward located on {mode} curve; "
-          f"time = training-only hours to peak):")
+    print(f"\nConvergence comparison (peak reward located on {mode} curve "
+          f"after final-stage start: S1>={FINAL_STATE_START_ITER['S1']}, "
+          f"S2>={FINAL_STATE_START_ITER['S2']}; time = training-only hours to peak):")
     print(f"  {'':4s}  {'Complete (iters / h / reward)':32s}  Baseline (iters / h / reward)")
     for scen, comp, base in rows:
         def _cell(s):
@@ -585,10 +623,12 @@ def main():
                          "or pass paths on the CLI.")
     s1_entries = _run_group([dict(s) for s in POLICIES_S1], args.reward_out_s1,
                             args.rates_out_s1, args.smooth, args.dpi, tag="S1",
-                            title_suffix=" (S1)")
+                            title_suffix=" (S1)",
+                            final_start_iter=FINAL_STATE_START_ITER["S1"])
     s2_entries = _run_group([dict(s) for s in POLICIES_S2], args.reward_out_s2,
                             args.rates_out_s2, args.smooth, args.dpi, tag="S2",
-                            title_suffix=" (S2)")
+                            title_suffix=" (S2)",
+                            final_start_iter=FINAL_STATE_START_ITER["S2"])
 
     # Convergence-comparison table (Complete vs Baseline, rows S1 & S2).
     write_convergence_table(s1_entries, s2_entries, args.table_smooth,

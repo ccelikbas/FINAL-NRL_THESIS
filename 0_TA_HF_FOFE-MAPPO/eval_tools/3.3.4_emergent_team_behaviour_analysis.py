@@ -98,7 +98,7 @@ MAIN_POLICY = PolicyInput(
 COMPARISON_POLICIES: List[PolicyInput] = [
     PolicyInput(
         name="Baseline",
-        policy_file="runs/FINALV2/Final_Baseline_Cont_3.pt",
+        policy_file="runs/FINALV2/Final_Baseline_Cont_4.pt",
         communicate=False,
     ),
 ]
