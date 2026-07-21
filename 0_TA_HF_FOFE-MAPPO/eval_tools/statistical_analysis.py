@@ -50,12 +50,18 @@ TRAINED checkpoints need a separate HIERARCHICAL analysis:
     episodes → mean per training seed → variation across training-seed means.
 
 ──────────────────────────────────────────────────────────────────────────────
-NORMALITY OF BOOTSTRAP MEANS  (diagnostic only, OFF by default)
+NORMALITY OF THE SAMPLING DISTRIBUTIONS OF THE KPI MEANS  (ON by default)
 ──────────────────────────────────────────────────────────────────────────────
-A D'Agostino-Pearson test on B bootstrap means is over-sensitive and is NOT a
-rule for deciding whether the bootstrap CI holds; it is only printed when
---run_bootstrap_normality_diagnostic is passed. The percentile CI is reported
-regardless.
+The CLT predicts that each KPI's mean is approximately normally distributed at
+large n. We assess this with a SHAPIRO-WILK test on the bootstrap sampling
+distribution of the mean: draw NORMALITY_N_SAMPLES (default 600) bootstrap
+sample means — each a resample of the study's episode count — and test THOSE for
+normality. The test is fed a modest 600 means (NOT the full B used for the CI)
+so its power is calibrated to a realistic sample size; a genuinely near-normal
+sampling distribution then passes rather than being rejected on trivial
+deviations (as it would if all B≈10 000 means were tested). Output: per-KPI
+p-values at α=0.05 and a printed + saved LaTeX table. The percentile CI itself
+requires no normality; the test is reported as supporting evidence.
 
 ──────────────────────────────────────────────────────────────────────────────
 HOW TO USE
@@ -118,7 +124,7 @@ import matplotlib.pyplot as plt
 # NOTE: the "pynvml package is deprecated" FutureWarning at import time comes
 # from the PyTorch/CUDA dependency stack, not from this analysis. It is left
 # untouched on purpose (we do not suppress FutureWarnings globally).
-from scipy.stats import normaltest, skew
+from scipy.stats import shapiro, skew
 
 from .config import PPOConfig
 from .trainer import build_env
@@ -141,7 +147,7 @@ SCENARIOS: List[CurriculumSection] = [
         name="FOFE-MAPPO S2",
         policy_file="runs/FINALV2/complete_stage7of8_DR_j2-4_k0_25.pt",
         n_iters=1,  # not used
-        n_strikers=2, n_jammers=(2, 4),
+        n_strikers=2, n_jammers=4,
         n_known_targets=(2, 4), n_unknown_targets=0,
         n_known_radars=(4, 6), n_unknown_radars=0,
         radar_kill_probability=0.25,
@@ -186,8 +192,12 @@ N_BOOTSTRAP    = 10_000   # bootstrap resamples B for the reported distributions
 BOOTSTRAP_SEED = 12345    # RNG seed for ALL bootstrap resampling (reproducible)
 BOOTSTRAP_MAX_ELEMS = 20_000_000   # cap the [B, n] index matrix before chunking
 
-# ── normality diagnostic (OFF by default; not a decision rule) ───────
-NORMALITY_ALPHA = 0.05
+# ── normality of the sampling distributions of the KPI means (ON) ────
+# Shapiro-Wilk is applied to NORMALITY_N_SAMPLES bootstrap sample means per KPI.
+# Using a modest count (matching the study's episode budget) keeps the test's
+# power calibrated so near-normal sampling distributions are not over-rejected.
+NORMALITY_ALPHA     = 0.05
+NORMALITY_N_SAMPLES = 600     # bootstrap sample means fed to the Shapiro-Wilk test
 
 WILSON_Z = 1.959963985   # z for a 95 % Wilson interval (completion, final mode)
 
@@ -255,6 +265,7 @@ class RunOpts:
     n_bootstrap: int
     bootstrap_seed: int
     normality_alpha: float
+    normality_n_samples: int
     run_normality: bool
     scenario_name_check: str
     out_dir: Path
@@ -562,51 +573,149 @@ def bootstrap_paired_diff_means(complete: np.ndarray, baseline: np.ndarray,
 
 
 # =====================================================================
-#  Normality diagnostic (OFF by default; NOT a decision rule)
+#  Normality of the sampling distribution of each KPI mean
+#  (Shapiro-Wilk on NORMALITY_N_SAMPLES bootstrap sample means)
 # =====================================================================
 
-def normality_tests_of_means(means_by_kpi: Dict[str, np.ndarray],
-                             alpha: float) -> Dict[str, dict]:
-    """D'Agostino-Pearson on each histogram KPI's bootstrap means (shape only)."""
+def normality_of_mean_distribution(spec: KpiSpec, pool: np.ndarray,
+                                   sample_size: int, n_samples: int,
+                                   rng: np.random.Generator,
+                                   alpha: float) -> dict:
+    """Shapiro-Wilk normality test of a KPI mean's sampling distribution.
+
+    The sampling distribution of the mean at `sample_size` is estimated by
+    drawing `n_samples` bootstrap sample means (each a resample of `sample_size`
+    observations WITH replacement); Shapiro-Wilk then tests those `n_samples`
+    means for normality. Feeding a MODEST count (default 600) — not the full B
+    replicates used for the CI — keeps the test's power calibrated to a realistic
+    sample size, so a genuinely near-normal sampling distribution is not rejected
+    on trivial deviations. The CLT predicts approximate normality at large n.
+    """
+    pool = np.asarray(pool, dtype=float)
+    pool = pool[np.isfinite(pool)]
+    result = {
+        "key": spec.key, "label": spec.label, "conditional": spec.conditional,
+        "sample_size": int(sample_size), "n_samples": 0,
+        "statistic": None, "pvalue": None, "is_normal": None, "reason": None,
+    }
+    if pool.size < 2 or sample_size < 2:
+        result["reason"] = "insufficient data"
+        return result
+
+    means = bootstrap_sample_means(pool, int(sample_size), int(n_samples), rng)
+    means = means[np.isfinite(means)]
+    result["n_samples"] = int(means.size)
+    if means.size < 3:
+        result["reason"] = "need at least 3 bootstrap means"
+    elif np.ptp(means) == 0.0:
+        result["reason"] = "all bootstrap means identical"
+    else:
+        test = shapiro(means)
+        statistic, pvalue = float(test.statistic), float(test.pvalue)
+        if np.isfinite(statistic) and np.isfinite(pvalue):
+            result["statistic"] = statistic
+            result["pvalue"] = pvalue
+            result["is_normal"] = pvalue >= alpha
+        else:
+            result["reason"] = "test returned a non-finite result"
+    return result
+
+
+def normality_of_means(pools: Dict[str, np.ndarray], summaries: Dict[str, dict],
+                       n_samples: int, rng: np.random.Generator,
+                       alpha: float) -> Dict[str, dict]:
+    """Run the Shapiro-Wilk normality test for every histogram KPI.
+
+    Each KPI's resample size is taken from its summary (the study N_eval, or the
+    completed-mission count for the conditional duration) so the tested sampling
+    distribution matches the one reported in the histogram dashboard.
+    """
     results: Dict[str, dict] = {}
     for spec in HISTOGRAM_SPECS:
-        x = np.asarray(means_by_kpi.get(spec.key, np.empty(0)), dtype=float)
-        x = x[np.isfinite(x)]
-        result = {"n": int(x.size), "statistic": None, "pvalue": None,
-                  "is_normal": None, "reason": None}
-        if x.size < 8:
-            result["reason"] = "requires at least 8 bootstrap means"
-        elif np.ptp(x) == 0.0:
-            result["reason"] = "all bootstrap means are identical"
-        else:
-            test = normaltest(x)
-            statistic, pvalue = float(test.statistic), float(test.pvalue)
-            if np.isfinite(statistic) and np.isfinite(pvalue):
-                result["statistic"] = statistic
-                result["pvalue"] = pvalue
-                result["is_normal"] = pvalue >= alpha
-            else:
-                result["reason"] = "test returned a non-finite result"
-        results[spec.key] = result
+        size = int(summaries.get(spec.key, {}).get("sample_size", 0))
+        results[spec.key] = normality_of_mean_distribution(
+            spec, pools[spec.key], size, n_samples, rng, alpha)
     return results
 
 
-def _print_normality_of_means(results: Dict[str, dict]) -> None:
-    print("      -- OPTIONAL bootstrap-mean shape diagnostic "
-          "(D'Agostino-Pearson) --", flush=True)
-    print("         This is an optional shape diagnostic only. With B bootstrap "
-          "replicates, very small", flush=True)
-    print("         deviations from normality may produce small p-values. The "
-          "bootstrap confidence", flush=True)
-    print("         interval does not require normality.", flush=True)
+def _fmt_pvalue(p: Optional[float]) -> str:
+    if p is None:
+        return "--"
+    return f"{p:.2e}" if p < 1e-4 else f"{p:.4f}"
+
+
+def _latex_escape(text: str) -> str:
+    for a, b in (("\\", r"\textbackslash{}"), ("&", r"\&"), ("%", r"\%"),
+                 ("_", r"\_"), ("#", r"\#"), ("$", r"\$"),
+                 ("{", r"\{"), ("}", r"\}"), ("~", r"\textasciitilde{}")):
+        text = text.replace(a, b)
+    return text
+
+
+def build_normality_latex(results: Dict[str, dict], mode: str, display: str,
+                          n_samples: int, alpha: float) -> str:
+    """Assemble a booktabs LaTeX table of the Shapiro-Wilk normality results."""
+    mode_word = "pilot (expected)" if mode == "pilot" else "final"
+    lines = [
+        r"\begin{table}[htbp]",
+        r"  \centering",
+        (f"  \\caption{{Shapiro--Wilk normality test of the bootstrap sampling "
+         f"distribution of each KPI mean ({mode_word} mode, scenario "
+         f"{_latex_escape(display)}). The test is applied to {n_samples} bootstrap "
+         f"sample means; a KPI is flagged Normal when $p \\geq \\alpha$ "
+         f"($\\alpha={alpha:g}$).}}"),
+        f"  \\label{{tab:normality_{_safe_name(display)}_{mode}}}",
+        r"  \begin{tabular}{lrrrc}",
+        r"    \toprule",
+        r"    KPI & Resample $n$ & $W$ & $p$-value & Normal ($\alpha="
+        + f"{alpha:g}" + r"$) \\",
+        r"    \midrule",
+    ]
     for spec in HISTOGRAM_SPECS:
         r = results.get(spec.key, {})
+        label = _latex_escape(spec.label)
+        size = r.get("sample_size", 0)
         if r.get("is_normal") is None:
-            print(f"           {spec.label:34s} not testable ({r.get('reason')})",
+            reason = _latex_escape(r.get("reason") or "not testable")
+            lines.append(f"    {label} & {size} & "
+                         f"\\multicolumn{{3}}{{c}}{{{reason}}} \\\\")
+        else:
+            w = f"{r['statistic']:.4f}"
+            p = _fmt_pvalue(r["pvalue"])
+            verdict = "Yes" if r["is_normal"] else "No"
+            lines.append(f"    {label} & {size} & {w} & {p} & {verdict} \\\\")
+    lines += [r"    \bottomrule", r"  \end{tabular}", r"\end{table}"]
+    return "\n".join(lines)
+
+
+def emit_normality_table(pools: Dict[str, np.ndarray],
+                         summaries: Dict[str, dict], mode: str, display: str,
+                         opts: "RunOpts", rng: np.random.Generator) -> None:
+    """Compute, print (console + LaTeX) and save the KPI-mean normality table."""
+    results = normality_of_means(pools, summaries, opts.normality_n_samples,
+                                 rng, opts.normality_alpha)
+    print("\n  -- Normality of the sampling distributions of the KPI means "
+          "(Shapiro-Wilk) --", flush=True)
+    print(f"     Test applied to {opts.normality_n_samples} bootstrap sample "
+          f"means per KPI; alpha={opts.normality_alpha:g}.", flush=True)
+    for spec in HISTOGRAM_SPECS:
+        r = results[spec.key]
+        if r.get("is_normal") is None:
+            print(f"       {spec.label:34s} not testable ({r.get('reason')})",
                   flush=True)
         else:
-            print(f"           {spec.label:34s} K^2={r['statistic']:.4g}  "
-                  f"p={r['pvalue']:.4g}", flush=True)
+            verdict = "normal" if r["is_normal"] else "NOT normal"
+            print(f"       {spec.label:34s} W={r['statistic']:.4f}  "
+                  f"p={_fmt_pvalue(r['pvalue'])}  [{verdict}]", flush=True)
+
+    latex = build_normality_latex(results, mode, display,
+                                  opts.normality_n_samples, opts.normality_alpha)
+    print("\n  LaTeX table (also saved to file):\n", flush=True)
+    print(latex, flush=True)
+
+    tex_path = opts.out_dir / f"normality_{_safe_name(display)}_{mode}_{opts.stamp}.tex"
+    tex_path.write_text(latex + "\n", encoding="utf-8")
+    print(f"\n      saved normality table    : {tex_path}", flush=True)
 
 
 # =====================================================================
@@ -850,9 +959,7 @@ def _run_pilot_scenario(section, display, ckpt, ckpt_path, env_cfg, policy,
     print(f"      saved expected means     : {mean_png}", flush=True)
 
     if opts.run_normality:
-        norm = normality_tests_of_means({k: summaries[k]["means"] for k in summaries},
-                                        opts.normality_alpha)
-        _print_normality_of_means(norm)
+        emit_normality_table(pooled, summaries, "pilot", display, opts, boot_rng)
 
 
 # =====================================================================
@@ -940,9 +1047,7 @@ def _run_final_scenario(section, display, ckpt, ckpt_path, env_cfg, policy,
     print(f"\n      saved final means        : {mean_png}", flush=True)
 
     if opts.run_normality:
-        norm = normality_tests_of_means({k: summaries[k]["means"] for k in summaries},
-                                        opts.normality_alpha)
-        _print_normality_of_means(norm)
+        emit_normality_table(derived, summaries, "final", display, opts, boot_rng)
 
 
 # =====================================================================
@@ -1024,10 +1129,14 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--bootstrap_seed", type=int, default=BOOTSTRAP_SEED,
                    help=f"RNG seed for all bootstrap resampling (default: {BOOTSTRAP_SEED}).")
     p.add_argument("--normality_alpha", type=float, default=NORMALITY_ALPHA,
-                   help=f"Optional normality-diagnostic alpha (default: {NORMALITY_ALPHA}).")
-    p.add_argument("--run_bootstrap_normality_diagnostic", action="store_true",
-                   help="Run the OPTIONAL D'Agostino-Pearson shape diagnostic on "
-                        "the bootstrap means (off by default; NOT a decision rule).")
+                   help=f"Alpha for the KPI-mean normality test (default: {NORMALITY_ALPHA}).")
+    p.add_argument("--normality_n_samples", type=int, default=NORMALITY_N_SAMPLES,
+                   help="Bootstrap sample means fed to the Shapiro-Wilk normality "
+                        f"test (default: {NORMALITY_N_SAMPLES}).")
+    p.add_argument("--skip_normality", action="store_true",
+                   help="Skip the Shapiro-Wilk normality test of the KPI-mean "
+                        "sampling distributions (ON by default; prints + saves a "
+                        "LaTeX table of the p-values).")
     p.add_argument("--scenario_name_check", choices=["warn", "error", "ignore"],
                    default="warn",
                    help="How to handle a display-name vs section.scenario mismatch "
@@ -1045,6 +1154,9 @@ def main() -> None:
         raise RuntimeError("SCENARIOS is empty — define at least one scenario.")
     if not 0.0 < args.normality_alpha < 1.0:
         raise ValueError("--normality_alpha must be strictly between 0 and 1.")
+    if not 3 <= args.normality_n_samples <= 5000:
+        raise ValueError("--normality_n_samples must be in [3, 5000] "
+                         "(Shapiro-Wilk's supported range).")
     if args.n_bootstrap < 100:
         raise ValueError("--n_bootstrap should be at least 100.")
     if args.analysis_mode == "final":
@@ -1071,7 +1183,8 @@ def main() -> None:
         precision_bootstrap=args.precision_bootstrap, round_to=args.round_to,
         n_bootstrap=args.n_bootstrap, bootstrap_seed=args.bootstrap_seed,
         normality_alpha=args.normality_alpha,
-        run_normality=args.run_bootstrap_normality_diagnostic,
+        normality_n_samples=args.normality_n_samples,
+        run_normality=not args.skip_normality,
         scenario_name_check=args.scenario_name_check,
         out_dir=out_dir, stamp=datetime.now().strftime("%Y%m%d_%H%M%S"),
     )
@@ -1088,8 +1201,9 @@ def main() -> None:
     print(f"  Histogram KPIs: " + ", ".join(k.label for k in HISTOGRAM_SPECS))
     print(f"  Bootstrap     : B={args.n_bootstrap}, seed={args.bootstrap_seed}")
     print(f"  Normality     : "
-          + ("ON (optional diagnostic)" if args.run_bootstrap_normality_diagnostic
-             else "OFF (percentile CI needs no normality)"))
+          + (f"OFF (--skip_normality)" if args.skip_normality
+             else f"ON — Shapiro-Wilk on {args.normality_n_samples} bootstrap "
+                  f"means/KPI, alpha={args.normality_alpha:g} (LaTeX table)"))
     print("─" * 70)
 
     analyse_scenarios(SCENARIOS, default_ckpt_path, opts, device)

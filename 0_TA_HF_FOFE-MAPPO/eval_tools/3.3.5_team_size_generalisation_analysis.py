@@ -89,14 +89,14 @@ POLICY_PATH = "runs/FINALV2/complete_stage7of8_DR_j2-4_k0_25.pt"    # "complete"
 BASELINE_PATH = "runs/FINALV2/Final_Baseline_Cont_4.pt"  # "baseline" model (--baseline); None → single-policy mode
 STRIKERS = [1, 2, 3]             # y-axis of the grid
 JAMMERS = [1, 2, 3, 4, 5, 6]  # x-axis of the grid
-N_RUNS = 100                         # parallel episodes per cell (per seed)
+N_RUNS = 600                         # parallel episodes per cell (per seed)
 N_SEEDS = 1                         # repeats per cell (concatenated); raise for stronger tests
 BASE_SEED = 500
 
 # Fixed evaluation world (match training). Kept constant across the whole sweep.
 SCENARIO = "S2"
 N_KNOWN_RADARS, N_UNKNOWN_RADARS = 6, 0
-N_KNOWN_TARGETS, N_UNKNOWN_TARGETS = 2, 0
+N_KNOWN_TARGETS, N_UNKNOWN_TARGETS = 3, 0
 KILL = 0.25
 FRAG_RADIUS = 0.2
 USE_FOFE = True

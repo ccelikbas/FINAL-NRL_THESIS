@@ -1,0 +1,17 @@
+\begin{table}[htbp]
+  \centering
+  \caption{Shapiro--Wilk normality test of the bootstrap sampling distribution of each KPI mean (pilot (expected) mode, scenario FOFE-MAPPO S2). The test is applied to 600 bootstrap sample means; a KPI is flagged Normal when $p \geq \alpha$ ($\alpha=0.05$).}
+  \label{tab:normality_FOFE_MAPPO_S2_pilot}
+  \begin{tabular}{lrrrc}
+    \toprule
+    KPI & Resample $n$ & $W$ & $p$-value & Normal ($\alpha=0.05$) \\
+    \midrule
+    Target-destruction rate & 325 & 0.9829 & 1.70e-06 & No \\
+    Survival rate & 325 & 0.9970 & 0.3404 & Yes \\
+    Failure-aware duration & 325 & 0.9958 & 0.1094 & Yes \\
+    Duration among completed missions & 306 & 0.9980 & 0.7314 & Yes \\
+    Coalition fragmentation & 325 & 0.9984 & 0.8678 & Yes \\
+    Episode reward & 325 & 0.9961 & 0.1513 & Yes \\
+    \bottomrule
+  \end{tabular}
+\end{table}
