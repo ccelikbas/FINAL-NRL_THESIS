@@ -386,6 +386,39 @@ class RewardConfig:
     # Set to 0.0 to disable.
     beam_accel_effort_scale: float = 0.005
 
+    # ─── VISIBILITY-GATED SHAPING  (reward ↔ observation consistency) ─────────
+    # When True, every radar/target-referencing DENSE SHAPING term is
+    # conditioned on the SAME per-agent visibility the actor observes: a jammer
+    # is only shaped toward radars it can see, a striker only toward targets it
+    # can see. This removes the reward↔observation mismatch that made
+    # unknown-entity scenarios (S2) unlearnable — the policy was penalised for
+    # not orienting toward entities that are masked out of its own observation
+    # (unknown radars/targets beyond R_obs), an ungrounded gradient that also
+    # corrupted learning of the visible/known entities.
+    #
+    # NO-OP in all-known worlds (S1): when every entity is always visible the
+    # gating masks are all-True and every gated term reduces EXACTLY to the
+    # pre-gating computation — so this cannot regress all-known results and
+    # reproduces pre-gating checkpoints there byte-for-byte. Set False to
+    # restore the old ground-truth shaping (e.g. to reproduce an ungated S2 run).
+    #
+    # GATED (both roles, radar/target-referencing shaping):
+    #   striker_approach, target_cover, striker_progress,
+    #   jammer_approach, jammer_progress, jammer_beam_on_radar_bonus,
+    #   jammer_beam_alignment.
+    # NOT GATED (intentional — evaluated on ground truth):
+    #   hf_margin & radar_avoidance (safety; being inside a radar's range is a
+    #   real threat whether or not you have detected it),
+    #   agent_destroyed (a hidden radar can still kill you — this is what drives
+    #   caution/discovery of unknowns),
+    #   target_destroyed / terminal_bonus (actual kills),
+    #   all agent↔agent coordination (escort / formation / coalition /
+    #   separation / jammer→striker approach — teammates are not "unknown"
+    #   entities and the escort field is a deliberately global mechanism).
+    # Only wired into the HF (directional-jammer) environment, which is the
+    # active model; the legacy non-HF reward path is unaffected.
+    reward_visibility_gating: bool = True
+
 
 '''
 RUN: Visualisation of the piecewise linear-exponential shaping function using current paramters:

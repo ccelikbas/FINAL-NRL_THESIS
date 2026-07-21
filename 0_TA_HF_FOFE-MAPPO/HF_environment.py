@@ -929,12 +929,41 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         alive_float = alive.float()
         _t = self._prof_lap("env_kills", _t)
 
+        # Refresh the communication-reachability cache HERE (it used to be
+        # rebuilt at the end of _step, just before the observation build).
+        # agent_alive is now final (post-kill) and agent positions do not change
+        # again this step, so this is byte-identical to the old end-of-step
+        # rebuild for the observation — but it makes the FRESH comm graph
+        # available to the visibility-gated shaping rewards below (which need
+        # the same comm reachability the actor's observation uses). No existing
+        # reward term reads _c_comm_reach, so moving it up changes nothing else.
+        self._update_comm_cache()
+        _t = self._prof_lap("env_comm_cache", _t)
+
         # ==================================================================
         # Reward computation  (identical to parent — copied verbatim)
         # ==================================================================
         reward = torch.zeros(B, A, device=self.device)
         max_dist = math.hypot(self.high - self.low, self.high - self.low)
         ts = float(rp.team_spirit)
+
+        # ── Visibility-gated shaping masks ──────────────────────────────────
+        # Restrict every radar/target-referencing dense SHAPING term below to
+        # the SAME per-agent visibility the actor observes (see
+        # RewardConfig.reward_visibility_gating). When gating is OFF, or in an
+        # all-known world, the masks are all-True and every masked op below
+        # reduces EXACTLY to the pre-gating computation (a numerical no-op), so
+        # ungated runs and all-known (S1) results are reproduced byte-for-byte.
+        # NOT gated by design: hf_margin / radar_avoidance (safety),
+        # agent_destroyed, target kills, and every agent↔agent term.
+        if bool(getattr(rp, "reward_visibility_gating", True)):
+            radar_vis  = self._radar_visibility_mask()        # [B, A, R] bool
+            target_vis = self._target_visibility_mask()       # [B, A, T] bool
+        else:
+            radar_vis  = torch.ones(B, A, self.n_radars,  dtype=torch.bool, device=self.device)
+            target_vis = torch.ones(B, A, self.n_targets, dtype=torch.bool, device=self.device)
+        radar_vis_j  = radar_vis[:, self.n_strikers:, :]      # [B, J, R]  jammer rows
+        target_vis_s = target_vis[:, :self.n_strikers, :]     # [B, ns, T] striker rows
 
         # 1. Target destroyed
         n_killed = kill_t.float().sum(dim=-1)
@@ -1043,7 +1072,10 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         striker_approach_full = torch.zeros(B, A, device=self.device)
         if striker_idx.numel() > 0 and self.n_targets > 0:
             dist_st = self._c_dist_at[:, :self.n_strikers, :]
-            mask_t = self.target_alive[:, None, :].expand(-1, self.n_strikers, -1)
+            # Gate to targets THIS striker can see (no-op when gating off / all
+            # targets known). any_alive below then means "any visible alive
+            # target", and the term is 0 when a striker sees none.
+            mask_t = self.target_alive[:, None, :].expand(-1, self.n_strikers, -1) & target_vis_s
 
             if rp.striker_nearest_only:
                 big_dist = torch.where(mask_t, dist_st, torch.full_like(dist_st, 1e6))
@@ -1087,6 +1119,16 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
             dist_jr = self._c_dist_ar[:, self.n_strikers:, :]
             jammer_alive_f = alive[:, self.n_strikers:].float()
 
+            # Nearest-VISIBLE-radar gating, shared by jammer_approach,
+            # jammer_progress and beam_alignment below. dist_jr_vis pushes
+            # radars this jammer cannot see to +inf so they never win an argmin
+            # / a min, and any_radar_vis_j zeros a term when nothing is visible.
+            # No-op when gating off / all radars known (radar_vis_j all-True).
+            dist_jr_vis = torch.where(
+                radar_vis_j, dist_jr, torch.full_like(dist_jr, float("inf"))
+            )
+            any_radar_vis_j = radar_vis_j.any(dim=-1)                       # [B, J]
+
             app_vals_j = self._piecewise_lin_exp(
                 dist_jr,
                 d_max=rp.jammer_approach_d_max,
@@ -1097,10 +1139,11 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
             )
 
             if rp.jammer_nearest_only:
-                nearest_idx_j = dist_jr.argmin(dim=-1, keepdim=True)
+                nearest_idx_j = dist_jr_vis.argmin(dim=-1, keepdim=True)
                 jammer_app = app_vals_j.gather(-1, nearest_idx_j).squeeze(-1)
             else:
-                jammer_app = app_vals_j.mean(dim=-1)
+                vis_f_j = radar_vis_j.float()
+                jammer_app = (app_vals_j * vis_f_j).sum(dim=-1) / vis_f_j.sum(dim=-1).clamp_min(1.0)
 
             jammer_zero = self._piecewise_lin_exp(
                 torch.zeros((), device=self.device, dtype=dist_jr.dtype),
@@ -1111,6 +1154,10 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
                 alpha=rp.jammer_approach_alpha,
             )
             jammer_app = jammer_app - jammer_zero
+
+            # No approach pressure toward radars the jammer cannot see (no-op
+            # when gating off — any_radar_vis_j is all-True).
+            jammer_app = torch.where(any_radar_vis_j, jammer_app, torch.zeros_like(jammer_app))
 
             jammer_app = jammer_app * jammer_alive_f
             reward[:, self.n_strikers:] += jammer_app
@@ -1125,9 +1172,12 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
             jammer_alive_f = alive[:, self.n_strikers:].float()
 
             if float(rp.jammer_progress_scale) > 0:
-                dist_jr_min_curr, _ = dist_jr.min(dim=-1)
+                # Progress toward the nearest VISIBLE radar; 0 when none visible
+                # (no-op when gating off — dist_jr_vis == dist_jr, mask all-True).
+                dist_jr_min_curr, _ = dist_jr_vis.min(dim=-1)
                 dist_jr_min_prev, _ = self._jammer_prev_dist.min(dim=-1)
                 progress_j = dist_jr_min_prev - dist_jr_min_curr
+                progress_j = torch.where(any_radar_vis_j, progress_j, torch.zeros_like(progress_j))
                 jammer_prog = float(rp.jammer_progress_scale) * progress_j * jammer_alive_f
                 reward[:, self.n_strikers:] += jammer_prog
                 jammer_progress_full[:, self.n_strikers:] = jammer_prog
@@ -1147,8 +1197,10 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
                 # _jammer_in_cone: [B, J, R] — radar inside this jammer's cone.
                 # radar_present excludes masked-out (absent) radars under DR;
                 # it is all-True when DR is off.
+                # Only count radars this jammer can SEE inside its cone (no-op
+                # when gating off — radar_vis_j all-True).
                 any_in_cone = (
-                    self._jammer_in_cone & self.radar_present[:, None, :]
+                    self._jammer_in_cone & self.radar_present[:, None, :] & radar_vis_j
                 ).any(dim=-1).float()                                              # [B, J]
                 beam_bonus = beam_scale * any_in_cone * jammer_alive_f
                 reward[:, self.n_strikers:] += beam_bonus
@@ -1164,13 +1216,20 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
             # (no in-cone gate) so the gradient is smooth everywhere.
             align_scale = float(getattr(rp, "jammer_beam_alignment_scale", 0.0))
             if align_scale != 0.0:
-                # dist_jr already in scope from approach block above — used
-                # to pick the *physically nearest* radar per jammer.
-                nearest_radar_idx = dist_jr.argmin(dim=-1, keepdim=True)           # [B, J, 1]
+                # Aim at the nearest VISIBLE radar (dist_jr_vis from the approach
+                # block). Previously this used the *physically nearest* radar
+                # regardless of visibility, so a jammer was penalised for not
+                # pointing its beam at an unknown radar masked out of its own
+                # observation — an ungrounded gradient. No alignment pressure at
+                # all when no radar is visible. No-op when gating off.
+                nearest_radar_idx = dist_jr_vis.argmin(dim=-1, keepdim=True)       # [B, J, 1]
                 nearest_abs_angle = self._jammer_abs_angular_delta.gather(
                     -1, nearest_radar_idx
                 ).squeeze(-1)                                                      # [B, J] in [0, pi]
                 alignment_pen = -align_scale * (nearest_abs_angle / math.pi) * jammer_alive_f
+                alignment_pen = torch.where(
+                    any_radar_vis_j, alignment_pen, torch.zeros_like(alignment_pen)
+                )
                 reward[:, self.n_strikers:] += alignment_pen
                 jammer_beam_alignment_full[:, self.n_strikers:] = alignment_pen
 
@@ -1180,7 +1239,9 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         if striker_idx.numel() > 0 and self.n_targets > 0:
             if float(rp.striker_progress_scale) > 0:
                 dist_st = self._c_dist_at[:, :self.n_strikers, :]
-                mask_t_p = self.target_alive[:, None, :].expand(-1, self.n_strikers, -1)
+                # Progress only toward visible alive targets (no-op when gating
+                # off); any_alive_p is False → 0 when a striker sees none.
+                mask_t_p = self.target_alive[:, None, :].expand(-1, self.n_strikers, -1) & target_vis_s
                 any_alive_p = mask_t_p.any(dim=-1)
                 progress = self._striker_prev_dist - dist_st
                 progress = torch.where(mask_t_p, progress, torch.full_like(progress, -1e6))
@@ -1319,23 +1380,30 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
             t_alive_f = self.target_alive.float()                      # [B, nt]
 
             d_st = self._c_dist_at[:, :ns, :]                          # [B, ns, nt] striker→target
-            k_st = torch.exp(-d_st / ell_t) * s_alive_f[:, :, None]    # dead strikers contribute 0
+            # Gate to targets each striker can SEE (no-op when gating off / all
+            # targets known): a striker neither covers nor commits to a target it
+            # cannot observe, and is not charged for that target being uncovered.
+            vis_ts = target_vis_s                                      # [B, ns, nt] bool
+            k_st = torch.exp(-d_st / ell_t) * s_alive_f[:, :, None] * vis_ts.float()  # dead/unseen → 0
 
-            # Soft commitment over targets (alive only): each striker assigns its
-            # one unit of mass to its nearest target → no straddling between targets.
-            t_logits = (-d_st / tau_t).masked_fill(t_alive_f[:, None, :] == 0, float("-inf"))  # [B, ns, nt]
+            # Soft commitment over VISIBLE alive targets: each striker assigns its
+            # one unit of mass to its nearest such target → no straddling.
+            valid_t  = (t_alive_f[:, None, :] > 0) & vis_ts           # [B, ns, nt]
+            t_logits = (-d_st / tau_t).masked_fill(~valid_t, float("-inf"))  # [B, ns, nt]
             b_st     = torch.nan_to_num(torch.softmax(t_logits, dim=2), nan=0.0)  # over targets
             bc_st    = b_st * k_st                                     # committed contribution [B, ns, nt]
             C_t      = bc_st.sum(dim=1)                                # [B, nt] coverage per target
 
-            # NEGATIVE shaping (farm-proof): penalise the team's UNMET target coverage
-            # over ALIVE targets, 0 when every target is covered to κ_t. The gradient
-            # w.r.t. each striker runs through C_t, pulling it onto an UNDER-covered
-            # target; with the κ_t cap + soft-commit, U=0 requires DISTRIBUTION (one
-            # striker per target). Loitering between targets leaves them uncovered →
-            # penalised, so strikers are driven ONTO targets (engage/destroy preserved).
-            unmet_t = ((kappa_t - C_t).clamp(min=0.0) * t_alive_f).sum(dim=-1, keepdim=True)  # [B,1]
-            striker_cover = -w_st * unmet_t * s_alive_f                # [B, ns]
+            # NEGATIVE shaping (farm-proof): penalise UNMET target coverage. Each
+            # striker is charged only for the under-covered targets IT can see
+            # (per-striker sum over visible targets), so no striker is penalised for
+            # a target no one can observe. With all targets visible this collapses
+            # EXACTLY to the original team-wide Σ_t (κ_t − C_t)₊ broadcast to every
+            # striker. The κ_t cap + soft-commit still make U=0 require DISTRIBUTION
+            # (one striker per target); strikers are driven ONTO targets.
+            per_target_unmet  = (kappa_t - C_t).clamp(min=0.0) * t_alive_f          # [B, nt]
+            unmet_per_striker = (per_target_unmet[:, None, :] * vis_ts.float()).sum(dim=-1)  # [B, ns]
+            striker_cover = -w_st * unmet_per_striker * s_alive_f      # [B, ns]
             reward[:, :ns]            += striker_cover
             target_cover_full[:, :ns]  = striker_cover
 
@@ -1537,8 +1605,9 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         next_td.set("done", done.to(torch.bool))
         next_td.set("terminated", terminated.to(torch.bool))
         _t = self._prof_lap("env_done_flags", _t)
-        self._update_comm_cache()
-        _t = self._prof_lap("env_comm_cache", _t)
+        # NOTE: _update_comm_cache() now runs right after the kill step (above),
+        # so _c_comm_reach is already fresh for both the reward gating and the
+        # observation build below. Positions/alive are unchanged since then.
         # Build outputs ONCE here, reuse for the returned TD and the cached
         # persistent buffers (Step 4 — partial-reset optimisation).
         _local_obs = self._build_local_obs()

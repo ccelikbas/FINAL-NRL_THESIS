@@ -2284,6 +2284,55 @@ class StrikeEA2DEnv(EnvBase):
             comm_reach = comm_reach | (torch.matmul(comm_reach.float(), comm_reach.float()) > 0)
         self._c_comm_reach = comm_reach
 
+    # ------------------------------------------------------------------
+    # Visibility masks (per-agent) — the single source of truth shared by
+    # the observation builders and the visibility-gated shaping rewards.
+    # ------------------------------------------------------------------
+    # IMPORTANT: these MUST stay identical to the visibility logic inlined in
+    # _build_fofe_obs / _build_local_obs. They are what makes reward gating
+    # (RewardConfig.reward_visibility_gating) see EXACTLY what the actor sees.
+    # They read the geometry + comm caches, so they are only valid after
+    # _update_geometry_cache() and _update_comm_cache() have run this step.
+
+    def _radar_visibility_mask(self) -> torch.Tensor:
+        """[B, A, R] bool — per-agent radar visibility.
+
+        Known radars are always visible; unknown radars are visible only when
+        within R_obs of the agent OR of a teammate reachable over the multi-hop
+        R_comm graph (comm-off collapses this to the agent's own R_obs).
+        """
+        B, A, R = self.num_envs, self.n_agents, self.n_radars
+        if R == 0:
+            return torch.zeros(B, A, 0, dtype=torch.bool, device=self.device)
+        radar_known_mask = self.radar_known[:, None, :].expand(B, A, R)
+        local_radar_obs = (self._c_dist_ar <= self.R_obs) & self.agent_alive[:, :, None]
+        local_unknown_radar = local_radar_obs & (~self.radar_known)[:, None, :].expand(B, A, R)
+        shared_unknown_radar = torch.matmul(
+            self._c_comm_reach.float(), local_unknown_radar.float()
+        ) > 0
+        return radar_known_mask | shared_unknown_radar
+
+    def _target_visibility_mask(self) -> torch.Tensor:
+        """[B, A, T] bool — per-agent target visibility (visible AND alive).
+
+        Known alive targets are always visible; unknown alive targets are
+        visible only within R_obs of the agent OR of a comm-reachable teammate.
+        """
+        B, A, T = self.num_envs, self.n_agents, self.n_targets
+        if T == 0:
+            return torch.zeros(B, A, 0, dtype=torch.bool, device=self.device)
+        target_known_mask = self.target_known[:, None, :].expand(B, A, T)
+        local_target_obs = (
+            (self._c_dist_at <= self.R_obs)
+            & self.agent_alive[:, :, None]
+            & self.target_alive[:, None, :]
+        )
+        local_unknown_target = local_target_obs & (~self.target_known)[:, None, :].expand(B, A, T)
+        shared_unknown_target = torch.matmul(
+            self._c_comm_reach.float(), local_unknown_target.float()
+        ) > 0
+        return (target_known_mask | shared_unknown_target) & self.target_alive[:, None, :]
+
     def _build_local_obs(self) -> torch.Tensor:
         """Ego-centric body-frame observation per agent with fixed slot counts.
 

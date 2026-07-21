@@ -157,9 +157,8 @@ RUNS: List[Run] = [
     # ── Example: only the complete S1→S2 lineage (chained, no paths). ──
     # Run(tag="V3_complete_S1", jobs=["complete_s1"], seed=0),
 
-    Run(tag="V4_complete_S2", jobs=["complete_s2"], seed=0, from_scratch=True),
-
-    Run(tag="V4_baseline_S2", jobs=["baseline_s2"], seed=0, from_scratch=True),
+    Run(tag="V5_test_complete_S2", jobs=["complete_s2"], seed=0, from_scratch=True),
+    # Run(tag="V5_test_baseline_S2", jobs=["baseline_s2"], seed=0, from_scratch=True),
 ]
 
 
