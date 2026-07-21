@@ -939,6 +939,11 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
         # reward term reads _c_comm_reach, so moving it up changes nothing else.
         self._update_comm_cache()
         _t = self._prof_lap("env_comm_cache", _t)
+        # Accumulate the persistent belief map (change #2) BEFORE the reward, so
+        # the visibility-gated shaping (change #1) and the observation both key
+        # off the same up-to-date belief this step.
+        self._update_belief()
+        _t = self._prof_lap("env_belief", _t)
 
         # ==================================================================
         # Reward computation  (identical to parent — copied verbatim)

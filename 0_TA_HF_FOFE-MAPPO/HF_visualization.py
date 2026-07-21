@@ -410,6 +410,17 @@ class HFTestRunner:
             "radar_known": env.radar_known[0].detach().cpu(),
             "radar_eff_range": env.radar_eff_range[0].detach().cpu(),
         }
+        # Belief-map "observed" flags (change #2): an entity is shown as OBSERVED
+        # once EVERY currently-alive agent has it in its persistent belief. Falls
+        # back to the static known flag for older envs without the belief map.
+        if hasattr(env, "radar_seen") and hasattr(env, "target_seen"):
+            alive0 = env.agent_alive[0]                                   # [A]
+            if bool(alive0.any()):
+                snap["radar_observed"] = env.radar_seen[0][alive0].all(dim=0).detach().cpu()   # [R]
+                snap["target_observed"] = env.target_seen[0][alive0].all(dim=0).detach().cpu()  # [T]
+            else:
+                snap["radar_observed"] = torch.zeros(env.n_radars, dtype=torch.bool)
+                snap["target_observed"] = torch.zeros(env.n_targets, dtype=torch.bool)
         # Directional jammer bearings (radians, relative to jammer heading).
         # Present when the HF env exposes them — pre-first-step they are
         # zero, which the animation treats as "pointing along own heading".
@@ -534,14 +545,19 @@ def hf_animate_rollout(
         ax.add_collection(LineCollection([], linewidths=2.0, zorder=1.5, capstyle="round"))
         for _ in range(env.n_agents)
     ]
-    target_known_sc = ax.scatter([], [], s=80, marker="*", label="Targets (known)", color="#a65e00", zorder=6)
+    # Fill = OBSERVED (every alive agent believes it, change #2); hollow = not
+    # yet observed by the whole team. Known entities are observed from t=0 so
+    # they render filled; unknown entities fill in as the team discovers them.
+    # (Scatter var names kept for minimal churn; the mask driving them is the
+    # belief-based "observed" flag, not the static known flag.)
+    target_known_sc = ax.scatter([], [], s=80, marker="*", label="Targets (observed)", color="#a65e00", zorder=6)
     target_unknown_sc = ax.scatter(
-        [], [], s=80, marker="*", label="Targets (unknown)",
+        [], [], s=80, marker="*", label="Targets (unobserved)",
         facecolors="none", edgecolors="#a65e00", linewidths=1.8, zorder=6,
     )
-    radar_known_sc = ax.scatter([], [], s=80, marker="X", label="Radars (known)", color="#243c9b", zorder=4)
+    radar_known_sc = ax.scatter([], [], s=80, marker="X", label="Radars (observed)", color="#243c9b", zorder=4)
     radar_unknown_sc = ax.scatter(
-        [], [], s=80, marker="X", label="Radars (unknown)",
+        [], [], s=80, marker="X", label="Radars (unobserved)",
         facecolors="none", edgecolors="#243c9b", linewidths=1.8, zorder=4,
     )
 
@@ -723,19 +739,23 @@ def hf_animate_rollout(
         striker_sc.set_offsets(striker_xy.numpy() if striker_xy.numel() else empty_xy)
         jammer_sc.set_offsets(jammer_xy.numpy() if jammer_xy.numel() else empty_xy)
 
-        # Targets
-        alive_known_targets = ta & tk
-        alive_unknown_targets = ta & (~tk)
+        # Targets — fill = OBSERVED by every alive agent (belief map, change #2),
+        # hollow = not yet observed by the whole team. Falls back to the static
+        # known flag for frames captured by an env without the belief map.
+        to = fr.get("target_observed", tk)
+        ro = fr.get("radar_observed", rk)
+        alive_observed_targets = ta & to
+        alive_unobserved_targets = ta & (~to)
         target_known_sc.set_offsets(
-            tp_km[alive_known_targets].numpy() if alive_known_targets.any() else empty_xy
+            tp_km[alive_observed_targets].numpy() if alive_observed_targets.any() else empty_xy
         )
         target_unknown_sc.set_offsets(
-            tp_km[alive_unknown_targets].numpy() if alive_unknown_targets.any() else empty_xy
+            tp_km[alive_unobserved_targets].numpy() if alive_unobserved_targets.any() else empty_xy
         )
 
-        # Radars scatter
-        radar_known_sc.set_offsets(rp_km[rk].numpy() if rk.any() else empty_xy)
-        radar_unknown_sc.set_offsets(rp_km[~rk].numpy() if (~rk).any() else empty_xy)
+        # Radars scatter — fill = observed by every alive agent, hollow otherwise.
+        radar_known_sc.set_offsets(rp_km[ro].numpy() if ro.any() else empty_xy)
+        radar_unknown_sc.set_offsets(rp_km[~ro].numpy() if (~ro).any() else empty_xy)
 
         # ---- HF Radar coverage polygons ----
         jammer_pos_np = ap[env.n_strikers:].numpy()        # [J, 2] world

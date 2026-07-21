@@ -379,6 +379,16 @@ class StrikeEA2DEnv(EnvBase):
         self.target_known  = torch.zeros(B, T,    dtype=torch.bool, device=self.device)
         self.radar_pos     = torch.zeros(B, R, 2, device=self.device)
         self.radar_known   = torch.zeros(B, R,    dtype=torch.bool, device=self.device)
+        # ── Persistent belief map (change #2) ────────────────────────────
+        # Per-agent memory of discovered STATIC entities: once agent i has
+        # sensed a radar/target (own R_obs) or been told about it over the
+        # comm graph, it stays "observed" to i for the rest of the episode
+        # (entities are static, so a banked sighting never goes stale).
+        # Seeded with the always-known entities at reset and accumulated in
+        # _update_belief. This belief is the single source of truth for BOTH
+        # the actor observation and the visibility-gated shaping rewards.
+        self.radar_seen    = torch.zeros(B, A, R, dtype=torch.bool, device=self.device)
+        self.target_seen   = torch.zeros(B, A, T, dtype=torch.bool, device=self.device)
         self.radar_eff_range = torch.full((B, R), self.radar_range, device=self.device)
         self.step_count    = torch.zeros(B, 1, dtype=torch.int64, device=self.device)
         # ── Per-env DR state (default: everything present, scalar kill_prob,
@@ -1231,6 +1241,15 @@ class StrikeEA2DEnv(EnvBase):
             self.target_known[reset_idx] = target_known_reset
             self.radar_known[reset_idx]  = radar_known_reset
 
+            # Belief map (change #2): seed with the always-known entities so
+            # every agent "believes" the known radars/targets from t=0. Unknown
+            # entities are added as they are sensed or comm-pooled by
+            # _update_belief (from the first step onward). Broadcast the per-env
+            # known mask over all agents.
+            _A = self.n_agents
+            self.radar_seen[reset_idx]  = radar_known_reset[:, None, :].expand(-1, _A, -1)
+            self.target_seen[reset_idx] = target_known_reset[:, None, :].expand(-1, _A, -1)
+
             self.radar_eff_range[reset_idx] = self.radar_range
             self.step_count[reset_idx] = 0
             self._episode_team_reward[reset_idx] = 0.0
@@ -1911,6 +1930,7 @@ class StrikeEA2DEnv(EnvBase):
         next_td.set("done",       done.to(torch.bool))
         next_td.set("terminated", terminated.to(torch.bool))
         self._update_comm_cache()
+        self._update_belief()   # accumulate persistent belief map (change #2)
         # Build obs/state/fofe ONCE and reuse for both the returned TD and
         # the persistent buffers (Step 4 — reused by the next _reset).
         _local_obs   = self._build_local_obs()
@@ -2164,6 +2184,9 @@ class StrikeEA2DEnv(EnvBase):
             "agent_pos", "agent_heading", "agent_speed", "agent_heading_rate", "agent_alive",
             "target_pos", "target_alive", "target_known",
             "radar_pos", "radar_known", "radar_eff_range",
+            # Persistent belief map (change #2) — slice with the state so the
+            # reset-slice obs build reads the correct per-env rows.
+            "radar_seen", "target_seen",
             "step_count",
             # Per-env DR state (present masks + per-env scalars) — must be
             # sliced with everything else so the subset-rebuild builders see
@@ -2285,53 +2308,72 @@ class StrikeEA2DEnv(EnvBase):
         self._c_comm_reach = comm_reach
 
     # ------------------------------------------------------------------
-    # Visibility masks (per-agent) — the single source of truth shared by
-    # the observation builders and the visibility-gated shaping rewards.
+    # Belief map (per-agent) — the single source of truth shared by the
+    # observation builders and the visibility-gated shaping rewards.
     # ------------------------------------------------------------------
-    # IMPORTANT: these MUST stay identical to the visibility logic inlined in
-    # _build_fofe_obs / _build_local_obs. They are what makes reward gating
-    # (RewardConfig.reward_visibility_gating) see EXACTLY what the actor sees.
-    # They read the geometry + comm caches, so they are only valid after
-    # _update_geometry_cache() and _update_comm_cache() have run this step.
+    # Change #2 turned the per-step visibility into a PERSISTENT belief:
+    # `radar_seen` / `target_seen` are accumulated by _update_belief and read
+    # here. The two accessors below are what both the actor observation
+    # (_build_fofe_obs / _build_local_obs) and reward gating
+    # (RewardConfig.reward_visibility_gating) consume, so they see EXACTLY the
+    # same set — an agent is shaped only toward entities it currently believes.
 
     def _radar_visibility_mask(self) -> torch.Tensor:
-        """[B, A, R] bool — per-agent radar visibility.
+        """[B, A, R] bool — per-agent radar belief.
 
-        Known radars are always visible; unknown radars are visible only when
-        within R_obs of the agent OR of a teammate reachable over the multi-hop
-        R_comm graph (comm-off collapses this to the agent's own R_obs).
+        Radars each agent currently KNOWS about: the seeded known radars plus
+        everything it has ever sensed (own R_obs) or been told about over the
+        comm graph this episode. Radars are static so a banked sighting never
+        expires. Accumulated by _update_belief.
         """
-        B, A, R = self.num_envs, self.n_agents, self.n_radars
-        if R == 0:
-            return torch.zeros(B, A, 0, dtype=torch.bool, device=self.device)
-        radar_known_mask = self.radar_known[:, None, :].expand(B, A, R)
-        local_radar_obs = (self._c_dist_ar <= self.R_obs) & self.agent_alive[:, :, None]
-        local_unknown_radar = local_radar_obs & (~self.radar_known)[:, None, :].expand(B, A, R)
-        shared_unknown_radar = torch.matmul(
-            self._c_comm_reach.float(), local_unknown_radar.float()
-        ) > 0
-        return radar_known_mask | shared_unknown_radar
+        return self.radar_seen
 
     def _target_visibility_mask(self) -> torch.Tensor:
-        """[B, A, T] bool — per-agent target visibility (visible AND alive).
+        """[B, A, T] bool — per-agent target belief, AND still alive.
 
-        Known alive targets are always visible; unknown alive targets are
-        visible only within R_obs of the agent OR of a comm-reachable teammate.
+        Persistent belief of discovered targets with destroyed targets dropped.
+        _update_belief already &-s the belief with target_alive; the extra mask
+        here keeps callers correct if invoked between a kill and the next
+        belief update.
         """
-        B, A, T = self.num_envs, self.n_agents, self.n_targets
-        if T == 0:
-            return torch.zeros(B, A, 0, dtype=torch.bool, device=self.device)
-        target_known_mask = self.target_known[:, None, :].expand(B, A, T)
-        local_target_obs = (
-            (self._c_dist_at <= self.R_obs)
-            & self.agent_alive[:, :, None]
-            & self.target_alive[:, None, :]
-        )
-        local_unknown_target = local_target_obs & (~self.target_known)[:, None, :].expand(B, A, T)
-        shared_unknown_target = torch.matmul(
-            self._c_comm_reach.float(), local_unknown_target.float()
-        ) > 0
-        return (target_known_mask | shared_unknown_target) & self.target_alive[:, None, :]
+        return self.target_seen & self.target_alive[:, None, :]
+
+    def _update_belief(self) -> None:
+        """Accumulate the persistent per-agent belief map for STATIC entities.
+
+        POOLED TEAM BELIEF (change #2). Each step:
+          1. every agent banks the entities currently inside its own R_obs;
+          2. the belief is then UNIONED across each current communication
+             component (transitive closure cached in _c_comm_reach) and
+             re-banked — so an agent inherits any comm-reachable teammate's
+             banked beliefs, and keeps them PERMANENTLY (monotonic OR).
+        Because radars/targets are static, a believed entity stays believed and
+        is exposed at its true position for the rest of the episode. Known
+        entities are seeded as believed at reset (see _reset) and, being
+        monotonic, remain believed. Targets additionally DROP OUT of the belief
+        when destroyed (& target_alive), so nobody is shaped toward a dead
+        target. Requires fresh geometry + comm caches (call after
+        _update_geometry_cache() and _update_comm_cache()).
+        """
+        if self.n_radars > 0:
+            local_r = (self._c_dist_ar <= self.R_obs) & self.agent_alive[:, :, None]
+            self.radar_seen |= local_r
+            # Union over each current comm component, then re-bank (monotonic).
+            self.radar_seen |= torch.matmul(
+                self._c_comm_reach.float(), self.radar_seen.float()
+            ) > 0
+        if self.n_targets > 0:
+            local_t = (
+                (self._c_dist_at <= self.R_obs)
+                & self.agent_alive[:, :, None]
+                & self.target_alive[:, None, :]
+            )
+            self.target_seen |= local_t
+            self.target_seen |= torch.matmul(
+                self._c_comm_reach.float(), self.target_seen.float()
+            ) > 0
+            # Drop destroyed targets from every agent's belief (drop-on-death).
+            self.target_seen &= self.target_alive[:, None, :]
 
     def _build_local_obs(self) -> torch.Tensor:
         """Ego-centric body-frame observation per agent with fixed slot counts.
@@ -2474,27 +2516,14 @@ class StrikeEA2DEnv(EnvBase):
         jammed = self._radar_jammed_flag().float()                          # [B,R] 1=jammed
         jammed_exp = jammed[:, None, :].expand(B, A, R)                     # [B,A,R]
 
-        # Communication reachability — pre-computed by _update_comm_cache
-        alive_agents = self.agent_alive
-        comm_reach   = self._c_comm_reach
-
         # ------------------------------------------------------------------
-        # Radar visibility sets
-        #   Known radars are always visible: R_K
-        #   Unknown radars are locally detectable only within R_obs
-        #   Shared unknown radars are unioned over comm_reach (multi-hop):
-        #       R_share(i) = union_{j in component(i)} R_loc(j)
-        # Final set used for slots:
-        #   radar_visible = R_K OR shared_unknown_radar_obs
+        # Radar visibility = persistent BELIEF (change #2): the radars this
+        # agent currently knows about — seeded known radars plus everything it
+        # has ever sensed (own R_obs) or been told about over the comm graph
+        # this episode. Accumulated in _update_belief; static entities → once
+        # seen, stays seen (no per-step expiry).
         # ------------------------------------------------------------------
-        radar_known_mask = self.radar_known[:, None, :].expand(B, A, R)
-        local_radar_obs = (dist_ar <= self.R_obs) & alive_agents[:, :, None]
-        unknown_radar_mask = (~self.radar_known)[:, None, :].expand(B, A, R)
-        local_unknown_radar_obs = local_radar_obs & unknown_radar_mask
-        shared_unknown_radar_obs = torch.matmul(
-            comm_reach.float(), local_unknown_radar_obs.float()
-        ) > 0
-        radar_visible = radar_known_mask | shared_unknown_radar_obs          # [B,A,R]
+        radar_visible = self._radar_visibility_mask()                        # [B,A,R]
         radar_base = torch.stack(
             [dx_ar_n, dy_ar_n, dist_ar_norm, jammed_exp], dim=-1,
         )  # [B,A,R,4]
@@ -2523,22 +2552,11 @@ class StrikeEA2DEnv(EnvBase):
         alive_t = self.target_alive[:, None, :].expand(B, A, T).float()     # [B,A,T]
 
         # ------------------------------------------------------------------
-        # Target visibility sets (same logic as radars)
-        #   Known targets are always visible: T_K
-        #   Unknown targets are local only when within R_obs and alive
-        #   Shared unknown targets are unioned over comm_reach
-        # Final set used for slots:
-        #   target_visible = T_K OR shared_unknown_target_obs
-        # Note: no persistence/memory is used; unknown visibility is per-step.
+        # Target visibility = persistent BELIEF (change #2): discovered targets
+        # (seeded known + ever-sensed / comm-pooled) that are still alive.
+        # Accumulated in _update_belief; destroyed targets drop out.
         # ------------------------------------------------------------------
-        target_known_mask = self.target_known[:, None, :].expand(B, A, T)
-        local_target_obs = (dist_at <= self.R_obs) & alive_agents[:, :, None] & self.target_alive[:, None, :]
-        unknown_target_mask = (~self.target_known)[:, None, :].expand(B, A, T)
-        local_unknown_target_obs = local_target_obs & unknown_target_mask
-        shared_unknown_target_obs = torch.matmul(
-            comm_reach.float(), local_unknown_target_obs.float()
-        ) > 0
-        target_visible = target_known_mask | shared_unknown_target_obs        # [B,A,T]
+        target_visible = self._target_visibility_mask()                       # [B,A,T]
         target_feat = torch.stack(
             [dx_at_n, dy_at_n, dist_at_norm, alive_t], dim=-1,
         )  # [B,A,T,4]
@@ -2649,12 +2667,10 @@ class StrikeEA2DEnv(EnvBase):
         dy_ar_b = -sin_h[:, :, None] * rel_ar_w[..., 0] + cos_h[:, :, None] * rel_ar_w[..., 1]
         jammed = self._radar_jammed_flag().float()[:, None, :].expand(B, A, R)
 
-        # Known/unknown visibility with communication sharing
-        radar_known_mask = self.radar_known[:, None, :].expand(B, A, R)
-        local_radar_obs = (dist_ar <= self.R_obs) & self.agent_alive[:, :, None]
-        local_unknown_radar = local_radar_obs & (~self.radar_known)[:, None, :].expand(B, A, R)
-        shared_unknown_radar = torch.matmul(comm_reach.float(), local_unknown_radar.float()) > 0
-        radars_visible = radar_known_mask | shared_unknown_radar
+        # Radar visibility = persistent BELIEF (change #2): discovered radars
+        # (seeded known + ever-sensed / comm-pooled), accumulated in
+        # _update_belief. Static → once seen, stays seen.
+        radars_visible = self._radar_visibility_mask()
 
         radars_base = torch.stack(
             [dx_ar_b / max_dist, dy_ar_b / max_dist, dist_ar / max_dist, jammed], dim=-1,
@@ -2674,11 +2690,9 @@ class StrikeEA2DEnv(EnvBase):
         dy_at_b = -sin_h[:, :, None] * rel_at_w[..., 0] + cos_h[:, :, None] * rel_at_w[..., 1]
         alive_t = self.target_alive[:, None, :].expand(B, A, T).float()
 
-        target_known_mask = self.target_known[:, None, :].expand(B, A, T)
-        local_target_obs = (dist_at <= self.R_obs) & self.agent_alive[:, :, None] & self.target_alive[:, None, :]
-        local_unknown_target = local_target_obs & (~self.target_known)[:, None, :].expand(B, A, T)
-        shared_unknown_target = torch.matmul(comm_reach.float(), local_unknown_target.float()) > 0
-        targets_visible = (target_known_mask | shared_unknown_target) & self.target_alive[:, None, :]
+        # Target visibility = persistent BELIEF (change #2): discovered targets
+        # still alive (destroyed targets drop out in _update_belief).
+        targets_visible = self._target_visibility_mask()
 
         targets_feat = torch.stack(
             [dx_at_b / max_dist, dy_at_b / max_dist, dist_at / max_dist, alive_t], dim=-1,
