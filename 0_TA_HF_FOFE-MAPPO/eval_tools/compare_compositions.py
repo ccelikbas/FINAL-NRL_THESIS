@@ -53,7 +53,10 @@ from .HF_visualization import (
     _compute_radar_boundary_km,
 )
 from .evaluate_policy import _LoadedCheckpoint, _build_policy_for_scenario
-from .nlr_style import NLR_PRIMARY, NLR_ACCENT, NLR_DARKGRAY, NLR_GRAY
+from .nlr_style import (
+    NLR_DARKGRAY, NLR_GRAY,
+    NLR_DARKBLUE, NLR_LIGHTBLUE, NLR_TERRA,
+)
 
 # ===================================================================
 # CONFIG — edit these to control the analysis
@@ -61,22 +64,25 @@ from .nlr_style import NLR_PRIMARY, NLR_ACCENT, NLR_DARKGRAY, NLR_GRAY
 
 # Policy to analyse. Relative paths are resolved against this file's folder
 # so it works regardless of the current working directory.
-POLICY_PATH = "runs/FINALV1/complete_S1_20260704/stage5of5_DR_j2-4_k0_25_FINAL.pt"
+POLICY_PATH = "runs/FINALV2/complete_stage7of8_DR_j2-4_k0_25.pt"
 
 # Compositions to test, as (n_strikers, n_jammers). One dashboard column each.
 CONFIGS = [(2, 2), (2, 3), (2, 4)]
 
 # Number of rollouts (different seeds) per composition. One dashboard row each.
-N_RUNS_PER_CONFIG = 5
+N_RUNS_PER_CONFIG = 1
 
 # Seeds are BASE_SEED, BASE_SEED+1, ... one per run/row.
-BASE_SEED = 1002
+BASE_SEED = 1008
 
 # Coalition-fragmentation neighbour radius (world units), for the frag metric.
 FRAG_RADIUS = 0.2
 
 # Output dashboard PNG (relative paths resolved against this file's folder).
 OUT_PATH = "eval_results/composition_dashboard.png"
+
+# Output resolution (dots per inch). 600 = print-quality for the paper.
+DPI = 600
 
 # ===================================================================
 # ENVIRONMENT CONFIG — the scenario the policy is evaluated in.
@@ -102,9 +108,15 @@ COMMUNICATE = True
 
 
 # --- Marker / colour conventions (shared across every subplot) ---
-_TARGET_ALIVE_C = "#a65e00"   # survived target
-_TARGET_DEAD_C = NLR_GRAY     # destroyed target
-_RADAR_C = "#243c9b"
+# Threats read in NLR terra (dark orange); the allied team reads in the NLR
+# blue family — strikers dark blue (solid), jammers light blue (dashed).
+_TARGET_ALIVE_C = "#111111"        # survived target (prominent, filled star)
+_TARGET_DEAD_C = NLR_GRAY          # destroyed target (faint, hollow star)
+_RADAR_C = "#111111"               # radar cross (small, black)
+_RADAR_COVERAGE_C = NLR_TERRA      # radar range + effective coverage (dark orange)
+# Translucent orange fill/edge for the jammer-notched effective coverage patch.
+_COVERAGE_FACE = (0.929, 0.475, 0.078, 0.13)   # NLR_TERRA @ ~13% alpha
+_COVERAGE_EDGE = (0.929, 0.475, 0.078, 0.55)   # NLR_TERRA @ ~55% alpha
 
 
 def _resolve(path_str: str) -> Path:
@@ -113,14 +125,21 @@ def _resolve(path_str: str) -> Path:
     return p if p.is_absolute() else (_THIS_DIR.parent / p)  # runs/ , eval_results/ live in the parent (0_TA_...)
 
 
+def _ramp(c_lo: str, c_hi: str, n: int):
+    """n colours interpolated between two hex endpoints (clean, on-brand)."""
+    lo = np.array(matplotlib.colors.to_rgb(c_lo))
+    hi = np.array(matplotlib.colors.to_rgb(c_hi))
+    return [tuple(lo + (hi - lo) * (i / max(n - 1, 1))) for i in range(n)]
+
+
 def _striker_colors(n: int):
-    cmap = plt.get_cmap("winter")
-    return [cmap(0.15 + 0.7 * (i / max(n - 1, 1))) for i in range(n)]
+    # Dark-blue family (NLR primary): deep navy -> mid blue.
+    return _ramp(NLR_DARKBLUE, "#2f7fb2", n)
 
 
 def _jammer_colors(n: int):
-    cmap = plt.get_cmap("autumn")
-    return [cmap(0.0 + 0.6 * (i / max(n - 1, 1))) for i in range(n)]
+    # Light-blue family (NLR secondary): bright cyan-blue -> pale blue.
+    return _ramp(NLR_LIGHTBLUE, "#8fd3f2", n)
 
 
 def rollout_config(ckpt, ns: int, nj: int, seed: int, device):
@@ -177,14 +196,14 @@ def _draw_radar_coverage(ax, fr, env):
     for j in range(env.n_radars):
         rx, ry = float(rp[j, 0]), float(rp[j, 1])
         ax.add_patch(Circle((rx * 1000, ry * 1000), R_unc_km, fill=False,
-                            edgecolor="#c23b3b", alpha=0.35, lw=0.9, ls="--",
-                            zorder=1))
+                            edgecolor=_RADAR_COVERAGE_C, alpha=0.35, lw=0.9,
+                            ls="--", zorder=1))
         verts = _compute_radar_boundary_km(
             rx, ry, jammer_pos, jammer_alive, env,
             jammer_pointing=jammer_pointing, active_jammers=active_jr[:, j],
         )
-        ax.add_patch(MplPolygon(verts, closed=True, fc=(0.76, 0.23, 0.23, 0.11),
-                                ec=(0.76, 0.23, 0.23, 0.55), lw=0.9, zorder=1.2))
+        ax.add_patch(MplPolygon(verts, closed=True, fc=_COVERAGE_FACE,
+                                ec=_COVERAGE_EDGE, lw=0.9, zorder=1.2))
 
 
 def draw_run(ax, frames, env, ns, nj):
@@ -215,34 +234,43 @@ def draw_run(ax, frames, env, ns, nj):
     # --- Radar coverage (end-of-episode snapshot) behind everything ---
     _draw_radar_coverage(ax, frames[-1], env)
 
-    # --- Targets / radars (initial layout; colour by survival at end) ---
+    # --- Targets (initial layout; colour by survival at end) ---
+    # Survived = prominent filled star with a white halo so it stands out over
+    # the radar coverage; destroyed = faint hollow star.
     tp = frames[0]["target_pos"].numpy() * 1000
     ta_end = frames[-1]["target_alive"].bool().numpy()
     if (~ta_end).any():
-        ax.scatter(tp[~ta_end, 0], tp[~ta_end, 1], s=90, marker="*",
-                   facecolors="none", edgecolors=_TARGET_DEAD_C, linewidths=1.4,
-                   zorder=5)
+        ax.scatter(tp[~ta_end, 0], tp[~ta_end, 1], s=120, marker="*",
+                   facecolors="none", edgecolors=_TARGET_DEAD_C, linewidths=1.3,
+                   alpha=0.7, zorder=5)
     if ta_end.any():
-        ax.scatter(tp[ta_end, 0], tp[ta_end, 1], s=100, marker="*",
-                   color=_TARGET_ALIVE_C, zorder=6)
+        ax.scatter(tp[ta_end, 0], tp[ta_end, 1], s=200, marker="*",
+                   color=_TARGET_ALIVE_C, edgecolors="white", linewidths=1.0,
+                   zorder=6)
+    # --- Radars (small black crosses) ---
     rp = frames[0]["radar_pos"].numpy() * 1000
-    ax.scatter(rp[:, 0], rp[:, 1], s=80, marker="X", color=_RADAR_C, zorder=4)
+    ax.scatter(rp[:, 0], rp[:, 1], s=42, marker="X", color=_RADAR_C,
+               linewidths=0.5, edgecolors="white", zorder=4)
 
-    # --- Striker paths (solid) ---
+    # --- Striker paths (solid, dark blue) ---
     for k in range(ns):
         a = np.array(s_traj[k]) * 1000
-        ax.plot(a[:, 0], a[:, 1], "-", color=s_colors[k], lw=1.8, zorder=3)
-        ax.plot(a[0, 0], a[0, 1], "o", color=s_colors[k], ms=6, mfc="none",
-                mew=1.4, zorder=3.5)
-        ax.plot(a[-1, 0], a[-1, 1], "^", color=s_colors[k], ms=8, zorder=3.5)
+        ax.plot(a[:, 0], a[:, 1], "-", color=s_colors[k], lw=2.0, zorder=3,
+                solid_capstyle="round", alpha=0.95)
+        ax.plot(a[0, 0], a[0, 1], "o", color=s_colors[k], ms=6, mfc="white",
+                mew=1.6, zorder=3.5)
+        ax.plot(a[-1, 0], a[-1, 1], "^", color=s_colors[k], ms=9, mec="white",
+                mew=0.8, zorder=3.6)
 
-    # --- Jammer paths (dashed) ---
+    # --- Jammer paths (dashed, light blue) ---
     for k in range(nj):
         a = np.array(j_traj[k]) * 1000
-        ax.plot(a[:, 0], a[:, 1], "--", color=j_colors[k], lw=1.5, zorder=3)
-        ax.plot(a[0, 0], a[0, 1], "o", color=j_colors[k], ms=6, mfc="none",
-                mew=1.4, zorder=3.5)
-        ax.plot(a[-1, 0], a[-1, 1], "s", color=j_colors[k], ms=7, zorder=3.5)
+        ax.plot(a[:, 0], a[:, 1], "--", color=j_colors[k], lw=1.7, zorder=3,
+                dash_capstyle="round", alpha=0.95)
+        ax.plot(a[0, 0], a[0, 1], "o", color=j_colors[k], ms=6, mfc="white",
+                mew=1.6, zorder=3.5)
+        ax.plot(a[-1, 0], a[-1, 1], "s", color=j_colors[k], ms=8, mec="white",
+                mew=0.8, zorder=3.6)
 
     lo = float(getattr(env, "low", 0.0)) * 1000
     hi = float(getattr(env, "high", 1.0)) * 1000
@@ -264,23 +292,23 @@ def draw_run(ax, frames, env, ns, nj):
 
 def _legend_handles():
     return [
-        Line2D([0], [0], color=NLR_PRIMARY, lw=1.8, label="Striker path"),
-        Line2D([0], [0], color=NLR_ACCENT, lw=1.5, ls="--", label="Jammer path"),
-        Line2D([0], [0], marker="o", color=NLR_DARKGRAY, ls="none", mfc="none",
-               mew=1.4, ms=7, label="Start"),
-        Line2D([0], [0], marker="^", color=NLR_PRIMARY, ls="none", ms=8,
+        Line2D([0], [0], color=NLR_DARKBLUE, lw=2.0, label="Striker path"),
+        Line2D([0], [0], color=NLR_LIGHTBLUE, lw=1.7, ls="--", label="Jammer path"),
+        Line2D([0], [0], marker="o", color=NLR_DARKGRAY, ls="none", mfc="white",
+               mew=1.6, ms=7, label="Start"),
+        Line2D([0], [0], marker="^", color=NLR_DARKBLUE, ls="none", ms=8,
                label="Striker end"),
-        Line2D([0], [0], marker="s", color=NLR_ACCENT, ls="none", ms=7,
+        Line2D([0], [0], marker="s", color=NLR_LIGHTBLUE, ls="none", ms=7,
                label="Jammer end"),
-        Line2D([0], [0], marker="*", color=_TARGET_ALIVE_C, ls="none", ms=11,
-               label="Target (survived)"),
-        Line2D([0], [0], marker="*", color=_TARGET_DEAD_C, ls="none", ms=11,
-               mfc="none", mew=1.4, label="Target (destroyed)"),
-        Line2D([0], [0], marker="X", color=_RADAR_C, ls="none", ms=9,
+        Line2D([0], [0], marker="*", color=_TARGET_ALIVE_C, ls="none", ms=13,
+               mec="white", mew=0.8, label="Target (survived)"),
+        Line2D([0], [0], marker="*", color=_TARGET_DEAD_C, ls="none", ms=12,
+               mfc="none", mew=1.3, label="Target (destroyed)"),
+        Line2D([0], [0], marker="X", color=_RADAR_C, ls="none", ms=8,
                label="Radar"),
-        Line2D([0], [0], color="#c23b3b", lw=0.9, ls="--", label="Radar range"),
-        Patch(fc=(0.76, 0.23, 0.23, 0.11), ec=(0.76, 0.23, 0.23, 0.55),
-              label="Effective coverage"),
+        Line2D([0], [0], color=_RADAR_COVERAGE_C, lw=0.9, ls="--",
+               label="Radar range"),
+        Patch(fc=_COVERAGE_FACE, ec=_COVERAGE_EDGE, label="Effective coverage"),
     ]
 
 
@@ -292,6 +320,8 @@ def main():
                     help="rollouts (rows) per composition")
     ap.add_argument("--base-seed", type=int, default=BASE_SEED)
     ap.add_argument("--out", default=OUT_PATH)
+    ap.add_argument("--dpi", type=int, default=DPI,
+                    help="output PNG resolution in dots per inch")
     args = ap.parse_args()
 
     ckpt_path = _resolve(args.checkpoint)
@@ -310,16 +340,10 @@ def main():
     fig, axes = plt.subplots(A, N, figsize=(4.6 * N, 4.6 * A), squeeze=False)
 
     for ci, (ns, nj) in enumerate(CONFIGS):
-        cfg_metrics = []
         for ri in range(A):
             ax = axes[ri, ci]
             frames, env = rollout_config(ckpt, ns, nj, seeds[ri], device)
             m = draw_run(ax, frames, env, ns, nj)
-            cfg_metrics.append(m)
-            ax.set_title(
-                f"seed {seeds[ri]}   ·   tgt={m['targets_destroyed']:.2f}   ·   "
-                f"surv={m['survival']:.2f}   ·   frag={m['frag']:.2f}",
-                fontsize=8)
             if ci == 0:
                 ax.set_ylabel("Y (km)", fontsize=8)
             if ri == A - 1:
@@ -328,28 +352,15 @@ def main():
                   f"tgt={m['targets_destroyed']:.3f}  surv={m['survival']:.3f}  "
                   f"frag={m['frag']:.3f}")
 
-        # Column header spanning the top subplot of each composition.
-        mean_td = np.mean([m["targets_destroyed"] for m in cfg_metrics])
-        mean_su = np.mean([m["survival"] for m in cfg_metrics])
-        mean_fr = np.mean([m["frag"] for m in cfg_metrics])
-        axes[0, ci].annotate(
-            f"{ns} strikers · {nj} jammers\n"
-            f"mean: tgt={mean_td:.2f} · surv={mean_su:.2f} · frag={mean_fr:.2f}",
-            xy=(0.5, 1.16), xycoords="axes fraction", ha="center", va="bottom",
-            fontsize=12, fontweight="bold", color=NLR_PRIMARY,
-        )
-
+    # Legend sits below all plots; no figure or per-scenario titles.
+    # Reserve a wider bottom strip and drop the legend below it so it clears
+    # the "X (km)" axis labels on the bottom row.
     fig.legend(handles=_legend_handles(), loc="lower center", ncol=5,
-               fontsize=9, frameon=True, bbox_to_anchor=(0.5, 0.0))
-    fig.suptitle(
-        f"Composition-agnostic policy analysis — {ckpt_path.name}\n"
-        f"{A} rollouts per composition (top = agent paths & radar coverage)",
-        fontsize=14, fontweight="bold", y=0.995,
-    )
-    fig.tight_layout(rect=[0, 0.05, 1, 0.95])
+               fontsize=9, frameon=True, bbox_to_anchor=(0.5, -0.02))
+    fig.tight_layout(rect=[0, 0.10, 1, 1.0])
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path, dpi=200, bbox_inches="tight")
-    print(f"saved -> {out_path}")
+    fig.savefig(out_path, dpi=args.dpi, bbox_inches="tight")
+    print(f"saved -> {out_path}  ({args.dpi} dpi)")
 
 
 if __name__ == "__main__":
