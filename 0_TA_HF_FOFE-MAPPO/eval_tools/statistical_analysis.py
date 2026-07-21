@@ -144,8 +144,8 @@ from .nlr_style import NLR_CYCLE, NLR_REFERENCE, NLR_ACCENT, NLR_SECONDARY
 
 SCENARIOS: List[CurriculumSection] = [
     CurriculumSection(
-        name="FOFE-MAPPO S2",
-        policy_file="runs/FINALV2/complete_stage7of8_DR_j2-4_k0_25.pt",
+        name="Baseline",
+        policy_file="runs/FINALV2/Final_Baseline_Cont_4.pt",
         n_iters=1,  # not used
         n_strikers=2, n_jammers=4,
         n_known_targets=(2, 4), n_unknown_targets=0,

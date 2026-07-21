@@ -62,16 +62,16 @@ from .nlr_style import (
 #   label : legend label. Defaults to the checkpoint stem if omitted.
 #   cont  : optional continuation checkpoints to stitch after `path`.
 POLICIES: list[dict] = [
-    dict(
-        path="runs/FINALV2/complete_stage7of8_DR_j2-4_k0_25.pt",
-        label="Complete",
-        cont=[],
-    ),
-    dict(
-        path="runs/FINALV2/baseline_stage11of11_DR_j2-4_k0_25_FINAL.pt",
-        label="Baseline",
-        cont=[],
-    ),
+    dict(path="runs/FINALV2/complete_stage7of8_DR_j2-4_k0_25.pt",
+         label="Complete V2",
+         cont=[]),
+    dict(path="runs/FINALV2/baseline_stage11of11_DR_j2-4_k0_25_FINAL.pt",
+         label="Baseline V2",
+         cont=["runs/FINALV2/FINAL_baseline_s1_cont.pt",
+               "runs/FINALV2/Final_Baseline_Cont_2.pt",
+               "runs/FINALV2/Final_Baseline_Cont_3.pt",
+               "runs/FINALV2/Final_Baseline_Cont_4.pt",
+               "runs/FINALV2/Final_Baseline_Cont_5.pt"]),
 ]
 
 SMOOTH_WINDOW = 25
@@ -79,6 +79,8 @@ DPI = 600
 
 VALUE_OUT = "eval_results/compare_value_loss.png"
 POLICY_OUT = "eval_results/compare_policy_loss.png"
+EV_OUT = "eval_results/compare_explained_variance.png"
+CLIP_OUT = "eval_results/compare_clip_ratio.png"
 
 
 LOSS_GROUPS = {
@@ -90,6 +92,26 @@ LOSS_GROUPS = {
         ("striker_loss_policy", "Striker policy loss"),
         ("jammer_loss_policy", "Jammer policy loss"),
     ],
+    "explained_variance": [
+        ("striker_explained_variance", "Striker explained variance"),
+        ("jammer_explained_variance", "Jammer explained variance"),
+    ],
+    "clip_ratio": [
+        ("striker_clip_ratio", "Striker clip ratio"),
+        ("jammer_clip_ratio", "Jammer clip ratio"),
+    ],
+}
+
+# Per-group plot metadata. ylim of None lets matplotlib autoscale.
+GROUP_TITLES = {
+    "value": "Value loss comparison",
+    "policy": "Policy loss comparison",
+    "explained_variance": "Explained variance comparison",
+    "clip_ratio": "Clip ratio comparison",
+}
+GROUP_YLIM = {
+    "value": (0.0, 50.0),
+    "explained_variance": (None, 1.02),
 }
 
 ROLE_COLORS = {
@@ -234,8 +256,9 @@ def _plot_loss_group(
         ax.set_ylabel(title, fontsize=10)
         ax.grid(True, alpha=0.3)
         ax.ticklabel_format(axis="y", style="sci", scilimits=(-3, 4))
-        if group_name == "value":
-            ax.set_ylim(0.0, 50.0)
+        ylim = GROUP_YLIM.get(group_name)
+        if ylim is not None:
+            ax.set_ylim(*ylim)
         ax.text(
             0.01,
             0.92,
@@ -256,7 +279,7 @@ def _plot_loss_group(
         for ax in axes:
             ax.set_xlim(1, max_iter)
 
-    title = "Value loss comparison" if group_name == "value" else "Policy loss comparison"
+    title = GROUP_TITLES.get(group_name, f"{group_name} comparison")
     fig.suptitle(title, fontsize=12, fontweight="bold")
     handles, labels = axes[0].get_legend_handles_labels()
     if handles:
@@ -274,7 +297,7 @@ def _plot_loss_group(
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
-    print(f"saved {group_name} loss comparison -> {out}")
+    print(f"saved {group_name} comparison -> {out}")
 
 
 def main() -> None:
@@ -307,6 +330,8 @@ def main() -> None:
     parser.add_argument("--dpi", type=int, default=DPI, help="output resolution")
     parser.add_argument("--value-out", default=VALUE_OUT)
     parser.add_argument("--policy-out", default=POLICY_OUT)
+    parser.add_argument("--ev-out", default=EV_OUT)
+    parser.add_argument("--clip-out", default=CLIP_OUT)
     args = parser.parse_args()
 
     specs = _policy_specs_from_args(args)
@@ -328,6 +353,20 @@ def main() -> None:
         policies,
         "policy",
         _resolve_out(args.policy_out),
+        max(1, int(args.smooth)),
+        args.dpi,
+    )
+    _plot_loss_group(
+        policies,
+        "explained_variance",
+        _resolve_out(args.ev_out),
+        max(1, int(args.smooth)),
+        args.dpi,
+    )
+    _plot_loss_group(
+        policies,
+        "clip_ratio",
+        _resolve_out(args.clip_out),
         max(1, int(args.smooth)),
         args.dpi,
     )
