@@ -389,6 +389,12 @@ class StrikeEA2DEnv(EnvBase):
         # the actor observation and the visibility-gated shaping rewards.
         self.radar_seen    = torch.zeros(B, A, R, dtype=torch.bool, device=self.device)
         self.target_seen   = torch.zeros(B, A, T, dtype=torch.bool, device=self.device)
+        # Monotonic TEAM-level target discovery (change #3): True once ANY agent
+        # has had target t in its belief this episode (own sensor or comm-pooled).
+        # Unlike target_seen it NEVER drops on death — so a discovered-then-killed
+        # target still counts as discovered for the mission-complete check and the
+        # targets-destroyed rate. Seeded with known targets at reset.
+        self.target_discovered = torch.zeros(B, T, dtype=torch.bool, device=self.device)
         self.radar_eff_range = torch.full((B, R), self.radar_range, device=self.device)
         self.step_count    = torch.zeros(B, 1, dtype=torch.int64, device=self.device)
         # ── Per-env DR state (default: everything present, scalar kill_prob,
@@ -1067,10 +1073,23 @@ class StrikeEA2DEnv(EnvBase):
 
         Computed over PRESENT entities only so masked-out (absent) slots never
         count as destroyed targets or dead agents. Reduces to the plain mean
-        when DR is off (all entities present)."""
+        when DR is off (all entities present).
+
+        Change #3: when RewardConfig.mission_discovered_targets_only is set, the
+        targets-destroyed rate is measured over the DISCOVERED set only —
+        (present & discovered & destroyed) / (present & discovered) — so a
+        never-discovered pop-up is excluded from both numerator and denominator
+        and "all discovered targets destroyed" reads 100%. Vacuously 100% when
+        nothing was discovered (consistent with vacuous mission-complete)."""
         tp = self.target_present[idx]
-        tgt_frac = ((~self.target_alive[idx]) & tp).float().sum(-1, keepdim=True) / \
-            tp.float().sum(-1, keepdim=True).clamp_min(1.0)
+        if getattr(self.reward_params, "mission_discovered_targets_only", False):
+            disc = self.target_discovered[idx] & tp                                    # [N, T]
+            num = ((~self.target_alive[idx]) & disc).float().sum(-1, keepdim=True)      # discovered & destroyed
+            den = disc.float().sum(-1, keepdim=True)                                    # discovered
+            tgt_frac = torch.where(den > 0, num / den.clamp_min(1.0), torch.ones_like(num))
+        else:
+            tgt_frac = ((~self.target_alive[idx]) & tp).float().sum(-1, keepdim=True) / \
+                tp.float().sum(-1, keepdim=True).clamp_min(1.0)
         ap = self.agent_present[idx]
         surv_frac = (self.agent_alive[idx] & ap).float().sum(-1, keepdim=True) / \
             ap.float().sum(-1, keepdim=True).clamp_min(1.0)
@@ -1249,6 +1268,8 @@ class StrikeEA2DEnv(EnvBase):
             _A = self.n_agents
             self.radar_seen[reset_idx]  = radar_known_reset[:, None, :].expand(-1, _A, -1)
             self.target_seen[reset_idx] = target_known_reset[:, None, :].expand(-1, _A, -1)
+            # Team discovery (change #3): known targets are discovered from t=0.
+            self.target_discovered[reset_idx] = target_known_reset
 
             self.radar_eff_range[reset_idx] = self.radar_range
             self.step_count[reset_idx] = 0
@@ -1436,7 +1457,7 @@ class StrikeEA2DEnv(EnvBase):
         # 1b. Mission-complete terminal bonus (all targets destroyed)
         # ------------------------------------------------------------------
         terminal_bonus_full = torch.zeros(B, A, device=self.device)
-        all_targets_done_now = (~self.target_alive).all(dim=-1)  # [B]
+        all_targets_done_now = self._mission_complete_mask().squeeze(-1)  # [B] (change #3 flag-aware)
         # Branchless: when no env hit the terminal, the masked write is a no-op
         # and `reward += zeros` is a no-op. Removing .item() avoids a GPU sync.
         if float(rp.terminal_bonus) != 0.0:
@@ -1918,7 +1939,7 @@ class StrikeEA2DEnv(EnvBase):
 
         # ---- done flags ----
         self.step_count += 1
-        all_targets_done = (~self.target_alive).all(dim=-1, keepdim=True)
+        all_targets_done = self._mission_complete_mask()  # [B,1] (change #3 flag-aware)
         all_agents_dead  = (~self.agent_alive).all(dim=-1, keepdim=True)
         timeout          = self.step_count >= self.max_steps_t
 
@@ -2184,9 +2205,10 @@ class StrikeEA2DEnv(EnvBase):
             "agent_pos", "agent_heading", "agent_speed", "agent_heading_rate", "agent_alive",
             "target_pos", "target_alive", "target_known",
             "radar_pos", "radar_known", "radar_eff_range",
-            # Persistent belief map (change #2) — slice with the state so the
-            # reset-slice obs build reads the correct per-env rows.
-            "radar_seen", "target_seen",
+            # Persistent belief map (change #2) + team discovery (change #3) —
+            # slice with the state so the reset-slice obs build reads the
+            # correct per-env rows.
+            "radar_seen", "target_seen", "target_discovered",
             "step_count",
             # Per-env DR state (present masks + per-env scalars) — must be
             # sliced with everything else so the subset-rebuild builders see
@@ -2372,8 +2394,32 @@ class StrikeEA2DEnv(EnvBase):
             self.target_seen |= torch.matmul(
                 self._c_comm_reach.float(), self.target_seen.float()
             ) > 0
+            # Team discovery (change #3): record which targets ANY agent now
+            # believes, BEFORE the drop-on-death below, so a target is banked as
+            # discovered even on the step it is destroyed. Monotonic (never
+            # cleared until reset).
+            self.target_discovered |= self.target_seen.any(dim=1)
             # Drop destroyed targets from every agent's belief (drop-on-death).
             self.target_seen &= self.target_alive[:, None, :]
+
+    def _mission_complete_mask(self) -> torch.Tensor:
+        """[B, 1] bool — per-env mission-complete flag.
+
+        Change #3: when RewardConfig.mission_discovered_targets_only is set, the
+        mission is complete once every DISCOVERED target is destroyed —
+        undiscovered pop-up targets are ignored (they "do not exist" to a team
+        that never saw them). Known targets are always discovered, so they must
+        still be destroyed. Vacuously complete if nothing was discovered.
+
+        Otherwise (or for a checkpoint whose baked RewardConfig predates the
+        flag → getattr default False) it is the legacy "all present targets
+        destroyed". Present-aware: absent (DR-masked) targets start dead and
+        never block.
+        """
+        if getattr(self.reward_params, "mission_discovered_targets_only", False):
+            blocking = self.target_discovered & self.target_alive & self.target_present  # [B, T]
+            return ~blocking.any(dim=-1, keepdim=True)                                    # [B, 1]
+        return (~self.target_alive).all(dim=-1, keepdim=True)                             # [B, 1]
 
     def _build_local_obs(self) -> torch.Tensor:
         """Ego-centric body-frame observation per agent with fixed slot counts.

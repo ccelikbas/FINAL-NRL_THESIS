@@ -419,6 +419,26 @@ class RewardConfig:
     # active model; the legacy non-HF reward path is unaffected.
     reward_visibility_gating: bool = True
 
+    # ─── MISSION = DISCOVERED TARGETS ONLY  (change #3, belief-map mission) ───
+    # When True, an UNKNOWN (pop-up) target that the team never discovers this
+    # episode is treated as non-existent: the mission is complete once every
+    # DISCOVERED target has been destroyed (a target is "discovered" the moment
+    # any agent has it in its belief map — own sensor or comm-pooled — see
+    # change #2). This stops agents from having to SEARCH the map for hidden
+    # targets (this is not an ISR mission): they get the terminal bonus and the
+    # episode terminates as soon as everything they have found is destroyed, and
+    # the destroyed-target rate is measured over the DISCOVERED set (so all
+    # discovered targets destroyed → 100%). Known targets are always discovered,
+    # so they must still be killed. Affects `terminated`, the `terminal_bonus`,
+    # and the recorded `mission_complete` / `targets_frac` episode stats (which
+    # feed the trainer eval, evaluate_policy, and the 3.3.x KPIs).
+    #
+    # DEFAULT True for new runs; the env reads it via getattr(..., False), so a
+    # checkpoint whose baked RewardConfig predates this field evaluates with the
+    # OLD "all present targets" definition — existing 3.3.x tables reproduce
+    # unchanged. Set False explicitly to force the old definition on a new run.
+    mission_discovered_targets_only: bool = True
+
 
 '''
 RUN: Visualisation of the piecewise linear-exponential shaping function using current paramters:

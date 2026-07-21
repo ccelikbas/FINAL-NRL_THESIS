@@ -993,7 +993,7 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
 
         # 1b. Terminal bonus
         terminal_bonus_full = torch.zeros(B, A, device=self.device)
-        all_targets_done_now = (~self.target_alive).all(dim=-1)
+        all_targets_done_now = self._mission_complete_mask().squeeze(-1)  # [B] (change #3 flag-aware)
         # Branchless: when no env hit the terminal, the masked write is a no-op
         # and `reward += zeros` is a no-op. Removing .item() avoids a GPU sync.
         if float(rp.terminal_bonus) != 0.0:
@@ -1598,7 +1598,7 @@ class HFStrikeEA2DEnv(StrikeEA2DEnv):
 
         # ---- done flags ----
         self.step_count += 1
-        all_targets_done = (~self.target_alive).all(dim=-1, keepdim=True)
+        all_targets_done = self._mission_complete_mask()  # [B,1] (change #3 flag-aware)
         all_agents_dead = (~self.agent_alive).all(dim=-1, keepdim=True)
         timeout = self.step_count >= self.max_steps_t
 

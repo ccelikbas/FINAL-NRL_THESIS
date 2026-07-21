@@ -186,8 +186,13 @@ TABLE_KPIS = ["targets", "survival", "duration"]
 # early ends its episode early, which would otherwise make it look "faster".
 SUCCESS_CONDITIONED_KPIS = {"duration"}
 
-# The per-episode success flag: the "completion" KPI == mission_complete ==
-# (~target_alive).all() == "all targets destroyed" (see environment.py).
+# The per-episode success flag: the "completion" KPI == mission_complete, as
+# recorded by the env. With RewardConfig.mission_discovered_targets_only (change
+# #3, default on) that means "all DISCOVERED targets destroyed" — an unknown
+# pop-up the team never sees does not block success; otherwise it is the legacy
+# "all present targets destroyed" (~target_alive).all(). See environment.py
+# (_mission_complete_mask). Likewise the "targets" KPI (targets_frac) is measured
+# over the discovered set when the flag is on.
 SUCCESS_KEY = "completion"
 
 # Outputs (relative paths resolved against the project dir 0_TA_...).
