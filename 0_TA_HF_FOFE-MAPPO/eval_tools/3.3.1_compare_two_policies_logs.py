@@ -86,15 +86,15 @@ POLICIES_S1: list[dict] = [
     #      cont=[]),
 
     # S2 scenarios
-    dict(path="runs/FINALV3/complete_S2_FINAL.pt",
-         label="V3 - Complete S2",
+    dict(path="runs/FINALV5/stage7of11_DR_j2-4_k0_25.pt",
+         label="V5 - Complete S2",
          cont=[]),
-    dict(path="runs/FINALV3/baseline_S2_FINAL.pt",
-         label="V3 - Baseline S2",
-         cont=[]),
-    dict(path="runs/FINALV2/S2_Baseline_stage9of9_S2_DR_j2-4_k0_25_FINAL.pt",
-         label="V2 - Baseline S2",
-         cont=[]),
+    # dict(path="runs/FINALV3/baseline_S2_FINAL.pt",
+    #      label="V3 - Baseline S2",
+    #      cont=[]),
+    # dict(path="runs/FINALV2/S2_Baseline_stage9of9_S2_DR_j2-4_k0_25_FINAL.pt",
+    #      label="V2 - Baseline S2",
+    #      cont=[]),
     # S1 scenarios
     # dict(path="runs/FINALV2/complete_stage7of8_DR_j2-4_k0_25.pt",
     #      label="Complete V2",
