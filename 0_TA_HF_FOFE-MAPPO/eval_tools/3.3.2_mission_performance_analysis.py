@@ -94,9 +94,9 @@ from .nlr_style import NLR_PRIMARY, NLR_ACCENT, NLR_SECONDARY, NLR_GRAY, NLR_DAR
 
 # Number of RUNS = paired episodes per policy per scenario (this is the test N,
 # and the "n=" printed in the table caption).             [CLI: --n_episodes]
-N_EPISODES = 600
+N_EPISODES = 1000
 # Parallel envs per rollout chunk (lower this if you hit GPU OOM). [CLI: --chunk]
-CHUNK_EPISODES = 300
+CHUNK_EPISODES = 500
 # Base RNG seed; both policies share it so episodes are paired 1:1.  [CLI: --seed]
 BASE_SEED = 42
 # Significance level for the tests.                                 [CLI: --alpha]
@@ -144,7 +144,7 @@ SCENARIO_POLICIES: Dict[str, ScenarioPolicies] = {
         base=PolicyInput(name=BASE_LABEL, policy_file="runs/FINALV2/Final_Baseline_Cont_4.pt", communicate=False),
     ),
     "S2": ScenarioPolicies(
-        main=PolicyInput(name=MAIN_LABEL, policy_file="runs/FINALV1/complete_S2_20260704/stage3of3_S2_DR_j2-4_k0_25_FINAL.pt", communicate=True),
+        main=PolicyInput(name=MAIN_LABEL, policy_file="runs/FINALV5/complete_S2_BEST.pt", communicate=True),
         base=PolicyInput(name=BASE_LABEL, policy_file="runs/FINALV2/S2_Baseline_stage9of9_S2_DR_j2-4_k0_25_FINAL.pt", communicate=False),
     ),
 }
@@ -177,7 +177,7 @@ EVAL_SCENARIOS: List[CurriculumSection] = [
 ]
 
 # KPIs shown (in column order). Keys must exist in evaluate_policy.KPIS.
-TABLE_KPIS = ["targets", "survival", "duration"]
+TABLE_KPIS = ["reward", "targets", "survival", "duration"]
 
 # KPIs restricted to SUCCESSFUL episodes. For these, means, CIs and the (one-sided,
 # directional) paired t-test are computed only over episode pairs where BOTH
@@ -418,9 +418,10 @@ _HEADER = r"""\begin{table}[htbp]
     \label{tab:mission-performence}
     \small
     \resizebox{\textwidth}{!}{%
-        \begin{tabular}{l*{9}{c}}
+        \begin{tabular}{l*{12}{c}}
             \toprule
             \textbf{Configuration}
+            & \multicolumn{3}{c}{\textbf{Reward}}
             & \multicolumn{3}{c}{\textbf{Targets destroyed}}
             & \multicolumn{3}{c}{\textbf{Survival}}
             & \multicolumn{3}{c}{\textbf{Duration}} \\
@@ -428,7 +429,9 @@ _HEADER = r"""\begin{table}[htbp]
             \cmidrule(lr){2-4}
             \cmidrule(lr){5-7}
             \cmidrule(lr){8-10}
+            \cmidrule(lr){11-13}
 
+            & __MAIN__ & __BASE__ & $p$-value
             & __MAIN__ & __BASE__ & $p$-value
             & __MAIN__ & __BASE__ & $p$-value
             & __MAIN__ & __BASE__ & $p$-value \\
@@ -457,11 +460,13 @@ def _duration_n_phrase(scenarios, results) -> str:
 def build_latex(scenarios, results, n_episodes) -> str:
     blocks = []
     for scn in scenarios:
+        rw = _cells(scn, "reward", results)
         t = _cells(scn, "targets", results)
         s = _cells(scn, "survival", results)
         d = _cells(scn, "duration", results)
         blocks.append(
             f"            ${scn.name}$\n"
+            f"            & {rw[0]} & {rw[1]} & {rw[2]}\n"
             f"            & {t[0]} & {t[1]} & {t[2]}\n"
             f"            & {s[0]} & {s[1]} & {s[2]}\n"
             f"            & {d[0]} & {d[1]} & {d[2]} \\\\\n"

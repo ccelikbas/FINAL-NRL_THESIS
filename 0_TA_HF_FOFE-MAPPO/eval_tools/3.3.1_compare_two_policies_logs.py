@@ -324,8 +324,8 @@ def _annotate_final_state_start(ax, n_iter, start_iter, label=None):
         return
     trans = ax.get_xaxis_transform()
     ax.axvline(start, color=NLR_DARKGRAY, lw=1.0, ls="--", alpha=0.65, zorder=1.5)
-    ax.text(start, 0.985, label or f"", transform=trans,
-            ha="right", va="top", rotation=90, fontsize=8.0,
+    ax.text(start, 0.02, label or f"", transform=trans,
+            ha="left", va="bottom", rotation=90, fontsize=8.0,
             color=NLR_DARKGRAY, alpha=0.9, zorder=2)
 
 
