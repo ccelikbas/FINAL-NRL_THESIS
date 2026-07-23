@@ -86,9 +86,9 @@ POLICIES_S1: list[dict] = [
     #      cont=[]),
 
     # S2 scenarios
-    dict(path="runs/FINALV5/stage7of11_DR_j2-4_k0_25.pt",
-         label="V5 - Complete S2",
-         cont=[]),
+    # dict(path="runs/FINALV5/stage7of11_DR_j2-4_k0_25.pt",
+    #      label="V5 - Complete S2",
+    #      cont=[]),
     # dict(path="runs/FINALV3/baseline_S2_FINAL.pt",
     #      label="V3 - Baseline S2",
     #      cont=[]),
@@ -96,30 +96,29 @@ POLICIES_S1: list[dict] = [
     #      label="V2 - Baseline S2",
     #      cont=[]),
     # S1 scenarios
-    # dict(path="runs/FINALV2/complete_stage7of8_DR_j2-4_k0_25.pt",
-    #      label="Complete V2",
-    #      cont=[]),
-    # dict(path="runs/FINALV2/baseline_stage11of11_DR_j2-4_k0_25_FINAL.pt",
-    #      label="Baseline V2",
-    #      cont=["runs/FINALV2/FINAL_baseline_s1_cont.pt",
-    #            "runs/FINALV2/Final_Baseline_Cont_2.pt",
-    #            "runs/FINALV2/Final_Baseline_Cont_3.pt",
-    #            "runs/FINALV2/Final_Baseline_Cont_4.pt",
-    #            "runs/FINALV2/Final_Baseline_Cont_5.pt"]),
+    dict(path="runs/FINALV2/complete_stage7of8_DR_j2-4_k0_25.pt",
+         label="Complete V2",
+         cont=[]),
+    dict(path="runs/FINALV2/baseline_stage11of11_DR_j2-4_k0_25_FINAL.pt",
+         label="Baseline V2",
+         cont=["runs/FINALV2/FINAL_baseline_s1_cont.pt",
+               "runs/FINALV2/Final_Baseline_Cont_2.pt",
+               "runs/FINALV2/Final_Baseline_Cont_3.pt",
+               "runs/FINALV2/Final_Baseline_Cont_4.pt",
+               "runs/FINALV2/Final_Baseline_Cont_5.pt"]),
 ]
 
 # ── S2 GROUP ──  (draws the *_S2 PNGs; SAME dict format as POLICIES_S1 above).
 # Fill in your S2 checkpoints here. Leave the list empty to skip the S2 plots
 # entirely — the S1 figures are unaffected either way.
 POLICIES_S2: list[dict] = [
-    dict(path="runs/FINALV1/complete_S2_20260704/stage3of3_S2_DR_j2-4_k0_25_FINAL.pt",
-         label="OLD - Complete S2",
-         start_iter=5000,          # set to e.g. 10_000 to drop the S1 phase (0→10k)
+    dict(path="runs/FINALV5/complete_S2_FINAL.pt",
+         label="V5 - Complete S2",
          cont=[]),
-    dict(path="runs/FINALV2/S2_Baseline_stage9of9_S2_DR_j2-4_k0_25_FINAL.pt",
-         label="Baseline S2",
-         start_iter=10000,          # may differ per policy; each still starts at 0 on the graph
-         cont=[]),
+    # dict(path="runs/FINALV2/S2_Baseline_stage9of9_S2_DR_j2-4_k0_25_FINAL.pt",
+    #      label="Baseline S2",
+    #      start_iter=10000,          # may differ per policy; each still starts at 0 on the graph
+    #      cont=[]),
 ]
 
 # Running-average window (datapoints); resets at each curriculum section so
@@ -156,7 +155,7 @@ TABLE_SMOOTH_WINDOW = 1
 # The final curriculum stage starts here on the plotted/re-based x-axis. The
 # convergence table searches for the peak reward only from this point onward, and
 # the figures mark the same point with a subtle vertical guide.
-FINAL_STATE_START_ITER = {"S1": 5000, "S2": 4000}
+FINAL_STATE_START_ITER = {"S1": 5000, "S2": 5000}
 
 # Figure resolution (dots per inch). Higher = sharper output (larger files). [CLI: --dpi]
 DPI = 600
@@ -325,7 +324,7 @@ def _annotate_final_state_start(ax, n_iter, start_iter, label=None):
         return
     trans = ax.get_xaxis_transform()
     ax.axvline(start, color=NLR_DARKGRAY, lw=1.0, ls="--", alpha=0.65, zorder=1.5)
-    ax.text(start, 0.985, label or f"final stage start ({start:,})", transform=trans,
+    ax.text(start, 0.985, label or f"", transform=trans,
             ha="right", va="top", rotation=90, fontsize=8.0,
             color=NLR_DARKGRAY, alpha=0.9, zorder=2)
 
