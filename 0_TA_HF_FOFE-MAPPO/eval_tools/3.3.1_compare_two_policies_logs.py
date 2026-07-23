@@ -97,10 +97,10 @@ POLICIES_S1: list[dict] = [
     #      cont=[]),
     # S1 scenarios
     dict(path="runs/FINALV2/complete_stage7of8_DR_j2-4_k0_25.pt",
-         label="Complete V2",
+         label="Comm-FOFE-MAPPO",
          cont=[]),
     dict(path="runs/FINALV2/baseline_stage11of11_DR_j2-4_k0_25_FINAL.pt",
-         label="Baseline V2",
+         label="MAPPO Baseline",
          cont=["runs/FINALV2/FINAL_baseline_s1_cont.pt",
                "runs/FINALV2/Final_Baseline_Cont_2.pt",
                "runs/FINALV2/Final_Baseline_Cont_3.pt",
@@ -113,10 +113,10 @@ POLICIES_S1: list[dict] = [
 # entirely — the S1 figures are unaffected either way.
 POLICIES_S2: list[dict] = [
     dict(path="runs/FINALV5/complete_S2_FINAL.pt",
-         label="V5 - Complete S2",
+         label="Comm-FOFE-MAPPO",
          cont=[]),
     dict(path="runs/FINALV5/baseline_S2_FINAL.pt",
-             label="V5 - Baseline S2",
+             label="MAPPO Baseline",
              cont=[]),
     # dict(path="runs/FINALV2/S2_Baseline_stage9of9_S2_DR_j2-4_k0_25_FINAL.pt",
     #      label="Baseline S2",
@@ -319,17 +319,14 @@ def _annotate_pkill(ax, n_iter):
 
 
 def _annotate_final_state_start(ax, n_iter, start_iter, label=None):
-    """Mark the first iteration included in the convergence-table peak search."""
+    """Mark the first iteration included in the convergence-table peak search
+    with a black dotted vertical line (no text annotation)."""
     if start_iter is None:
         return
     start = int(start_iter)
     if start <= 0 or not n_iter or start > n_iter:
         return
-    trans = ax.get_xaxis_transform()
-    ax.axvline(start, color=NLR_DARKGRAY, lw=1.0, ls="--", alpha=0.65, zorder=1.5)
-    ax.text(start, 0.02, label or f"", transform=trans,
-            ha="left", va="bottom", rotation=90, fontsize=8.0,
-            color=NLR_DARKGRAY, alpha=0.9, zorder=2)
+    ax.axvline(start, color="black", lw=1.2, ls=":", alpha=0.9, zorder=1.5)
 
 
 def plot_reward(policies, out, smooth, dpi=DPI, final_start_iter=None, final_start_label=None):
@@ -347,15 +344,16 @@ def plot_reward(policies, out, smooth, dpi=DPI, final_start_iter=None, final_sta
         ax.plot(xs, ys, lw=1.9, color=color, label=label)
 
     ax.axhline(0.0, color=NLR_DARKGRAY, lw=0.8, alpha=0.5)
-    ax.set_xlabel("Global training iteration", fontsize=11)
-    ax.set_ylabel("Mean episode reward (train)", fontsize=11)
+    ax.set_xlabel("Global training iteration", fontsize=22)
+    ax.set_ylabel("Mean episode reward (train)", fontsize=22)
     # ax.set_title("Training reward — policy comparison", fontsize=12, fontweight="bold")
+    ax.set_ylim(-40, 0)
     if n_iter:
         ax.set_xlim(1, n_iter)
     ax.grid(True, alpha=0.3)
     _annotate_pkill(ax, n_iter)
     _annotate_final_state_start(ax, n_iter, final_start_iter, final_start_label)
-    ax.legend(loc="lower right", fontsize=10, frameon=True, title="policy")
+    ax.legend(loc="lower right", fontsize=20, frameon=True, title="policy", title_fontsize=20)
     fig.tight_layout()
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=dpi, bbox_inches="tight")
@@ -380,8 +378,8 @@ def plot_eval_rates(policies, out, smooth, dpi=DPI, title_suffix="", final_start
             ax.plot(xs, ys, lw=1.6, color=kcolor, ls=style)
             plotted_metrics.add(klabel)
 
-    ax.set_xlabel("Global training iteration", fontsize=11)
-    ax.set_ylabel("Rate", fontsize=11)
+    ax.set_xlabel("Global training iteration", fontsize=22)
+    ax.set_ylabel("Rate", fontsize=22)
     ax.set_title(f"Eval rates — policy comparison{title_suffix}", fontsize=12, fontweight="bold")
     ax.set_ylim(0.0, 1.05)
     if n_iter:
@@ -397,10 +395,12 @@ def plot_eval_rates(policies, out, smooth, dpi=DPI, title_suffix="", final_start
                           ls=POLICY_STYLES[i % len(POLICY_STYLES)], label=pol[0])
                    for i, pol in enumerate(policies)]
     leg1 = ax.legend(handles=kpi_handles, title="eval metric", loc="center left",
-                     bbox_to_anchor=(1.01, 0.68), fontsize=9, frameon=True)
+                     bbox_to_anchor=(1.01, 0.68), fontsize=18, frameon=True,
+                     title_fontsize=18)
     ax.add_artist(leg1)
     leg2 = ax.legend(handles=pol_handles, title="policy", loc="center left",
-                     bbox_to_anchor=(1.01, 0.30), fontsize=9, frameon=True)
+                     bbox_to_anchor=(1.01, 0.30), fontsize=18, frameon=True,
+                     title_fontsize=18)
     out.parent.mkdir(parents=True, exist_ok=True)
     # bbox_extra_artists ensures BOTH outside legends are inside the saved crop.
     fig.savefig(out, dpi=dpi, bbox_inches="tight", bbox_extra_artists=[leg1, leg2])
