@@ -1,36 +1,46 @@
 \begin{table}[htbp]
     \centering
-    \caption{Mission performance across scenarios (n=600 paired episodes;
+    \caption{Mission performance across scenarios (n=1000 paired episodes;
     one-sided \emph{paired} $t$-test on common-random-number pairs; Duration is
-    conditioned on jointly-successful episodes, $n_\mathrm{dur}$: S1=353, S2=146).}
+    conditioned on jointly-successful episodes, $n_\mathrm{dur}$: S1=563, S2=417).}
     \label{tab:mission-performence}
     \small
     \resizebox{\textwidth}{!}{%
-        \begin{tabular}{l*{9}{c}}
+        \begin{tabular}{l*{15}{c}}
             \toprule
             \textbf{Configuration}
+            & \multicolumn{3}{c}{\textbf{Reward}}
             & \multicolumn{3}{c}{\textbf{Targets destroyed}}
             & \multicolumn{3}{c}{\textbf{Survival}}
-            & \multicolumn{3}{c}{\textbf{Duration}} \\
+            & \multicolumn{3}{c}{\textbf{Duration}}
+            & \multicolumn{3}{c}{\textbf{Coalition frag.}} \\
 
             \cmidrule(lr){2-4}
             \cmidrule(lr){5-7}
             \cmidrule(lr){8-10}
+            \cmidrule(lr){11-13}
+            \cmidrule(lr){14-16}
 
+            & Complete & Baseline & $p$-value
+            & Complete & Baseline & $p$-value
             & Complete & Baseline & $p$-value
             & Complete & Baseline & $p$-value
             & Complete & Baseline & $p$-value \\
             \midrule
 
             $S1$
-            & 0.966 & 0.742 & <0.001
-            & 0.862 & 0.543 & <0.001
-            & 42.8 & 57.0 & <0.001 \\
+            & 0.59 & -15.39 & <0.001
+            & 0.973 & 0.721 & <0.001
+            & 0.874 & 0.515 & <0.001
+            & 42.1 & 56.3 & <0.001
+            & 0.237 & 0.002 & <0.001 \\
 
             $S2$
-            & 0.638 & 0.625 & 0.279
-            & 0.632 & 0.322 & <0.001
-            & 53.2 & 57.1 & <0.001 \\
+            & -4.37 & -11.89 & <0.001
+            & 0.867 & 0.668 & <0.001
+            & 0.766 & 0.410 & <0.001
+            & 46.7 & 48.6 & <0.001
+            & 0.002 & 0.006 & <0.001 \\
             \bottomrule
         \end{tabular}%
     }

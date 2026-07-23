@@ -177,7 +177,7 @@ EVAL_SCENARIOS: List[CurriculumSection] = [
 ]
 
 # KPIs shown (in column order). Keys must exist in evaluate_policy.KPIS.
-TABLE_KPIS = ["reward", "targets", "survival", "duration"]
+TABLE_KPIS = ["reward", "targets", "survival", "duration", "fragmentation"]
 
 # KPIs restricted to SUCCESSFUL episodes. For these, means, CIs and the (one-sided,
 # directional) paired t-test are computed only over episode pairs where BOTH
@@ -418,19 +418,22 @@ _HEADER = r"""\begin{table}[htbp]
     \label{tab:mission-performence}
     \small
     \resizebox{\textwidth}{!}{%
-        \begin{tabular}{l*{12}{c}}
+        \begin{tabular}{l*{15}{c}}
             \toprule
             \textbf{Configuration}
             & \multicolumn{3}{c}{\textbf{Reward}}
             & \multicolumn{3}{c}{\textbf{Targets destroyed}}
             & \multicolumn{3}{c}{\textbf{Survival}}
-            & \multicolumn{3}{c}{\textbf{Duration}} \\
+            & \multicolumn{3}{c}{\textbf{Duration}}
+            & \multicolumn{3}{c}{\textbf{Coalition frag.}} \\
 
             \cmidrule(lr){2-4}
             \cmidrule(lr){5-7}
             \cmidrule(lr){8-10}
             \cmidrule(lr){11-13}
+            \cmidrule(lr){14-16}
 
+            & __MAIN__ & __BASE__ & $p$-value
             & __MAIN__ & __BASE__ & $p$-value
             & __MAIN__ & __BASE__ & $p$-value
             & __MAIN__ & __BASE__ & $p$-value
@@ -464,12 +467,14 @@ def build_latex(scenarios, results, n_episodes) -> str:
         t = _cells(scn, "targets", results)
         s = _cells(scn, "survival", results)
         d = _cells(scn, "duration", results)
+        f = _cells(scn, "fragmentation", results)
         blocks.append(
             f"            ${scn.name}$\n"
             f"            & {rw[0]} & {rw[1]} & {rw[2]}\n"
             f"            & {t[0]} & {t[1]} & {t[2]}\n"
             f"            & {s[0]} & {s[1]} & {s[2]}\n"
-            f"            & {d[0]} & {d[1]} & {d[2]} \\\\\n"
+            f"            & {d[0]} & {d[1]} & {d[2]}\n"
+            f"            & {f[0]} & {f[1]} & {f[2]} \\\\\n"
         )
     header = (_HEADER.replace("__N__", str(n_episodes))
               .replace("__DURN__", _duration_n_phrase(scenarios, results))

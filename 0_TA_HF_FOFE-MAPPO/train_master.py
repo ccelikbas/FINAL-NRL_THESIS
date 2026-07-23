@@ -162,6 +162,22 @@ RUNS: List[Run] = [
 ]
 
 
+# ── PER-MODEL PPO OVERRIDES ──────────────────────────────────────────────────
+# Override PPOConfig fields per MODEL, applied to EVERY section of every job of
+# that model — so the complete and baseline models in ONE master run (e.g. a
+# week-long all-four run) can use DIFFERENT PPO settings. Keyed by job.model
+# ("complete" | "baseline"); an empty dict means "use the PPOConfig defaults".
+#
+# Currently: the baseline uses a smaller minibatch to cut server GPU memory
+# (the update-time activation peak scales with minibatch_size; this does NOT
+# change how much data is collected, so the complete-vs-baseline ablation stays
+# fair). The complete model is left on the config default, untouched.
+PPO_OVERRIDES_BY_MODEL: Dict[str, Dict[str, Any]] = {
+    "complete": {},                        # unchanged — uses PPOConfig defaults
+    "baseline": {"minibatch_size": 8192},  # halve the update-time GPU memory peak
+}
+
+
 # =====================================================================
 #  IMPLEMENTATION  —  the engine.  You usually do not edit below here.
 # =====================================================================
@@ -329,6 +345,10 @@ def _print_job_plan(job: Job, resolved, out_dir: Path, warm_src: str, seed: int)
     print(f"  JOB '{job.key}'  —  {job.description}")
     print(f"  FOFE {'ON' if job.use_fofe else 'OFF'} | comm {'ON' if job.communicate else 'OFF'} "
           f"| {total_iters} iters | {len(resolved)} sections | seed {seed}")
+    ppo_ovr = PPO_OVERRIDES_BY_MODEL.get(job.model, {})
+    if ppo_ovr:
+        print(f"  ppo override: {', '.join(f'{k}={v}' for k, v in ppo_ovr.items())} "
+              f"(model '{job.model}')")
     print(f"  warm-start : {warm_src}")
     print(f"  output     : {out_dir.name}/{job.model}_{job.scenario}_FINAL.pt (+ backup folder)")
     cursor = 0
@@ -366,6 +386,10 @@ def _train_job(job: Job, warmstart_path: Optional[Path], out_dir: Path,
     for si, (sec, env_cfg) in enumerate(resolved):
         ppo_cfg = PPOConfig(num_envs=args.num_envs, n_iters=sec.n_iters,
                             seed=seed + global_iter, log_every=args.log_every)
+        # Per-model PPO overrides (e.g. a smaller baseline minibatch) — applied
+        # to every section so both models in one master run can differ.
+        for _k, _v in PPO_OVERRIDES_BY_MODEL.get(job.model, {}).items():
+            setattr(ppo_cfg, _k, _v)
         ppo_cfg.iteration_offset = global_iter
         exp_cfg = ExperimentConfig(
             env=env_cfg, ppo=ppo_cfg, net=net_cfg, fofe=fofe_cfg, ext=ext_cfg,
