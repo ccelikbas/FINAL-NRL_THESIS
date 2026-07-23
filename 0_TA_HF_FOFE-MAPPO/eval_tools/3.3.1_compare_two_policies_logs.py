@@ -53,6 +53,10 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
+from matplotlib.ticker import FuncFormatter
+
+# x-axis tick formatter: show the iteration count in thousands (5000 -> "5").
+_THOUSANDS_FMT = FuncFormatter(lambda x, _pos: f"{x / 1000:g}")
 
 # Reuse the checkpoint path resolver and the finite / per-section smoothing helpers.
 from .evaluate_policy import _resolve_policy_path
@@ -126,7 +130,7 @@ POLICIES_S2: list[dict] = [
 
 # Running-average window (datapoints); resets at each curriculum section so
 # transitions stay sharp. 1 = raw.                        [CLI: --smooth]
-SMOOTH_WINDOW = 25
+SMOOTH_WINDOW = 1
 
 # Output PNGs (relative paths resolved against the project dir 0_TA_...). One pair
 # per group; the S1 and S2 figures are written to distinct files so neither group
@@ -326,7 +330,7 @@ def _annotate_final_state_start(ax, n_iter, start_iter, label=None):
     start = int(start_iter)
     if start <= 0 or not n_iter or start > n_iter:
         return
-    ax.axvline(start, color="black", lw=1.2, ls=":", alpha=0.9, zorder=1.5)
+    ax.axvline(start, color="black", lw=2.6, ls=":", alpha=1.0, zorder=3)
 
 
 def plot_reward(policies, out, smooth, dpi=DPI, final_start_iter=None, final_start_label=None):
@@ -344,8 +348,10 @@ def plot_reward(policies, out, smooth, dpi=DPI, final_start_iter=None, final_sta
         ax.plot(xs, ys, lw=1.9, color=color, label=label)
 
     ax.axhline(0.0, color=NLR_DARKGRAY, lw=0.8, alpha=0.5)
-    ax.set_xlabel("Global training iteration", fontsize=22)
+    ax.set_xlabel("Global training iteration ('000)", fontsize=22)
     ax.set_ylabel("Mean episode reward (train)", fontsize=22)
+    ax.xaxis.set_major_formatter(_THOUSANDS_FMT)
+    ax.tick_params(axis="both", labelsize=15)
     # ax.set_title("Training reward — policy comparison", fontsize=12, fontweight="bold")
     ax.set_ylim(-40, 0)
     if n_iter:
@@ -378,8 +384,10 @@ def plot_eval_rates(policies, out, smooth, dpi=DPI, title_suffix="", final_start
             ax.plot(xs, ys, lw=1.6, color=kcolor, ls=style)
             plotted_metrics.add(klabel)
 
-    ax.set_xlabel("Global training iteration", fontsize=22)
+    ax.set_xlabel("Global training iteration ('000)", fontsize=22)
     ax.set_ylabel("Rate", fontsize=22)
+    ax.xaxis.set_major_formatter(_THOUSANDS_FMT)
+    ax.tick_params(axis="both", labelsize=15)
     ax.set_title(f"Eval rates — policy comparison{title_suffix}", fontsize=12, fontweight="bold")
     ax.set_ylim(0.0, 1.05)
     if n_iter:
