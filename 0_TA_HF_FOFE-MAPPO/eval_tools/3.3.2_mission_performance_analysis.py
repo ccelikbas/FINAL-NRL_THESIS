@@ -198,7 +198,8 @@ SUCCESS_KEY = "completion"
 # Outputs (relative paths resolved against the project dir 0_TA_...).
 OUT_PATH = "eval_results/mission_performance.tex"
 DASHBOARD_OUT = "eval_results/mission_performance_ci.png"
-DPI = 200
+COMPACT_TOP_OUT = "eval_results/mission_performance_ci_top.png"
+DPI = 500
 
 # =====================================================================
 
@@ -632,6 +633,69 @@ def plot_dashboard(scenarios, scen_main, scen_base, results, ci_level, alpha,
     print(f"Saved CI dashboard to: {out_png}")
 
 
+def plot_top_compact(scenarios, scen_main, scen_base, results, ci_level, alpha,
+                     out_png, main_label, base_label,
+                     spacing=0.5, dodge=0.09, panel_w=1.95, panel_h=2.9,
+                     title_fs=9, label_fs=8.5, tick_fs=8, legend_fs=8) -> None:
+    """A COMPACT, report-ready version of ONLY the top row of plot_dashboard:
+    per-method mean ± CI per KPI, no suptitle, no paired-difference row. The
+    scenarios are packed together (small `spacing`) and each panel is narrow
+    (`panel_w`) so there is no wasted horizontal whitespace between the S1/S2
+    datapoints — same data as the full dashboard, just squeezed in x. The shared
+    legend sits at the bottom, tucked close under the panels."""
+    keys = TABLE_KPIS
+    K = len(keys)
+    scen = list(scenarios)
+    xn = np.arange(len(scen)) * spacing
+    any_base = any(scen_base.get(s.name) is not None for s in scen)
+
+    fig, axes = plt.subplots(1, K, figsize=(panel_w * K, panel_h), squeeze=False)
+    handles: list = []
+    for j, key in enumerate(keys):
+        spec = _KPI_BY_KEY[key]
+        is_rate = spec.unit == "rate"
+        ax = axes[0, j]
+
+        m_mean = np.array([results[key][s.name]["mean_main"] for s in scen])
+        m_err = np.array([(results[key][s.name]["ci_main"][1]
+                           - results[key][s.name]["ci_main"][0]) / 2.0 for s in scen])
+        h1 = ax.errorbar(xn - dodge, m_mean, yerr=m_err, fmt="o", ms=6, capsize=5,
+                         color=NLR_PRIMARY, label=main_label, lw=1.6)
+        if any_base:
+            b_mean = np.array([results[key][s.name]["mean_base"] for s in scen])
+            b_err = np.array([(results[key][s.name]["ci_base"][1]
+                               - results[key][s.name]["ci_base"][0]) / 2.0 for s in scen])
+            h2 = ax.errorbar(xn + dodge, b_mean, yerr=b_err, fmt="s", ms=6, capsize=5,
+                             color=NLR_ACCENT, label=base_label, lw=1.6)
+            if not handles:
+                handles = [h1, h2]
+        elif not handles:
+            handles = [h1]
+
+        ax.set_title(spec.label, fontsize=title_fs)
+        ax.set_ylabel(spec.unit, fontsize=label_fs)
+        ax.set_xticks(xn)
+        ax.set_xticklabels([s.name for s in scen])
+        ax.tick_params(labelsize=tick_fs)
+        ax.set_xlim(xn.min() - spacing * 0.56, xn.max() + spacing * 0.56)
+        if is_rate:
+            ax.set_ylim(0.0, 1.02)
+        ax.grid(True, axis="y", alpha=0.3)
+
+    # Shared legend at the BOTTOM, tucked close under the panels.
+    if handles:
+        fig.legend(handles=handles,
+                   labels=[main_label, base_label] if any_base else [main_label],
+                   loc="lower center", ncol=2, fontsize=legend_fs, frameon=True,
+                   bbox_to_anchor=(0.5, 0.005), handletextpad=0.4,
+                   columnspacing=1.2, borderpad=0.4)
+    fig.tight_layout(rect=(0, 0.075, 1, 1.0))
+    out_png.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_png, dpi=DPI)
+    plt.close(fig)
+    print(f"Saved compact top figure to: {out_png}")
+
+
 # =====================================================================
 #  Config banner
 # =====================================================================
@@ -697,7 +761,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--device", type=str, default=None, metavar="DEVICE")
     p.add_argument("--out", type=str, default=OUT_PATH)
     p.add_argument("--dashboard_out", type=str, default=DASHBOARD_OUT)
+    p.add_argument("--compact_top_out", type=str, default=COMPACT_TOP_OUT,
+                   help="Compact top-row-only CI figure (no suptitle, x-compressed).")
     p.add_argument("--no_dashboard", action="store_true", help="Skip the CI dashboard.")
+    p.add_argument("--no_compact_top", action="store_true",
+                   help="Skip the compact top-row-only CI figure.")
     return p
 
 
@@ -791,6 +859,12 @@ def main() -> None:
         plot_dashboard(EVAL_SCENARIOS, scen_main, scen_base, results, args.ci,
                        args.alpha, _resolve_out(args.dashboard_out),
                        MAIN_LABEL, BASE_LABEL)
+
+    # ── compact top-row-only CI figure (report-ready, x-compressed) ──
+    if not args.no_compact_top:
+        plot_top_compact(EVAL_SCENARIOS, scen_main, scen_base, results, args.ci,
+                         args.alpha, _resolve_out(args.compact_top_out),
+                         "Comm-FOFE-MAPPO", "MAPPO Baseline")
 
 
 if __name__ == "__main__":

@@ -76,7 +76,7 @@ from .nlr_style import NLR_PRIMARY, NLR_ACCENT
 
 # Number of RUNS = paired episodes per policy per composition (test N and the
 # "n=" printed in the caption).                            [CLI: --n_episodes]
-N_EPISODES = 600
+N_EPISODES = 1000
 # Parallel envs per rollout chunk (lower this if you hit GPU OOM). [CLI: --chunk]
 CHUNK_EPISODES = 300
 # Base RNG seed; both policies share it so episodes are paired 1:1.  [CLI: --seed]
@@ -158,6 +158,9 @@ OUT_PATH = "eval_results/emergent_team_behaviour.tex"
 RATES_PLOT_OUT = "eval_results/emergent_team_rates.png"        # targets/survival/frag vs #jammers
 DURATION_PLOT_OUT = "eval_results/emergent_team_duration.png"  # duration vs #jammers
 DPI = 200
+# Shared figure size (inches) so the two sensitivity plots come out identically
+# sized when placed side by side in the paper.
+FIG_SIZE = (8.0, 5.4)
 
 # =====================================================================
 
@@ -483,6 +486,11 @@ _BASELINE_KPI_COLOR = {"targets": "#a5510e", "survival": "#ed7914", "fragmentati
 _DURATION_COLOR = [NLR_PRIMARY, NLR_ACCENT]   # duration plot: Complete blue, Baseline orange
 _MARKER_SIZE = 9
 
+# Display names for the plot legends only (LaTeX table keeps the generic labels).
+_DISPLAY_NAME = {"Complete": "Comm-FOFE-MAPPO", "Baseline": "MAPPO Baseline"}
+def _disp(name: str) -> str:
+    return _DISPLAY_NAME.get(name, name)
+
 
 def _sorted_scen_x(scenarios):
     scen = sorted(scenarios, key=_jammer_count)
@@ -506,7 +514,7 @@ def plot_rates_sensitivity(scenarios, main, base, results, ci_level, out_png) ->
     pct = int(round(ci_level * 100))
     policies = [main] + ([base] if base is not None else [])
 
-    fig, ax = plt.subplots(figsize=(9.2, 5.8))
+    fig, ax = plt.subplots(figsize=FIG_SIZE)
     for key in RATE_KPIS:
         if key not in results:
             continue
@@ -523,7 +531,7 @@ def plot_rates_sensitivity(scenarios, main, base, results, ci_level, out_png) ->
 
     ax.set_xlabel("Number of jammers (strikers = 2)", fontsize=11)
     ax.set_ylabel("Rate", fontsize=11)
-    ax.set_ylim(0.0, 1.05)
+    ax.set_ylim(-0.05, 1.05)
     ax.set_xticks(xs)
     ax.set_xticklabels([f"{int(x)}" for x in xs])
     ax.grid(True, alpha=0.3)
@@ -537,12 +545,12 @@ def plot_rates_sensitivity(scenarios, main, base, results, ci_level, out_png) ->
             handles.append(Line2D([0], [0], color=_rate_color(pi, key),
                                   ls=_POLICY_LS[pi % len(_POLICY_LS)], lw=2.0,
                                   marker=KPI_MARKER[key], ms=8, mec="white", mew=0.7))
-            labels.append(f"{pol.name} · {_KPI_BY_KEY[key].label}")
-    leg = ax.legend(handles, labels, title="policy · KPI", loc="center left",
-                    bbox_to_anchor=(1.01, 0.5), fontsize=9, frameon=True)
-    ax.set_title(f"Team-size sensitivity — rates ({pct}% CI)", fontsize=12)
+            labels.append(f"{_disp(pol.name)} · {_KPI_BY_KEY[key].label}")
+    ax.legend(handles, labels, title="policy · KPI", loc="lower left",
+              bbox_to_anchor=(0.01, 0.20), fontsize=9, frameon=True)
     out_png.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_png, dpi=DPI, bbox_inches="tight", bbox_extra_artists=[leg])
+    fig.tight_layout()
+    fig.savefig(out_png, dpi=DPI)
     plt.close(fig)
     print(f"Saved rates sensitivity plot to: {out_png}")
 
@@ -556,7 +564,7 @@ def plot_duration_sensitivity(scenarios, main, base, results, ci_level, out_png)
     policies = [main] + ([base] if base is not None else [])
     mk = KPI_MARKER["duration"]
 
-    fig, ax = plt.subplots(figsize=(8.0, 5.4))
+    fig, ax = plt.subplots(figsize=FIG_SIZE)
     for pi, pol in enumerate(policies):
         mkey, ckey = _mean_ci_keys(pi)
         color = _DURATION_COLOR[pi % len(_DURATION_COLOR)]
@@ -564,7 +572,7 @@ def plot_duration_sensitivity(scenarios, main, base, results, ci_level, out_png)
         err = np.array([(results["duration"][s.name][ckey][1]
                          - results["duration"][s.name][ckey][0]) / 2.0 for s in scen], dtype=float)
         ax.errorbar(xs, ys, yerr=err, color=color, ls=_POLICY_LS[pi % len(_POLICY_LS)],
-                    marker=mk, ms=_MARKER_SIZE, lw=1.9, capsize=4, label=pol.name,
+                    marker=mk, ms=_MARKER_SIZE, lw=1.9, capsize=4, label=_disp(pol.name),
                     mec="white", mew=0.7)
 
     ax.set_xlabel("Number of jammers (strikers = 2)", fontsize=11)
@@ -573,9 +581,9 @@ def plot_duration_sensitivity(scenarios, main, base, results, ci_level, out_png)
     ax.set_xticklabels([f"{int(x)}" for x in xs])
     ax.grid(True, alpha=0.3)
     ax.legend(title="policy", fontsize=10, frameon=True)
-    ax.set_title(f"Team-size sensitivity — duration ({pct}% CI)", fontsize=12)
     out_png.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_png, dpi=DPI, bbox_inches="tight")
+    fig.tight_layout()
+    fig.savefig(out_png, dpi=DPI)
     plt.close(fig)
     print(f"Saved duration sensitivity plot to: {out_png}")
 
