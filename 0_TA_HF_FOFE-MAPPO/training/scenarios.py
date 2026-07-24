@@ -198,6 +198,21 @@ def complete_s2_curriculum() -> List[CurriculumSection]:
         CurriculumSection(name="S2 DR j2-4 k0.25", n_iters=1000,
                           n_strikers=2, n_jammers=(2, 4),
                           radar_kill_probability=0.25, **world),    # 10000 iters total
+        CurriculumSection(name="S2 DR j2-4 k0.25", n_iters=1000,
+                            n_strikers=2, n_jammers=(2, 4),
+                            radar_kill_probability=0.25, **world),
+        CurriculumSection(name="S2 DR j2-4 k0.25", n_iters=1000,
+                            n_strikers=2, n_jammers=(2, 4),
+                            radar_kill_probability=0.25, **world), 
+        CurriculumSection(name="S2 DR j2-4 k0.25", n_iters=1000,
+                            n_strikers=2, n_jammers=(2, 4),
+                            radar_kill_probability=0.25, **world),
+        CurriculumSection(name="S2 DR j2-4 k0.25", n_iters=1000,
+                            n_strikers=2, n_jammers=(2, 4),
+                            radar_kill_probability=0.25, **world),
+        CurriculumSection(name="S2 DR j2-4 k0.25", n_iters=1000,
+                            n_strikers=2, n_jammers=(2, 4),
+                            radar_kill_probability=0.25, **world),    # 15000 iters total
     ]
 
 
@@ -240,6 +255,36 @@ def baseline_s2_curriculum() -> List[CurriculumSection]:
         CurriculumSection(name="S2 DR j2-4 k0.25", n_iters=1000,
                           n_strikers=2, n_jammers=(2, 4),
                           radar_kill_probability=0.25, **world),    # 10000 iters total
+        CurriculumSection(name="S2 DR j2-4 k0.25", n_iters=1000,
+                                  n_strikers=2, n_jammers=(2, 4),
+                                  radar_kill_probability=0.25, **world),
+        CurriculumSection(name="S2 DR j2-4 k0.25", n_iters=1000,
+                            n_strikers=2, n_jammers=(2, 4),
+                            radar_kill_probability=0.25, **world), 
+        CurriculumSection(name="S2 DR j2-4 k0.25", n_iters=1000,
+                            n_strikers=2, n_jammers=(2, 4),
+                            radar_kill_probability=0.25, **world),
+        CurriculumSection(name="S2 DR j2-4 k0.25", n_iters=1000,
+                            n_strikers=2, n_jammers=(2, 4),
+                            radar_kill_probability=0.25, **world),
+        CurriculumSection(name="S2 DR j2-4 k0.25", n_iters=1000,
+                            n_strikers=2, n_jammers=(2, 4),
+                            radar_kill_probability=0.25, **world),    # 15000 iters total
+        CurriculumSection(name="S2 DR j2-4 k0.25", n_iters=1000,
+                                    n_strikers=2, n_jammers=(2, 4),
+                                    radar_kill_probability=0.25, **world),
+        CurriculumSection(name="S2 DR j2-4 k0.25", n_iters=1000,
+                            n_strikers=2, n_jammers=(2, 4),
+                            radar_kill_probability=0.25, **world), 
+        CurriculumSection(name="S2 DR j2-4 k0.25", n_iters=1000,
+                            n_strikers=2, n_jammers=(2, 4),
+                            radar_kill_probability=0.25, **world),
+        CurriculumSection(name="S2 DR j2-4 k0.25", n_iters=1000,
+                            n_strikers=2, n_jammers=(2, 4),
+                            radar_kill_probability=0.25, **world),
+        CurriculumSection(name="S2 DR j2-4 k0.25", n_iters=1000,
+                            n_strikers=2, n_jammers=(2, 4),
+                            radar_kill_probability=0.25, **world),    # 20000 iters total
     ]
 
 

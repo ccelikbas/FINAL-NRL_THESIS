@@ -167,14 +167,20 @@ RUNS: List[Run] = [
     # ── Example: only the complete S1→S2 lineage (chained, no paths). ──
     # Run(tag="V3_complete_S1", jobs=["complete_s1"], seed=0),
 
-    # ── FULL STUDY — all 6 jobs in ONE run (one runs/V6/ folder). Order matters:
-    #    both S1s train FROM SCRATCH first, then each S2 CHAINS from its S1 sibling
-    #    produced above (no checkpoint paths needed), then the two S1 communication
-    #    ablations. 6 jobs total:
-    #      S1 models      : complete_s1 · baseline_s1        (from scratch)
-    #      S2 models      : complete_s2 · baseline_s2        (chain from S1 siblings)
-    #      S1 ablations   : complete_nocomm_s1 · baseline_comm_s1  (from scratch)
-    Run(tag="V6", jobs=ALL_JOBS + ABLATION_JOBS, seed=0),
+    # ── FULL STUDY — 6 independent runs, one per model, EACH TRAINED FROM SCRATCH
+    #    (from_scratch=True → no policy transfer / no S1→S2 chaining). Each has its
+    #    own tag → its own runs/<tag>/ folder, and its own seed, so you can tune
+    #    every run's main parameters here independently and re-run just one with
+    #    e.g. --only V6_complete_s2.
+    # S1 — two communication ablations
+    Run(tag="V6_complete_nocomm_s1", jobs=["complete_nocomm_s1"], seed=0, from_scratch=True),
+    Run(tag="V6_baseline_comm_s1",   jobs=["baseline_comm_s1"],   seed=0, from_scratch=True),
+    # S1 — two main models
+    Run(tag="V6_complete_s1",        jobs=["complete_s1"],        seed=0, from_scratch=True),
+    Run(tag="V6_baseline_s1",        jobs=["baseline_s1"],        seed=0, from_scratch=True),
+    # S2 — two main models (from scratch, NOT continued from S1)
+    Run(tag="V6_complete_s2",        jobs=["complete_s2"],        seed=0, from_scratch=True),
+    Run(tag="V6_baseline_s2",        jobs=["baseline_s2"],        seed=0, from_scratch=True),
 ]
 
 
