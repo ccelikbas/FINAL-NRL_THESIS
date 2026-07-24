@@ -24,6 +24,13 @@ TWO MODES
   by shared per-episode seeds, so both policies see identical worlds (common random
   numbers) and the signed-rank test is valid.
 
+The radar / target COUNTS are set in ONE place per channel (KNOWN_RADARS, KNOWN_TARGETS,
+…): give an int for a FIXED count, or an inclusive (lo, hi) tuple to DOMAIN-RANDOMISE it
+per episode (each parallel env samples its own count in [lo, hi] at reset). Override per
+run with --known_radars / --known_targets etc. (pass 'n' or 'lo,hi'). Under a range the
+per-episode rates are normalised to the PRESENT entities, so a cell mixes world
+complexities. See DomainRandomization in config.py; hi becomes the allocated count.
+
 The FOFE (or fixed-slot legacy) policy can be evaluated at any composition because its
 per-role obs encoding is composition-agnostic; cells far from the training composition
 are extrapolation and are expected to degrade. The training region is outlined in red.
@@ -63,7 +70,7 @@ from matplotlib.patches import Rectangle
 from matplotlib.colors import LinearSegmentedColormap, Normalize
 from scipy.stats import wilcoxon
 
-from .config import PPOConfig
+from .config import PPOConfig, DomainRandomization
 from .trainer import build_env
 from .environment import coalition_fragmentation
 from .evaluate_policy import _LoadedCheckpoint, _build_policy_for_scenario
@@ -89,14 +96,22 @@ POLICY_PATH = "runs/FINALV2/complete_stage7of8_DR_j2-4_k0_25.pt"    # "complete"
 BASELINE_PATH = "runs/FINALV2/Final_Baseline_Cont_4.pt"  # "baseline" model (--baseline); None → single-policy mode
 STRIKERS = [1, 2, 3]             # y-axis of the grid
 JAMMERS = [1, 2, 3, 4, 5, 6]  # x-axis of the grid
-N_RUNS = 600                         # parallel episodes per cell (per seed)
+N_RUNS = 1000                         # parallel episodes per cell (per seed)
 N_SEEDS = 1                         # repeats per cell (concatenated); raise for stronger tests
 BASE_SEED = 500
 
-# Fixed evaluation world (match training). Kept constant across the whole sweep.
+# Evaluation world (match training). Radar / target COUNTS: give an int for a
+# FIXED count, or an inclusive (lo, hi) tuple to DOMAIN-RANDOMISE it per episode
+# (each parallel env in a cell samples its own count in [lo, hi] at reset). Under
+# a range the env allocates tensors at hi and masks each episode down, and the
+# per-episode rates are normalised to the PRESENT entities, so a cell mixes world
+# complexities. Override per run with --known_radars / --known_targets etc.,
+# passing either 'n' (fixed) or 'lo,hi' (randomised).
 SCENARIO = "S2"
-N_KNOWN_RADARS, N_UNKNOWN_RADARS = 6, 0
-N_KNOWN_TARGETS, N_UNKNOWN_TARGETS = 3, 0
+KNOWN_RADARS    = (4,6)        # e.g. (2, 6) to randomise known radars in [2, 6]
+UNKNOWN_RADARS  = 0
+KNOWN_TARGETS   = (2,4)        # e.g. (1, 3) to randomise known targets in [1, 3]
+UNKNOWN_TARGETS = 0
 KILL = 0.25
 FRAG_RADIUS = 0.2
 USE_FOFE = True
@@ -133,6 +148,26 @@ COMPARE_KPIS = [
 ]
 
 
+def _count_spec(v):
+    """Normalise a count spec to (alloc_size, dr_range).
+
+    ``v`` is an int (FIXED count) or an inclusive (lo, hi) tuple (per-episode DR).
+    ``alloc_size`` is what the env builds tensors at (hi for a range); ``dr_range``
+    is the (lo, hi) passed to DomainRandomization, or None when the count is fixed
+    (a scalar, or a degenerate lo==hi range).
+    """
+    if isinstance(v, (tuple, list)):
+        lo, hi = int(v[0]), int(v[1])
+        return hi, (None if lo == hi else (lo, hi))
+    return int(v), None
+
+
+def _parse_count(s):
+    """Parse a CLI count override: 'n' → fixed int; 'lo,hi' → (lo, hi) DR range."""
+    parts = [int(x) for x in s.split(",")]
+    return parts[0] if len(parts) == 1 else (parts[0], parts[1])
+
+
 def _resolve(p):
     p = Path(p)
     if p.is_absolute():
@@ -153,14 +188,28 @@ def _make_cfg(base, ns, nj):
     ec = copy.deepcopy(base)
     ec.n_strikers, ec.n_jammers = ns, nj
     ec.scenario = SCENARIO
-    ec.n_known_targets, ec.n_unknown_targets = N_KNOWN_TARGETS, N_UNKNOWN_TARGETS
-    ec.n_targets = N_KNOWN_TARGETS + N_UNKNOWN_TARGETS
-    ec.n_known_radars, ec.n_unknown_radars = N_KNOWN_RADARS, N_UNKNOWN_RADARS
-    ec.n_radars = N_KNOWN_RADARS + N_UNKNOWN_RADARS
+
+    # Radar / target counts. Each spec is an int (fixed) or a (lo, hi) range;
+    # _count_spec gives (alloc_size, dr_range). The env allocates tensors at
+    # alloc_size (hi for a range) and masks each episode down to a per-env sample.
+    kt, dr_kt = _count_spec(KNOWN_TARGETS)
+    ut, dr_ut = _count_spec(UNKNOWN_TARGETS)
+    kr, dr_kr = _count_spec(KNOWN_RADARS)
+    ur, dr_ur = _count_spec(UNKNOWN_RADARS)
+    ec.n_known_targets, ec.n_unknown_targets = kt, ut
+    ec.n_targets = kt + ut
+    ec.n_known_radars, ec.n_unknown_radars = kr, ur
+    ec.n_radars = kr + ur
+
     ec.radar_kill_probability = KILL
     ec.communicate = COMMUNICATE
     ec._use_fofe = USE_FOFE
-    ec.dr = None
+
+    dr = DomainRandomization(
+        n_known_radars=dr_kr,   n_unknown_radars=dr_ur,
+        n_known_targets=dr_kt,  n_unknown_targets=dr_ut,
+    )
+    ec.dr = dr if dr.active() else None
     return ec
 
 
@@ -183,6 +232,10 @@ def run_cell(ckpt, base, ns, nj, n_runs, seed, device):
     fin_alive = None; fin_talive = None
     with torch.no_grad():
         td = env.reset()
+        # Per-episode PRESENT masks (fixed for the episode; all-True when DR off).
+        # Under radar/target DR the absent slots must be excluded from the rates.
+        tgt_present = env.target_present.bool().detach().cpu().numpy()   # [B, T]
+        agt_present = env.agent_present.bool().detach().cpu().numpy()    # [B, A]
         done = torch.zeros(B, dtype=torch.bool, device=device)
         for _ in range(env.max_steps):
             td = policy(td); td = env.step(td)
@@ -203,10 +256,13 @@ def run_cell(ckpt, base, ns, nj, n_runs, seed, device):
             if bool(done.all()):
                 break
             td = td.get("next")
+    n_agt = np.clip(agt_present.sum(axis=1), 1, None)                   # present agents / episode
+    n_tgt = np.clip(tgt_present.sum(axis=1), 1, None)                   # present targets / episode
+    tgt_destroyed = (tgt_present & ~fin_talive).sum(axis=1)            # present & down
     return dict(
-        survival=fin_alive.mean(axis=1).astype(float),                 # frac agents alive / episode
-        completion=(~fin_talive.any(axis=1)).astype(float),            # 1 if all targets down
-        targets_destroyed=(1.0 - fin_talive.mean(axis=1)).astype(float),
+        survival=((agt_present & fin_alive).sum(axis=1) / n_agt).astype(float),   # frac PRESENT agents alive
+        completion=(~(tgt_present & fin_talive).any(axis=1)).astype(float),       # 1 if all present targets down
+        targets_destroyed=(tgt_destroyed / n_tgt).astype(float),                  # frac PRESENT targets down
         frag=(frag_sum / np.clip(frag_cnt, 1, None)).astype(float),
         reward=rew_sum.astype(float),
         duration=ep_len.astype(float),
@@ -323,15 +379,15 @@ def plot_comparison(grids_c, grids_b, strikers, jammers, name_c, name_b, out, n_
             vmin, vmax = (float(allv.min()), float(allv.max())) if allv.size else (0.0, 1.0)
         better = "higher = better" if direction == "higher" else "lower = better"
         _draw_heat(fig, axes[row, 0], gc, NLR_SEQ, vmin, vmax, strikers, jammers,
-                   f"{title}\nComplete", cbar_label=title)
+                   f"{title}\nComm-FOFE-MAPPO", cbar_label=title)
         _draw_heat(fig, axes[row, 1], gb, NLR_SEQ, vmin, vmax, strikers, jammers,
-                   f"{title}\nBaseline", cbar_label=title)
-        # difference: complete − baseline, diverging, centred at 0
+                   f"{title}\nMAPPO Baseline", cbar_label=title)
+        # difference: Comm-FOFE-MAPPO − MAPPO Baseline, diverging, centred at 0
         diff = gc - gb
         vabs = float(np.nanmax(np.abs(diff))) if np.isfinite(diff).any() else 1.0
         vabs = vabs if vabs > 0 else 1.0
         _draw_heat(fig, axes[row, 2], diff, NLR_DIV, -vabs, vabs, strikers, jammers,
-                   f"{title}\nΔ = Complete − Baseline",
+                   f"{title}\nΔ = Comm-FOFE-MAPPO − MAPPO Baseline",
                    cbar_label=f"Δ  ({better})", signed=True)
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=DPI, bbox_inches="tight")
@@ -445,16 +501,36 @@ def main():
     ap.add_argument("--n_seeds", type=int, default=N_SEEDS)
     ap.add_argument("--strikers", default=None, help="comma list override, e.g. '2' or '1,2,3'")
     ap.add_argument("--jammers", default=None, help="comma list override, e.g. '2,4'")
+    ap.add_argument("--known_radars", default=None,
+                    help="count override: 'n' fixed, or 'lo,hi' to randomise KNOWN radars per episode")
+    ap.add_argument("--unknown_radars", default=None,
+                    help="count override: 'n' fixed, or 'lo,hi' to randomise UNKNOWN radars per episode")
+    ap.add_argument("--known_targets", default=None,
+                    help="count override: 'n' fixed, or 'lo,hi' to randomise KNOWN targets per episode")
+    ap.add_argument("--unknown_targets", default=None,
+                    help="count override: 'n' fixed, or 'lo,hi' to randomise UNKNOWN targets per episode")
     ap.add_argument("--out", default=OUT_PATH)
     args = ap.parse_args()
     strikers = [int(x) for x in args.strikers.split(",")] if args.strikers else STRIKERS
     jammers = [int(x) for x in args.jammers.split(",")] if args.jammers else JAMMERS
 
+    # CLI count overrides replace the module constants (only when the flag is passed).
+    global KNOWN_RADARS, UNKNOWN_RADARS, KNOWN_TARGETS, UNKNOWN_TARGETS
+    if args.known_radars    is not None: KNOWN_RADARS    = _parse_count(args.known_radars)
+    if args.unknown_radars  is not None: UNKNOWN_RADARS  = _parse_count(args.unknown_radars)
+    if args.known_targets   is not None: KNOWN_TARGETS   = _parse_count(args.known_targets)
+    if args.unknown_targets is not None: UNKNOWN_TARGETS = _parse_count(args.unknown_targets)
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    def _fmt(v):
+        return f"[{v[0]}..{v[1]}]" if isinstance(v, (tuple, list)) else str(v)
 
     ckpt_c = _LoadedCheckpoint(_resolve(args.checkpoint), device)
     name_c = Path(args.checkpoint).stem
-    print(f"complete policy = {name_c}   world: S2 {N_KNOWN_RADARS}kr {N_KNOWN_TARGETS}kt kill={KILL}")
+    print(f"complete policy = {name_c}   world: {SCENARIO} "
+          f"radars(k={_fmt(KNOWN_RADARS)},u={_fmt(UNKNOWN_RADARS)}) "
+          f"targets(k={_fmt(KNOWN_TARGETS)},u={_fmt(UNKNOWN_TARGETS)}) kill={KILL}")
     grids_c, per_ep_c = sweep_policy(ckpt_c, strikers, jammers, args.n_runs, args.n_seeds,
                                      BASE_SEED, device, label="complete")
 
