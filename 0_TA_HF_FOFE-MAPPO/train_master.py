@@ -108,14 +108,24 @@ from .training.job_complete_s1 import JOB as _JOB_COMPLETE_S1
 from .training.job_baseline_s1 import JOB as _JOB_BASELINE_S1
 from .training.job_complete_s2 import JOB as _JOB_COMPLETE_S2
 from .training.job_baseline_s2 import JOB as _JOB_BASELINE_S2
+# Ablation jobs — single-axis communication flip on each architecture, S1 from
+# scratch (complete with comm OFF; baseline with comm ON). FOFE + schedule are
+# left identical to each parent model so communication is the ONLY changed axis.
+from .training.job_complete_nocomm_s1 import JOB as _JOB_COMPLETE_NOCOMM_S1
+from .training.job_baseline_comm_s1 import JOB as _JOB_BASELINE_COMM_S1
 
 apply_nlr_style()
 
 # Job registry (key → Job) and the convenience "all four" list.
 _JOBS: Dict[str, Job] = {
-    j.key: j for j in (_JOB_COMPLETE_S1, _JOB_BASELINE_S1, _JOB_COMPLETE_S2, _JOB_BASELINE_S2)
+    j.key: j for j in (
+        _JOB_COMPLETE_S1, _JOB_BASELINE_S1, _JOB_COMPLETE_S2, _JOB_BASELINE_S2,
+        _JOB_COMPLETE_NOCOMM_S1, _JOB_BASELINE_COMM_S1,
+    )
 }
 ALL_JOBS: List[str] = ["complete_s1", "baseline_s1", "complete_s2", "baseline_s2"]
+# Communication ablation (S1, from scratch): complete − comm, baseline + comm.
+ABLATION_JOBS: List[str] = ["complete_nocomm_s1", "baseline_comm_s1"]
 
 
 # =====================================================================
@@ -157,8 +167,14 @@ RUNS: List[Run] = [
     # ── Example: only the complete S1→S2 lineage (chained, no paths). ──
     # Run(tag="V3_complete_S1", jobs=["complete_s1"], seed=0),
 
-    # Run(tag="V5_test_complete_S2", jobs=["complete_s2"], seed=0, from_scratch=True),
-    Run(tag="V5.1_baseline_S2", jobs=["baseline_s2"], seed=0, from_scratch=True),
+    # ── FULL STUDY — all 6 jobs in ONE run (one runs/V6/ folder). Order matters:
+    #    both S1s train FROM SCRATCH first, then each S2 CHAINS from its S1 sibling
+    #    produced above (no checkpoint paths needed), then the two S1 communication
+    #    ablations. 6 jobs total:
+    #      S1 models      : complete_s1 · baseline_s1        (from scratch)
+    #      S2 models      : complete_s2 · baseline_s2        (chain from S1 siblings)
+    #      S1 ablations   : complete_nocomm_s1 · baseline_comm_s1  (from scratch)
+    Run(tag="V6", jobs=ALL_JOBS + ABLATION_JOBS, seed=0),
 ]
 
 
@@ -175,6 +191,10 @@ RUNS: List[Run] = [
 PPO_OVERRIDES_BY_MODEL: Dict[str, Dict[str, Any]] = {
     "complete": {},                        # unchanged — uses PPOConfig defaults
     "baseline": {"minibatch_size": 8192},  # halve the update-time GPU memory peak
+    # Ablation models mirror their parent's PPO settings so only communication
+    # differs (complete_nocomm ≡ complete; baseline_comm ≡ baseline).
+    "complete_nocomm": {},
+    "baseline_comm": {"minibatch_size": 8192},
 }
 
 

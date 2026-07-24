@@ -96,9 +96,9 @@ POLICY_PATH = "runs/FINALV2/complete_stage7of8_DR_j2-4_k0_25.pt"    # "complete"
 BASELINE_PATH = "runs/FINALV2/Final_Baseline_Cont_4.pt"  # "baseline" model (--baseline); None → single-policy mode
 STRIKERS = [1, 2, 3]             # y-axis of the grid
 JAMMERS = [1, 2, 3, 4, 5, 6]  # x-axis of the grid
-N_RUNS = 1000                         # parallel episodes per cell (per seed)
+N_RUNS = 3000                         # parallel episodes per cell (per seed)
 N_SEEDS = 1                         # repeats per cell (concatenated); raise for stronger tests
-BASE_SEED = 500
+BASE_SEED = 42
 
 # Evaluation world (match training). Radar / target COUNTS: give an int for a
 # FIXED count, or an inclusive (lo, hi) tuple to DOMAIN-RANDOMISE it per episode
