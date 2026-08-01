@@ -195,11 +195,11 @@ RUNS: List[Run] = [
 # change how much data is collected, so the complete-vs-baseline ablation stays
 # fair). The complete model is left on the config default, untouched.
 PPO_OVERRIDES_BY_MODEL: Dict[str, Dict[str, Any]] = {
-    "complete": {},                        # unchanged — uses PPOConfig defaults
+    "complete": {"minibatch_size": 8192},                        # unchanged — uses PPOConfig defaults
     "baseline": {"minibatch_size": 8192},  # halve the update-time GPU memory peak
     # Ablation models mirror their parent's PPO settings so only communication
     # differs (complete_nocomm ≡ complete; baseline_comm ≡ baseline).
-    "complete_nocomm": {},
+    "complete_nocomm": {"minibatch_size": 8192},
     "baseline_comm": {"minibatch_size": 8192},
 }
 
