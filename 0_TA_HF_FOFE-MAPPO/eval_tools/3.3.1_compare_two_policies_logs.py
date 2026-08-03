@@ -103,6 +103,9 @@ POLICIES_S1: list[dict] = [
     dict(path="runs/FINALV2/complete_stage7of8_DR_j2-4_k0_25.pt",
          label="Comm-FOFE-MAPPO",
          cont=[]),
+    dict(path="runs/FINALV6/complete_S1_FINAL.pt",
+             label="Comm-FOFE-MAPPO 2",
+             cont=[]),
     dict(path="runs/FINALV2/baseline_stage11of11_DR_j2-4_k0_25_FINAL.pt",
          label="MAPPO Baseline",
          cont=["runs/FINALV2/FINAL_baseline_s1_cont.pt",
@@ -110,6 +113,12 @@ POLICIES_S1: list[dict] = [
                "runs/FINALV2/Final_Baseline_Cont_3.pt",
                "runs/FINALV2/Final_Baseline_Cont_4.pt",
                "runs/FINALV2/Final_Baseline_Cont_5.pt"]),
+    dict(path="runs/FINALV6/baseline_comm_S1_FINAL.pt",
+                     label="MAPPO Baseline - Comm",
+                     cont=[]),
+    dict(path="runs/FINALV6/complete_nocomm_S1_FINAL.pt",
+                    label="FOFE-MAPPO (No Comm)",
+                    cont=[]),
 ]
 
 # ── S2 GROUP ──  (draws the *_S2 PNGs; SAME dict format as POLICIES_S1 above).

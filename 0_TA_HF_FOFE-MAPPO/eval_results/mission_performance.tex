@@ -1,47 +1,45 @@
 \begin{table}[htbp]
     \centering
-    \caption{Mission performance across scenarios (n=1000 paired episodes;
-    one-sided \emph{paired} $t$-test on common-random-number pairs; Duration is
-    conditioned on jointly-successful episodes, $n_\mathrm{dur}$: S1=563, S2=417).}
-    \label{tab:mission-performence}
+    \caption{Mission performance across scenarios based on 1,000 paired episodes (common random numbers). \(p\)-values are from one-sided \emph{paired} \(t\)-tests, except \(^{\dagger}\), which are from one-sided Wilcoxon signed-rank tests (used where the Shapiro--Wilk test rejected normality of the KPI mean's sampling distribution: targets destroyed, duration and fragmentation). Coalition fragmentation is tested two-sided. Effect size is Cohen's paired-sample \(d_z\), oriented so that a positive value favours Complete. Duration is evaluated only for jointly successful episodes (S1: \(n=563\); S2: \(n=417\)).}
+    \label{tab:mission-performance}
     \small
-    \resizebox{\textwidth}{!}{%
-        \begin{tabular}{l*{15}{c}}
-            \toprule
-            \textbf{Configuration}
-            & \multicolumn{3}{c}{\textbf{Reward}}
-            & \multicolumn{3}{c}{\textbf{Targets destroyed}}
-            & \multicolumn{3}{c}{\textbf{Survival}}
-            & \multicolumn{3}{c}{\textbf{Duration}}
-            & \multicolumn{3}{c}{\textbf{Coalition frag.}} \\
+    \begin{tabular}{lcccccccc}
+        \toprule
+        & \multicolumn{4}{c}{\textbf{Scenario S1}}
+        & \multicolumn{4}{c}{\textbf{Scenario S2}} \\
+        \cmidrule(lr){2-5}
+        \cmidrule(lr){6-9}
 
-            \cmidrule(lr){2-4}
-            \cmidrule(lr){5-7}
-            \cmidrule(lr){8-10}
-            \cmidrule(lr){11-13}
-            \cmidrule(lr){14-16}
+        \textbf{KPI}
+        & \textbf{Complete}
+        & \textbf{Baseline}
+        & \(\boldsymbol{p}\)\textbf{-value}
+        & \(\boldsymbol{d_z}\)
+        & \textbf{Complete}
+        & \textbf{Baseline}
+        & \(\boldsymbol{p}\)\textbf{-value}
+        & \(\boldsymbol{d_z}\) \\
+        \midrule
 
-            & Complete & Baseline & $p$-value
-            & Complete & Baseline & $p$-value
-            & Complete & Baseline & $p$-value
-            & Complete & Baseline & $p$-value
-            & Complete & Baseline & $p$-value \\
-            \midrule
+        Reward
+        & 0.59 & -15.39 & \(<0.001\) & 1.20
+        & -4.37 & -11.89 & \(<0.001\) & 0.54 \\
 
-            $S1$
-            & 0.59 & -15.39 & <0.001
-            & 0.973 & 0.721 & <0.001
-            & 0.874 & 0.515 & <0.001
-            & 42.1 & 56.3 & <0.001
-            & 0.237 & 0.002 & <0.001 \\
+        Targets destroyed
+        & 0.973 & 0.721 & \(<0.001\)\(^{\dagger}\) & 0.69
+        & 0.867 & 0.668 & \(<0.001\)\(^{\dagger}\) & 0.48 \\
 
-            $S2$
-            & -4.37 & -11.89 & <0.001
-            & 0.867 & 0.668 & <0.001
-            & 0.766 & 0.410 & <0.001
-            & 46.7 & 48.6 & <0.001
-            & 0.002 & 0.006 & <0.001 \\
-            \bottomrule
-        \end{tabular}%
-    }
+        Survival
+        & 0.874 & 0.515 & \(<0.001\) & 0.77
+        & 0.766 & 0.410 & \(<0.001\) & 0.68 \\
+
+        Duration
+        & 42.1 & 56.3 & \(<0.001\)\(^{\dagger}\) & 1.22
+        & 46.7 & 48.6 & \(<0.001\)\(^{\dagger}\) & 0.24 \\
+
+        Fragmentation
+        & 0.237 & 0.002 & \(<0.001\)\(^{\dagger}\) & 1.56
+        & 0.002 & 0.006 & \(<0.001\)\(^{\dagger}\) & -0.12 \\
+        \bottomrule
+    \end{tabular}
 \end{table}

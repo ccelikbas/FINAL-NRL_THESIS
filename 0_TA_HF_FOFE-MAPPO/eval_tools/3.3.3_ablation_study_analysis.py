@@ -68,9 +68,9 @@ from .nlr_style import NLR_PRIMARY, NLR_ACCENT, NLR_SECONDARY, NLR_GRAY, NLR_DAR
 # =====================================================================
 
 # Number of RUNS = paired episodes per policy (the test N).   [CLI: --n_episodes]
-N_EPISODES = 600
+N_EPISODES = 1000
 # Parallel envs per rollout chunk (lower this if you hit GPU OOM). [CLI: --chunk]
-CHUNK_EPISODES = 300
+CHUNK_EPISODES = 500
 # Base RNG seed; all policies share it so episodes are paired 1:1.   [CLI: --seed]
 BASE_SEED = 42
 # Significance level.                                               [CLI: --alpha]
@@ -103,12 +103,12 @@ COMPARISON_POLICIES: List[PolicyInput] = [
     ),
     PolicyInput(  # PLACEHOLDER — replace with your FOFE-on / comms-off checkpoint
         name="No-Com",
-        policy_file="runs/FINALV2/complete_stage7of8_DR_j2-4_k0_25.pt",
+        policy_file="runs/FINALV6/complete_nocomm_S1_FINAL.pt",
         communicate=False,
     ),
     PolicyInput(  # PLACEHOLDER — replace with your FOFE-off / comms-on checkpoint
         name="No-FOFE",
-        policy_file="runs/FINALV2/Final_Baseline_Cont_4.pt",
+        policy_file="runs/FINALV6/baseline_comm_S1_FINAL.pt",
         communicate=True,
     ),
 ]

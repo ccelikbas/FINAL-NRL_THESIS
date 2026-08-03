@@ -13,21 +13,40 @@ be left empty — that cell/section of the table is then simply rendered blank, 
 a p-value is produced for a row only when BOTH of its policies are present.
 
 ──────────────────────────────────────────────────────────────────────────────
-STATISTICAL METHODOLOGY  (paired one-sided t-test)
+STATISTICAL METHODOLOGY  (paired one-sided tests: t OR Wilcoxon per KPI)
 ──────────────────────────────────────────────────────────────────────────────
 The RAW per-episode KPIs are not normal (completion is binary, targets/survival
 are bounded fractions, duration is right-skewed). But statistical_analysis.py
 showed — via the bootstrap sampling distribution of the mean — that the SAMPLE
-MEAN of each KPI is approximately normal (central limit theorem at n=600). That
-normality justifies a PARAMETRIC test on the means.
+MEAN of MOST KPIs is approximately normal (central limit theorem at n=600). That
+normality justifies a PARAMETRIC test on those means.
+
+Normality was NOT universal, though: the Shapiro-Wilk test in statistical_analysis.py
+REJECTED it for a few (KPI, model) combinations — see NORMALITY_REJECTED below.
+For every KPI where EITHER member of the compared pair failed that check we drop
+the parametric assumption and use the one-sided WILCOXON SIGNED-RANK test on the
+same paired differences instead; the remaining KPIs keep the paired t-test. Which
+test produced which p-value is marked in the outputs (a dagger in LaTeX, a "test"
+column on the console).
 
 Because the environment is fully seeded, episode i faces the SAME randomised
 layout for both methods (common random numbers), so (complete_i, baseline_i) is a
-MATCHED PAIR. We therefore use a PAIRED t-test on the per-episode differences
+MATCHED PAIR. Both tests therefore run on the per-episode differences
     d_i = KPI_complete_i − KPI_baseline_i ,
 one-sided in each KPI's "better" direction (targets/survival: Complete greater;
-duration: Complete less). Pairing removes the shared between-layout variance, so
-the test has more power than an unpaired comparison.
+duration: Complete less; fragmentation is two-sided). Pairing removes the shared
+between-layout variance, so the tests have more power than unpaired comparisons.
+
+EFFECT SIZE: alongside the p-value we report Cohen's PAIRED-SAMPLE d_z,
+    d_z = mean(d) / sd(d)          (sd with ddof=1)
+i.e. the mean paired difference in units of its own standard deviation. It is
+reported for every KPI regardless of which test was used (d_z is descriptive; it
+does not itself assume normality). The sign is ORIENTED so a POSITIVE d_z always
+means the Complete policy is better — for "lower is better" KPIs (duration) the
+sign is flipped, exactly like the oriented difference CIs. Note that d_z is a
+WITHIN-PAIR effect size: because common random numbers remove the between-layout
+variance it is legitimately larger than an unpaired Cohen's d on the same data,
+and the two must not be compared.
 
 Duration is conditioned on JOINTLY-SUCCESSFUL pairs (both methods destroyed all
 targets): duration is only comparable between missions that actually finished, so
@@ -36,7 +55,7 @@ a method whose agents die early cannot look "faster". Its effective n < 600.
 ──────────────────────────────────────────────────────────────────────────────
 OUTPUTS
 ──────────────────────────────────────────────────────────────────────────────
-  1. a LaTeX table  (Complete / Baseline / one-sided paired-t p per KPI),
+  1. a LaTeX table  (per scenario: Complete / Baseline / p-value / d_z per KPI),
   2. the same table printed to the console (with 95% CIs and the mean diff), and
   3. a CI dashboard: per-method mean ± 95% CI (eyeball whether they OVERLAP) plus
      a companion panel of the paired mean-difference ± 95% CI vs a zero line (the
@@ -74,12 +93,13 @@ import torch
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from scipy.stats import ttest_rel
+from scipy.stats import ttest_rel, wilcoxon
 from scipy.stats import t as _student_t
 
 # Reuse the evaluation engine (paired rollouts, KPI defs, path resolution) from
-# evaluate_policy. The engine also runs Wilcoxon internally, but we ignore that
-# here and compute the PAIRED t-test locally from the raw paired `samples`.
+# evaluate_policy. The engine also runs its own Wilcoxon internally, but we ignore
+# that here and compute the paired tests locally from the raw paired `samples`
+# (so the test choice, the success-conditioning and the effect size all match).
 from .evaluate_policy import (
     PolicyInput, evaluate_comparison, _LoadedCheckpoint, _resolve_policy_path,
     _print_policy_diagnostics, _ALT, KPIS, SEED_STRIDE,
@@ -176,8 +196,42 @@ EVAL_SCENARIOS: List[CurriculumSection] = [
     ),
 ]
 
-# KPIs shown (in column order). Keys must exist in evaluate_policy.KPIS.
+# KPIs shown (in row order). Keys must exist in evaluate_policy.KPIS.
 TABLE_KPIS = ["reward", "targets", "survival", "duration", "fragmentation"]
+
+# Row labels in the LaTeX table. Falls back to the engine's KPISpec.label.
+ROW_LABELS = {
+    "reward": "Reward",
+    "targets": "Targets destroyed",
+    "survival": "Survival",
+    "duration": "Duration",
+    "fragmentation": "Fragmentation",
+}
+
+# =====================================================================
+#  >>>  WHICH TEST PER KPI  (t-test vs Wilcoxon signed-rank)  <<<
+# =====================================================================
+# statistical_analysis.py runs a Shapiro-Wilk test on the BOOTSTRAP SAMPLING
+# DISTRIBUTION OF EACH KPI MEAN, per model. Normality was NOT rejected for most
+# (KPI, model) combinations, so those KPIs keep the parametric paired t-test.
+# It WAS formally rejected for the combinations listed below; for those the CLT
+# justification does not hold and we fall back to the DISTRIBUTION-FREE one-sided
+# Wilcoxon signed-rank test on the same paired differences.
+#
+# Keys are the policy ROLE (MAIN_LABEL / BASE_LABEL), values are KPI keys from
+# TABLE_KPIS. A KPI switches to Wilcoxon when EITHER member of the compared pair
+# appears here (the conservative choice: the parametric assumption must hold for
+# both arms of a paired comparison). The switch applies to EVERY scenario row.
+NORMALITY_REJECTED: Dict[str, set] = {
+    MAIN_LABEL: {"targets"},                      # Complete: target-destruction rate
+    BASE_LABEL: {"fragmentation", "duration"},    # Baseline: coalition frag. + duration
+}
+
+# Derived: the KPIs tested with Wilcoxon rather than the paired t-test.
+WILCOXON_KPIS = {k for keys in NORMALITY_REJECTED.values() for k in keys}
+
+# Marker appended to a Wilcoxon p-value in the LaTeX table (explained in the caption).
+WILCOXON_MARK_TEX = r"\(^{\dagger}\)"
 
 # KPIs restricted to SUCCESSFUL episodes. For these, means, CIs and the (one-sided,
 # directional) paired t-test are computed only over episode pairs where BOTH
@@ -236,6 +290,20 @@ def _fmt_p(p: float) -> str:
     return "<0.001" if p < 0.001 else f"{p:.3f}"
 
 
+def _fmt_p_tex(p: float) -> str:
+    """LaTeX p-value ('<' must be in math mode)."""
+    if not np.isfinite(p):
+        return "--"
+    return r"\(<0.001\)" if p < 0.001 else f"{p:.3f}"
+
+
+def _fmt_dz(dz: float) -> str:
+    """Cohen's paired-sample d_z (oriented: positive = main policy better)."""
+    if not np.isfinite(dz):
+        return "--"
+    return f"{dz:.2f}"
+
+
 def _stars(p: float, alpha: float) -> str:
     if not np.isfinite(p):
         return ""
@@ -249,8 +317,17 @@ def _stars(p: float, alpha: float) -> str:
 
 
 # =====================================================================
-#  Paired one-sided t-test (computed from the raw paired `samples`)
+#  Paired one-sided test — t OR Wilcoxon (from the raw paired `samples`)
 # =====================================================================
+
+def _test_for(key: str) -> str:
+    """Which paired test this KPI uses: 'wilcoxon' where the Shapiro-Wilk check
+    in statistical_analysis.py rejected normality of a mean's sampling
+    distribution (NORMALITY_REJECTED), else the parametric 't'."""
+    return "wilcoxon" if key in WILCOXON_KPIS else "t"
+
+
+_TEST_LABEL = {"t": "paired t", "wilcoxon": "Wilcoxon"}
 
 def _joint_success_mask(scn, main, base, samples) -> np.ndarray:
     """Boolean mask over episodes where BOTH policies completed the mission."""
@@ -270,27 +347,36 @@ def _ci_mean(vals: np.ndarray, tcrit: float) -> Tuple[float, float]:
     return (mu - tcrit * sem, mu + tcrit * sem)
 
 
-def _paired_ttest(m: np.ndarray, b: np.ndarray, direction: str,
-                  ci_level: float) -> Dict[str, Any]:
-    """PAIRED one-sided t-test on d = m − b, plus per-method and difference CIs.
+def _paired_test(m: np.ndarray, b: np.ndarray, direction: str, ci_level: float,
+                 test: str) -> Dict[str, Any]:
+    """PAIRED one-sided test on d = m − b, plus per-method and difference CIs
+    and Cohen's paired-sample d_z.
 
     `direction` is the KPI's "better" direction: "higher" → H1 mean(d) > 0,
     "lower" → H1 mean(d) < 0, "two-sided" → H1 mean(d) != 0. The reported
     difference is ORIENTED so a positive value always means the main policy is
-    better (for "lower" KPIs the sign is flipped)."""
+    better (for "lower" KPIs the sign is flipped); d_z carries the same
+    orientation.
+
+    `test` is "t" (parametric paired t-test, the default when the KPI mean's
+    sampling distribution passed the normality check) or "wilcoxon" (the
+    distribution-free signed-rank test, used where normality was rejected). Both
+    run on the SAME paired differences and the same one-sided alternative; only
+    the p-value differs. The CIs and d_z are computed identically either way."""
     m = np.asarray(m, dtype=float)
     b = np.asarray(b, dtype=float)
     n = m.size
     sign = -1.0 if direction == "lower" else 1.0
     alt = _ALT[direction]
     out: Dict[str, Any] = {
-        "n": int(n), "alternative": alt,
+        "n": int(n), "alternative": alt, "test": test,
         "mean_main": float("nan"), "mean_base": float("nan"),
         "mean_diff": float("nan"), "mean_diff_oriented": float("nan"),
         "ci_main": (float("nan"), float("nan")),
         "ci_base": (float("nan"), float("nan")),
         "ci_diff_oriented": (float("nan"), float("nan")),
-        "t": float("nan"), "pvalue": float("nan"), "reason": None,
+        "statistic": float("nan"), "pvalue": float("nan"),
+        "dz": float("nan"), "reason": None,
     }
     if n < 2:
         out["reason"] = "fewer than 2 paired observations"
@@ -310,31 +396,51 @@ def _paired_ttest(m: np.ndarray, b: np.ndarray, direction: str,
     out["ci_diff_oriented"] = tuple(sorted((sign * d_lo, sign * d_hi)))
 
     sd = float(d.std(ddof=1))
+    # Cohen's paired-sample effect size d_z = mean(d)/sd(d), oriented so that a
+    # POSITIVE value always favours the main policy. Undefined when sd == 0.
+    out["dz"] = (sign * mean_d / sd) if sd > 0.0 else float("nan")
     if sd == 0.0:                                   # constant difference
         if mean_d == 0.0:
-            out["t"], out["pvalue"] = 0.0, 1.0
+            out["statistic"], out["pvalue"] = 0.0, 1.0
         else:
             better = (mean_d > 0) if alt == "greater" else (
                 mean_d < 0) if alt == "less" else True
-            out["t"] = float("inf") if mean_d > 0 else float("-inf")
+            out["statistic"] = float("inf") if mean_d > 0 else float("-inf")
             out["pvalue"] = 0.0 if better else 1.0
         out["reason"] = "all paired differences are equal"
         return out
-    res = ttest_rel(m, b, alternative=alt)
-    out["t"], out["pvalue"] = float(res.statistic), float(res.pvalue)
+
+    if test == "wilcoxon":
+        # Signed-rank test on the same differences. zero_method="wilcox" drops
+        # exact ties (episodes where both policies scored identically), matching
+        # evaluate_policy._wilcoxon_pair.
+        if not np.any(d != 0.0):
+            out["statistic"], out["pvalue"] = 0.0, 1.0
+            out["reason"] = "all paired differences are zero"
+            return out
+        try:
+            res = wilcoxon(d, alternative=alt, zero_method="wilcox",
+                           correction=False)
+        except ValueError as exc:                   # degenerate inputs
+            out["reason"] = f"wilcoxon failed: {exc}"
+            return out
+    else:
+        res = ttest_rel(m, b, alternative=alt)
+    out["statistic"], out["pvalue"] = float(res.statistic), float(res.pvalue)
     return out
 
 
 def _empty_result() -> Dict[str, Any]:
     """A fully-blank result (no policy present for this scenario/KPI)."""
     return {
-        "n": 0, "alternative": None,
+        "n": 0, "alternative": None, "test": None,
         "mean_main": float("nan"), "mean_base": float("nan"),
         "mean_diff": float("nan"), "mean_diff_oriented": float("nan"),
         "ci_main": (float("nan"), float("nan")),
         "ci_base": (float("nan"), float("nan")),
         "ci_diff_oriented": (float("nan"), float("nan")),
-        "t": float("nan"), "pvalue": float("nan"), "reason": None,
+        "statistic": float("nan"), "pvalue": float("nan"),
+        "dz": float("nan"), "reason": None,
     }
 
 
@@ -378,7 +484,8 @@ def _paired_result(scn, key, main, base, samples, ci_level) -> Dict[str, Any]:
         mask = np.isfinite(mv) & np.isfinite(bv)
         if key in SUCCESS_CONDITIONED_KPIS:
             mask &= _joint_success_mask(scn, main, base, samples)[:n]
-        return _paired_ttest(mv[mask], bv[mask], direction, ci_level)
+        return _paired_test(mv[mask], bv[mask], direction, ci_level,
+                            _test_for(key))
 
     if main is not None:
         return _single_result(scn_samples, main, key, ci_level, "main")
@@ -401,51 +508,38 @@ def compute_results(scenarios, scen_main, scen_base, samples, ci_level) -> Dict[
 #  LaTeX table
 # =====================================================================
 
-def _cells(scn, key, results) -> Tuple[str, str, str]:
-    """(complete, baseline, p) strings for one (scenario, KPI). Any absent
-    policy (empty slot) yields a blank cell so the section is simply empty."""
+def _cells(scn, key, results) -> Tuple[str, str, str, str]:
+    """(complete, baseline, p, d_z) LaTeX strings for one (scenario, KPI).
+
+    The p-value carries WILCOXON_MARK_TEX when the signed-rank test was used
+    instead of the paired t-test. Any absent policy (empty slot) yields blank
+    cells so that section of the table is simply empty."""
     r = results[key][scn.name]
     c = _fmt_val(key, r["mean_main"]) if np.isfinite(r["mean_main"]) else ""
     b = _fmt_val(key, r["mean_base"]) if np.isfinite(r["mean_base"]) else ""
-    p = _fmt_p(r["pvalue"]) if np.isfinite(r["pvalue"]) else ""
-    return c, b, p
+    if np.isfinite(r["pvalue"]):
+        p = _fmt_p_tex(r["pvalue"])
+        if r.get("test") == "wilcoxon":
+            p += WILCOXON_MARK_TEX
+    else:
+        p = ""
+    dz = _fmt_dz(r["dz"]) if np.isfinite(r["dz"]) else ""
+    return c, b, p, dz
 
 
-_HEADER = r"""\begin{table}[htbp]
-    \centering
-    \caption{Mission performance across scenarios (n=__N__ paired episodes;
-    one-sided \emph{paired} $t$-test on common-random-number pairs; Duration is
-    conditioned on jointly-successful episodes, __DURN__).}
-    \label{tab:mission-performence}
-    \small
-    \resizebox{\textwidth}{!}{%
-        \begin{tabular}{l*{15}{c}}
-            \toprule
-            \textbf{Configuration}
-            & \multicolumn{3}{c}{\textbf{Reward}}
-            & \multicolumn{3}{c}{\textbf{Targets destroyed}}
-            & \multicolumn{3}{c}{\textbf{Survival}}
-            & \multicolumn{3}{c}{\textbf{Duration}}
-            & \multicolumn{3}{c}{\textbf{Coalition frag.}} \\
+_CAPTION = (
+    r"Mission performance across scenarios based on __N__ paired episodes "
+    r"(common random numbers). \(p\)-values are from one-sided \emph{paired} "
+    r"\(t\)-tests, except __MARK__, which are from one-sided Wilcoxon "
+    r"signed-rank tests (used where the Shapiro--Wilk test rejected normality of "
+    r"the KPI mean's sampling distribution: __WKPIS__). Coalition fragmentation "
+    r"is tested two-sided. Effect size is Cohen's paired-sample \(d_z\), oriented "
+    r"so that a positive value favours __MAIN__. Duration is evaluated only for "
+    r"jointly successful episodes (__DURN__)."
+)
 
-            \cmidrule(lr){2-4}
-            \cmidrule(lr){5-7}
-            \cmidrule(lr){8-10}
-            \cmidrule(lr){11-13}
-            \cmidrule(lr){14-16}
-
-            & __MAIN__ & __BASE__ & $p$-value
-            & __MAIN__ & __BASE__ & $p$-value
-            & __MAIN__ & __BASE__ & $p$-value
-            & __MAIN__ & __BASE__ & $p$-value
-            & __MAIN__ & __BASE__ & $p$-value \\
-            \midrule
-
-"""
-
-_FOOTER = r"""            \bottomrule
-        \end{tabular}%
-    }
+_FOOTER = r"""        \bottomrule
+    \end{tabular}
 \end{table}
 """
 
@@ -457,29 +551,65 @@ def _duration_n_phrase(scenarios, results) -> str:
     ns = [(scn.name, int(results["duration"][scn.name]["n"])) for scn in scenarios]
     uniq = {n for _, n in ns}
     if len(uniq) == 1:
-        return f"$n_\\mathrm{{dur}}={ns[0][1]}$"
-    return "$n_\\mathrm{dur}$: " + ", ".join(f"{name}={n}" for name, n in ns)
+        return f"\\(n={ns[0][1]}\\)"
+    return "; ".join(f"{name}: \\(n={n}\\)" for name, n in ns)
+
+
+def _wilcoxon_kpi_phrase() -> str:
+    """Caption fragment naming the KPIs that use the Wilcoxon test."""
+    names = [ROW_LABELS.get(k, _KPI_BY_KEY[k].label).lower()
+             for k in TABLE_KPIS if _test_for(k) == "wilcoxon"]
+    if not names:
+        return "none"
+    if len(names) == 1:
+        return names[0]
+    return ", ".join(names[:-1]) + " and " + names[-1]
 
 
 def build_latex(scenarios, results, n_episodes) -> str:
+    """LaTeX table: one ROW per KPI, one 4-column GROUP per scenario
+    (Complete, Baseline, p-value, d_z)."""
+    scen = list(scenarios)
+    caption = (_CAPTION.replace("__N__", f"{n_episodes:,}")
+               .replace("__MARK__", WILCOXON_MARK_TEX)
+               .replace("__WKPIS__", _wilcoxon_kpi_phrase())
+               .replace("__DURN__", _duration_n_phrase(scen, results))
+               .replace("__MAIN__", MAIN_LABEL))
+
+    # column groups: 1 label column + 4 columns per scenario
+    group_heads, cmidrules, sub_heads = [], [], []
+    for i, s in enumerate(scen):
+        lo = 2 + 4 * i
+        group_heads.append(f"        & \\multicolumn{{4}}{{c}}{{\\textbf{{Scenario {s.name}}}}}")
+        cmidrules.append(f"        \\cmidrule(lr){{{lo}-{lo + 3}}}")
+        sub_heads.append(f"        & \\textbf{{{MAIN_LABEL}}}\n"
+                         f"        & \\textbf{{{BASE_LABEL}}}\n"
+                         f"        & \\(\\boldsymbol{{p}}\\)\\textbf{{-value}}\n"
+                         f"        & \\(\\boldsymbol{{d_z}}\\)")
+
+    header = (
+        "\\begin{table}[htbp]\n"
+        "    \\centering\n"
+        f"    \\caption{{{caption}}}\n"
+        "    \\label{tab:mission-performance}\n"
+        "    \\small\n"
+        f"    \\begin{{tabular}}{{l{'cccc' * len(scen)}}}\n"
+        "        \\toprule\n"
+        + "\n".join(group_heads) + " \\\\\n"
+        + "\n".join(cmidrules) + "\n\n"
+        "        \\textbf{KPI}\n"
+        + "\n".join(sub_heads) + " \\\\\n"
+        "        \\midrule\n\n"
+    )
+
     blocks = []
-    for scn in scenarios:
-        rw = _cells(scn, "reward", results)
-        t = _cells(scn, "targets", results)
-        s = _cells(scn, "survival", results)
-        d = _cells(scn, "duration", results)
-        f = _cells(scn, "fragmentation", results)
-        blocks.append(
-            f"            ${scn.name}$\n"
-            f"            & {rw[0]} & {rw[1]} & {rw[2]}\n"
-            f"            & {t[0]} & {t[1]} & {t[2]}\n"
-            f"            & {s[0]} & {s[1]} & {s[2]}\n"
-            f"            & {d[0]} & {d[1]} & {d[2]}\n"
-            f"            & {f[0]} & {f[1]} & {f[2]} \\\\\n"
-        )
-    header = (_HEADER.replace("__N__", str(n_episodes))
-              .replace("__DURN__", _duration_n_phrase(scenarios, results))
-              .replace("__MAIN__", MAIN_LABEL).replace("__BASE__", BASE_LABEL))
+    for key in TABLE_KPIS:
+        label = ROW_LABELS.get(key, _KPI_BY_KEY[key].label)
+        lines = [f"        {label}"]
+        for s in scen:
+            c, b, p, dz = _cells(s, key, results)
+            lines.append(f"        & {c} & {b} & {p} & {dz}")
+        blocks.append("\n".join(lines) + " \\\\\n")
     return header + "\n".join(blocks) + _FOOTER
 
 
@@ -493,7 +623,7 @@ def print_console_tables(scenarios, scen_main, scen_base, results, ci_level,
     # Show the comparison columns if ANY scenario has a Baseline policy.
     any_base = any(scen_base.get(s.name) is not None for s in scenarios)
     print("\n" + "=" * 96)
-    print(f"  MISSION PERFORMANCE — one-sided PAIRED t-test  "
+    print(f"  MISSION PERFORMANCE — one-sided PAIRED tests (t / Wilcoxon)  "
           f"(CRN pairs; {pct}% CIs; * p<{alpha:g} ** p<0.01 *** p<0.001)")
     print("=" * 96)
     for key in TABLE_KPIS:
@@ -502,10 +632,11 @@ def print_console_tables(scenarios, scen_main, scen_base, results, ci_level,
                   else "lower is better" if spec.direction == "lower"
                   else "two-sided")
         cond = "  [successful pairs only]" if key in SUCCESS_CONDITIONED_KPIS else ""
+        test_txt = f"  [test: {_TEST_LABEL[_test_for(key)]}]"
         headers = ["Scenario", f"{main_label} ({pct}% CI)"]
         if any_base:
             headers += [f"{base_label} ({pct}% CI)",
-                        f"Δ {main_label}−{base_label} ({pct}% CI)", "p", "n"]
+                        f"Δ {main_label}−{base_label} ({pct}% CI)", "p", "d_z", "n"]
         rows: List[List[str]] = []
         for scn in scenarios:
             r = results[key][scn.name]
@@ -523,7 +654,8 @@ def print_console_tables(scenarios, scen_main, scen_base, results, ci_level,
                 else:
                     diff_cell, p_txt = "", ""
                     n_txt = str(r["n"]) if r["n"] else ""
-                row += [base_cell, diff_cell, p_txt, n_txt]
+                dz_txt = _fmt_dz(r["dz"]) if np.isfinite(r["dz"]) else ""
+                row += [base_cell, diff_cell, p_txt, dz_txt, n_txt]
             rows.append(row)
 
         widths = [len(h) for h in headers]
@@ -535,7 +667,7 @@ def print_console_tables(scenarios, scen_main, scen_base, results, ci_level,
             return "  ".join(cell.ljust(widths[c]) if c == 0 else cell.rjust(widths[c])
                              for c, cell in enumerate(cells))
 
-        print(f"\n  KPI: {spec.label}  ({better}){cond}")
+        print(f"\n  KPI: {spec.label}  ({better}){cond}{test_txt}")
         print("  " + _fmt_row(headers))
         print("  " + "  ".join("-" * w for w in widths))
         for row in rows:
@@ -612,7 +744,9 @@ def plot_dashboard(scenarios, scen_main, scen_base, results, ci_level, alpha,
                 if not np.isfinite(r["pvalue"]):
                     continue                     # no pair here → nothing to annotate
                 mark = "sig." if sig[xi] else "n.s."
-                ax_bot.annotate(f"p={_fmt_p(r['pvalue'])}\n{mark}",
+                test_tag = _TEST_LABEL.get(r.get("test"), "")
+                ax_bot.annotate(f"p={_fmt_p(r['pvalue'])} ({test_tag})\n"
+                                f"$d_z$={_fmt_dz(r['dz'])}  {mark}",
                                 (xi, d_mean[xi]), textcoords="offset points",
                                 xytext=(8, 0), va="center", fontsize=7.5,
                                 color=NLR_DARKGRAY)
@@ -710,7 +844,7 @@ def _slot_txt(pol: Optional[PolicyInput]) -> str:
 def _print_config(scenario_policies, scenarios, n_episodes, base_seed, alpha,
                   ci_level, main_label, base_label) -> None:
     print("─" * 78)
-    print("  MISSION PERFORMANCE — PAIRED t-TEST (common random numbers)")
+    print("  MISSION PERFORMANCE — PAIRED TESTS (common random numbers)")
     print("─" * 78)
     print(f"  Columns            : {main_label} (reference) vs {base_label} (compared)")
     print("  Per-scenario policy pairs (each row uses its OWN trained pair):")
@@ -722,9 +856,17 @@ def _print_config(scenario_policies, scenarios, n_episodes, base_seed, alpha,
         print(f"      {' ' * len(scn.name)}    {base_label}: {_slot_txt(b)}")
     print(f"  Scenarios          : {len(scenarios)}  "
           f"({', '.join(s.name for s in scenarios)})")
-    print(f"  Test               : one-sided PAIRED t-test on d=main−baseline "
+    print(f"  Test               : one-sided PAIRED test on d=main−baseline "
           f"(paired by common seed)")
     print(f"  Normality basis    : CLT on the sample mean (see statistical_analysis.py)")
+    print("  Test per KPI (Wilcoxon where Shapiro-Wilk rejected normality):")
+    for key in TABLE_KPIS:
+        spec = _KPI_BY_KEY[key]
+        who = sorted(role for role, keys in NORMALITY_REJECTED.items() if key in keys)
+        why = f"  <- normality rejected for: {', '.join(who)}" if who else ""
+        print(f"      {spec.label:18s} {_TEST_LABEL[_test_for(key)]}{why}")
+    print(f"  Effect size        : Cohen's paired-sample d_z = mean(d)/sd(d), "
+          f"oriented (+ favours {main_label})")
     print(f"  N (paired episodes): {n_episodes}   base seed: {base_seed}")
     print(f"  Significance / CI  : alpha={alpha:g}   {int(round(ci_level*100))}% CIs")
     print("  Hypotheses (H1, main vs comparison):")
@@ -749,7 +891,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description="Mission-performance LaTeX table + CI dashboard "
         "(Targets/Survival/Duration) for a Complete vs Baseline policy across "
-        "EVAL_SCENARIOS, using a one-sided PAIRED t-test.")
+        "EVAL_SCENARIOS, using one-sided PAIRED tests (t-test, or Wilcoxon "
+        "signed-rank for the KPIs in NORMALITY_REJECTED) plus Cohen's d_z.")
     p.add_argument("--checkpoint", type=str, default=None, metavar="PATH",
                    help="Default .pt for any policy that leaves policy_file=None.")
     p.add_argument("--n_episodes", type=int, default=N_EPISODES)
