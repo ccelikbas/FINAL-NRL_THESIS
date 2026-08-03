@@ -1,27 +1,40 @@
 \begin{table}[htbp]
     \centering
-    \caption{Ablation-study results for Scenario~S2 (n=600 paired episodes; one-sided \emph{paired} $t$-test vs Complete on common-random-number pairs; Duration uses each policy's own successful missions, successful episodes: Complete=553, Baseline=365, No-Com=549, No-FOFE=365).}
-    \label{tab:ablation-study-s2}
+    \caption{Ablation-study results for Scenario~S1 based on 1,000 paired episodes (common random numbers). Each ablation is compared with Comm-FOFE-MAPPO. \(p\)-values are from one-sided Wilcoxon signed-rank tests, except \(^{\dagger}\), which are from one-sided \emph{paired} \(t\)-tests (used where the Shapiro--Wilk test did not reject normality of the KPI mean's sampling distribution: survival). Coalition fragmentation is tested two-sided. Effect size is reported as Cohen's paired-sample \(d_z\), oriented such that a positive value favours Comm-FOFE-MAPPO. Duration uses each policy's own successful missions (successful episodes: Comm-FOFE-MAPPO=932, MAPPO Baseline=578, No-Com=926, No-FOFE=302); its \(p\) and \(d_z\) use the jointly-successful pairs.}
+    \label{tab:ablation-study-s1}
     \small
-    \begin{tabular}{lccccccc}
-        \toprule
-        \textbf{KPI}
-        & \multicolumn{1}{c}{\textbf{Complete}}
-        & \multicolumn{2}{c}{\textbf{Baseline}}
-        & \multicolumn{2}{c}{\textbf{No-Com}}
-        & \multicolumn{2}{c}{\textbf{No-FOFE}} \\
-        \cmidrule(lr){2-2}
-        \cmidrule(lr){3-4}
-        \cmidrule(lr){5-6}
-        \cmidrule(lr){7-8}
-        & \textbf{Value}
-        & \textbf{Value} & \textbf{$p$}
-        & \textbf{Value} & \textbf{$p$}
-        & \textbf{Value} & \textbf{$p$} \\
-        \midrule
-        Targets destroyed & 0.966 & 0.742 & <0.001 & 0.963 & 0.138 & 0.742 & <0.001 \\
-        Survival & 0.862 & 0.543 & <0.001 & 0.846 & 0.008 & 0.543 & <0.001 \\
-        Duration & 44.5 & 57.2 & <0.001 & 44.9 & 0.020 & 57.2 & <0.001 \\
-        \bottomrule
-    \end{tabular}
+    \resizebox{\textwidth}{!}{%
+        \begin{tabular}{lcccccccccc}
+            \toprule
+            \textbf{KPI}
+            & \multicolumn{1}{c}{\textbf{Comm-FOFE-MAPPO}}
+            & \multicolumn{3}{c}{\textbf{MAPPO Baseline}}
+            & \multicolumn{3}{c}{\textbf{No-Com}}
+            & \multicolumn{3}{c}{\textbf{No-FOFE}} \\
+
+            \cmidrule(lr){2-2}
+            \cmidrule(lr){3-5}
+            \cmidrule(lr){6-8}
+            \cmidrule(lr){9-11}
+
+            & Mean
+            & Mean & \(\boldsymbol{p}\) & \(\boldsymbol{d_z}\)
+            & Mean & \(\boldsymbol{p}\) & \(\boldsymbol{d_z}\)
+            & Mean & \(\boldsymbol{p}\) & \(\boldsymbol{d_z}\) \\
+            \midrule
+            Targets destroyed
+            & 0.973 & 0.721 & \(<0.001\) & 0.69 & 0.968 & 0.250 & 0.03 & 0.445 & \(<0.001\) & 1.27 \\
+
+            Survival
+            & 0.874 & 0.515 & \(<0.001\)\(^{\dagger}\) & 0.77 & 0.852 & 0.012\(^{\dagger}\) & 0.07 & 0.260 & \(<0.001\)\(^{\dagger}\) & 1.40 \\
+
+            Duration
+            & 44.3 & 56.6 & \(<0.001\) & 1.22 & 44.1 & 0.972 & -0.02 & 47.8 & \(<0.001\) & 0.87 \\
+
+            Fragmentation
+            & 0.237 & 0.002 & \(<0.001\) & 1.56 & 0.232 & 0.057 & 0.04 & 0.014 & \(<0.001\) & 1.45 \\
+
+            \bottomrule
+        \end{tabular}%
+    }
 \end{table}

@@ -26,8 +26,10 @@ REJECTED it for a few (KPI, model) combinations — see NORMALITY_REJECTED below
 For every KPI where EITHER member of the compared pair failed that check we drop
 the parametric assumption and use the one-sided WILCOXON SIGNED-RANK test on the
 same paired differences instead; the remaining KPIs keep the paired t-test. Which
-test produced which p-value is marked in the outputs (a dagger in LaTeX, a "test"
-column on the console).
+test produced which p-value is marked in the outputs: on the console each KPI
+block names its test, and in LaTeX the MINORITY test carries a dagger while the
+caption names the majority one as the default (see MARKED_TEST — Wilcoxon now
+covers 3 of the 5 KPIs, so it is the paired-t p-values that are daggered).
 
 Because the environment is fully seeded, episode i faces the SAME randomised
 layout for both methods (common random numbers), so (complete_i, baseline_i) is a
@@ -230,8 +232,12 @@ NORMALITY_REJECTED: Dict[str, set] = {
 # Derived: the KPIs tested with Wilcoxon rather than the paired t-test.
 WILCOXON_KPIS = {k for keys in NORMALITY_REJECTED.values() for k in keys}
 
-# Marker appended to a Wilcoxon p-value in the LaTeX table (explained in the caption).
-WILCOXON_MARK_TEX = r"\(^{\dagger}\)"
+# Which test carries the dagger in the LaTeX table. Wilcoxon is now the MAJORITY
+# test (3 of 5 KPIs), so the caption states Wilcoxon as the default and daggers
+# the paired-t minority. Flip to "wilcoxon" if NORMALITY_REJECTED ever shrinks so
+# that the t-test becomes the majority again.
+MARKED_TEST = "t"
+TEST_MARK_TEX = r"\(^{\dagger}\)"
 
 # KPIs restricted to SUCCESSFUL episodes. For these, means, CIs and the (one-sided,
 # directional) paired t-test are computed only over episode pairs where BOTH
@@ -511,16 +517,16 @@ def compute_results(scenarios, scen_main, scen_base, samples, ci_level) -> Dict[
 def _cells(scn, key, results) -> Tuple[str, str, str, str]:
     """(complete, baseline, p, d_z) LaTeX strings for one (scenario, KPI).
 
-    The p-value carries WILCOXON_MARK_TEX when the signed-rank test was used
-    instead of the paired t-test. Any absent policy (empty slot) yields blank
-    cells so that section of the table is simply empty."""
+    The p-value carries TEST_MARK_TEX when it came from the MARKED_TEST (the
+    minority test, named in the caption). Any absent policy (empty slot) yields
+    blank cells so that section of the table is simply empty."""
     r = results[key][scn.name]
     c = _fmt_val(key, r["mean_main"]) if np.isfinite(r["mean_main"]) else ""
     b = _fmt_val(key, r["mean_base"]) if np.isfinite(r["mean_base"]) else ""
     if np.isfinite(r["pvalue"]):
         p = _fmt_p_tex(r["pvalue"])
-        if r.get("test") == "wilcoxon":
-            p += WILCOXON_MARK_TEX
+        if r.get("test") == MARKED_TEST:
+            p += TEST_MARK_TEX
     else:
         p = ""
     dz = _fmt_dz(r["dz"]) if np.isfinite(r["dz"]) else ""
@@ -529,10 +535,10 @@ def _cells(scn, key, results) -> Tuple[str, str, str, str]:
 
 _CAPTION = (
     r"Mission performance across scenarios based on __N__ paired episodes "
-    r"(common random numbers). \(p\)-values are from one-sided \emph{paired} "
-    r"\(t\)-tests, except __MARK__, which are from one-sided Wilcoxon "
-    r"signed-rank tests (used where the Shapiro--Wilk test rejected normality of "
-    r"the KPI mean's sampling distribution: __WKPIS__). Coalition fragmentation "
+    r"(common random numbers). \(p\)-values are from one-sided Wilcoxon "
+    r"signed-rank tests, except __MARK__, which are from one-sided \emph{paired} "
+    r"\(t\)-tests (used where the Shapiro--Wilk test did not reject normality of "
+    r"the KPI mean's sampling distribution: __MKPIS__). Coalition fragmentation "
     r"is tested two-sided. Effect size is Cohen's paired-sample \(d_z\), oriented "
     r"so that a positive value favours __MAIN__. Duration is evaluated only for "
     r"jointly successful episodes (__DURN__)."
@@ -555,10 +561,10 @@ def _duration_n_phrase(scenarios, results) -> str:
     return "; ".join(f"{name}: \\(n={n}\\)" for name, n in ns)
 
 
-def _wilcoxon_kpi_phrase() -> str:
-    """Caption fragment naming the KPIs that use the Wilcoxon test."""
+def _marked_kpi_phrase() -> str:
+    """Caption fragment naming the KPIs whose p-value carries the dagger."""
     names = [ROW_LABELS.get(k, _KPI_BY_KEY[k].label).lower()
-             for k in TABLE_KPIS if _test_for(k) == "wilcoxon"]
+             for k in TABLE_KPIS if _test_for(k) == MARKED_TEST]
     if not names:
         return "none"
     if len(names) == 1:
@@ -571,8 +577,8 @@ def build_latex(scenarios, results, n_episodes) -> str:
     (Complete, Baseline, p-value, d_z)."""
     scen = list(scenarios)
     caption = (_CAPTION.replace("__N__", f"{n_episodes:,}")
-               .replace("__MARK__", WILCOXON_MARK_TEX)
-               .replace("__WKPIS__", _wilcoxon_kpi_phrase())
+               .replace("__MARK__", TEST_MARK_TEX)
+               .replace("__MKPIS__", _marked_kpi_phrase())
                .replace("__DURN__", _duration_n_phrase(scen, results))
                .replace("__MAIN__", MAIN_LABEL))
 

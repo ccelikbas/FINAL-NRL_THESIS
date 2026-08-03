@@ -5,10 +5,17 @@ Two clearly separated workflows for a FROZEN FOFE-MAPPO policy's KPIs:
 
   ── PILOT  (--analysis_mode pilot) ── sample-size PLANNING ──────────────────
      Collect a large pool (e.g. 1000 episodes) and decide HOW MANY evaluation
-     episodes the final study needs, using a PRECISION criterion: bootstrap the
-     mean at candidate sample sizes and pick the smallest n whose 95 % CI
-     half-width drops below a user-defined target (PRECISION_TARGETS). Outputs:
+     episodes the final study needs, using TWO independent criteria:
+       (1) PRECISION — bootstrap the mean at candidate sample sizes and pick the
+           smallest n whose 95 % CI half-width drops below a user-defined target
+           (PRECISION_TARGETS);
+       (2) CV STABILISATION — the distribution-free criterion (see below): the
+           smallest n from which the coefficient of variation c_v = σ(o)/μ(o) of
+           the model output stops moving.
+     Outputs:
        • the precision plot (CI half-width vs sample size) + console recommendation,
+       • the CV-stabilisation plot (c_v vs simulation runs) + its own recommendation
+         — ONE figure per scenario/model,
        • the EXPECTED sampling distributions of the KPI means at the proposed
          N_eval (histograms) — labelled *expected*, not a final result.
 
@@ -39,6 +46,29 @@ DURATION  (two metrics, failed missions never silently dropped)
     conditional on completion; its sample size is the number of completed
     episodes. Read it together with the completion rate — a policy can look fast
     by completing only the easy missions.
+
+──────────────────────────────────────────────────────────────────────────────
+CV-STABILISATION SAMPLE SIZE  (pilot only, ON by default)
+──────────────────────────────────────────────────────────────────────────────
+A second, DISTRIBUTION-FREE way to size the study: the model output may have ANY
+distribution, so instead of a CI we watch the COEFFICIENT OF VARIATION
+
+        c_v(n) = σ(o) / μ(o)      (σ, μ computed from the first n runs)
+
+and take the sample size at which c_v STOPS CHANGING. Because a running c_v
+depends on the ORDER in which the episodes happen to arrive, the pilot pool is
+randomly re-ordered CV_REPLICATES times; the plotted curve is the MEAN c_v(n)
+over those orderings and the shaded band is their 5–95 % spread. The
+stabilisation point n* is the smallest n (≥ CV_MIN_N) from which the mean curve
+NEVER again leaves a ±CV_TOL RELATIVE band around its value at the full pool.
+The recommended count is the largest n* over the KPIs measured on all episodes,
+rounded up to ROUND_TO — reported ALONGSIDE (not instead of) the precision-based
+recommendation, so the two criteria can be compared.
+
+c_v is only interpretable on a ratio scale: a KPI whose values change sign or
+whose mean sits at ~0 (episode reward, typically) gets its panel drawn for
+reference but is EXCLUDED from the recommendation and flagged in the table.
+Output: one figure per scenario/model + a printed and saved LaTeX table.
 
 ──────────────────────────────────────────────────────────────────────────────
 SEEDS
@@ -73,6 +103,10 @@ HOW TO USE
     # 2) run the final study at the chosen count:
     .\.venv\Scripts\python.exe 0_TA_HF_FOFE-MAPPO\eval_tools\statistical_analysis.py ^
         --analysis_mode final --eval_episodes 100
+
+The pilot emits ONE precision figure and ONE CV-stabilisation figure PER entry in
+SCENARIOS, so the two models below give two CV plots (add --skip_cv to turn the
+CV analysis off).
 
 Edit SCENARIOS + PRECISION_TARGETS below. Figures land in <script_dir>/stat_results.
 """
@@ -142,7 +176,21 @@ from .nlr_style import NLR_CYCLE, NLR_REFERENCE, NLR_ACCENT, NLR_SECONDARY
 #  >>>  EDIT YOUR SCENARIOS HERE  <<<  (same format as evaluate_policy.py)
 # =====================================================================
 
+#  One entry per MODEL: every analysis below (precision, CV stabilisation,
+#  expected/final KPI-mean distributions) is produced once per entry, so the two
+#  entries here yield two of each figure — one per model.
 SCENARIOS: List[CurriculumSection] = [
+    CurriculumSection(
+        name="Complete",
+        policy_file="runs/FINALV2/complete_stage7of8_DR_j2-4_k0_25.pt",
+        n_iters=1,  # not used
+        n_strikers=2, n_jammers=4,
+        n_known_targets=(2, 4), n_unknown_targets=0,
+        n_known_radars=(4, 6), n_unknown_radars=0,
+        radar_kill_probability=0.25,
+        scenario="S2",
+        communicate=True,
+    ),
     CurriculumSection(
         name="Baseline",
         policy_file="runs/FINALV2/Final_Baseline_Cont_4.pt",
@@ -186,6 +234,20 @@ PRECISION_TARGETS: Dict[str, float] = {
 PRECISION_STEP      = 10      # candidate sample sizes 10, 20, 30, …, max_episodes
 PRECISION_BOOTSTRAP = 2000    # bootstrap resamples for the (many) precision points
 ROUND_TO            = 25      # round the recommended N_eval up to a tidy multiple
+
+# ── CV-based sample-size planning (pilot; distribution-free) ─────────
+# The running coefficient of variation c_v(n) = σ/μ is deemed STABILISED at the
+# smallest n ≥ CV_MIN_N from which it never again deviates by more than CV_TOL
+# (RELATIVE) from its full-pool value. The running curve depends on the order the
+# episodes arrive in, so it is averaged over CV_REPLICATES random re-orderings of
+# the SAME pilot pool; the band shows their CV_BAND_LO–CV_BAND_HI percentiles.
+CV_TOL         = 0.02    # ±2 % relative stabilisation band around the final c_v
+CV_MIN_N       = 30      # never recommend fewer runs than this (early c_v is noise)
+CV_REPLICATES  = 50      # random episode orderings averaged into the c_v curve
+CV_BAND_LO     = 5.0     # lower percentile of the plotted spread band
+CV_BAND_HI     = 95.0    # upper percentile of the plotted spread band
+CV_SEED_OFFSET = 991     # own RNG stream: adding CV leaves other results identical
+CV_MEAN_EPS    = 1e-12   # |μ| below this ⇒ c_v is not interpretable
 
 # ── bootstrap of the sampling distribution of the mean ───────────────
 N_BOOTSTRAP    = 10_000   # bootstrap resamples B for the reported distributions

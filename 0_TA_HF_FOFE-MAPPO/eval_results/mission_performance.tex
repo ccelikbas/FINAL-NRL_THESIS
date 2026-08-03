@@ -1,6 +1,6 @@
 \begin{table}[htbp]
     \centering
-    \caption{Mission performance across scenarios based on 1,000 paired episodes (common random numbers). \(p\)-values are from one-sided \emph{paired} \(t\)-tests, except \(^{\dagger}\), which are from one-sided Wilcoxon signed-rank tests (used where the Shapiro--Wilk test rejected normality of the KPI mean's sampling distribution: targets destroyed, duration and fragmentation). Coalition fragmentation is tested two-sided. Effect size is Cohen's paired-sample \(d_z\), oriented so that a positive value favours Complete. Duration is evaluated only for jointly successful episodes (S1: \(n=563\); S2: \(n=417\)).}
+    \caption{Mission performance across scenarios based on 1,000 paired episodes (common random numbers). \(p\)-values are from one-sided Wilcoxon signed-rank tests, except \(^{\dagger}\), which are from one-sided \emph{paired} \(t\)-tests (used where the Shapiro--Wilk test did not reject normality of the KPI mean's sampling distribution: reward and survival). Coalition fragmentation is tested two-sided. Effect size is Cohen's paired-sample \(d_z\), oriented so that a positive value favours Complete. Duration is evaluated only for jointly successful episodes (S1: \(n=563\); S2: \(n=417\)).}
     \label{tab:mission-performance}
     \small
     \begin{tabular}{lcccccccc}
@@ -22,24 +22,24 @@
         \midrule
 
         Reward
-        & 0.59 & -15.39 & \(<0.001\) & 1.20
-        & -4.37 & -11.89 & \(<0.001\) & 0.54 \\
+        & 0.59 & -15.39 & \(<0.001\)\(^{\dagger}\) & 1.20
+        & -4.37 & -11.89 & \(<0.001\)\(^{\dagger}\) & 0.54 \\
 
         Targets destroyed
-        & 0.973 & 0.721 & \(<0.001\)\(^{\dagger}\) & 0.69
-        & 0.867 & 0.668 & \(<0.001\)\(^{\dagger}\) & 0.48 \\
+        & 0.973 & 0.721 & \(<0.001\) & 0.69
+        & 0.867 & 0.668 & \(<0.001\) & 0.48 \\
 
         Survival
-        & 0.874 & 0.515 & \(<0.001\) & 0.77
-        & 0.766 & 0.410 & \(<0.001\) & 0.68 \\
+        & 0.874 & 0.515 & \(<0.001\)\(^{\dagger}\) & 0.77
+        & 0.766 & 0.410 & \(<0.001\)\(^{\dagger}\) & 0.68 \\
 
         Duration
-        & 42.1 & 56.3 & \(<0.001\)\(^{\dagger}\) & 1.22
-        & 46.7 & 48.6 & \(<0.001\)\(^{\dagger}\) & 0.24 \\
+        & 42.1 & 56.3 & \(<0.001\) & 1.22
+        & 46.7 & 48.6 & \(<0.001\) & 0.24 \\
 
         Fragmentation
-        & 0.237 & 0.002 & \(<0.001\)\(^{\dagger}\) & 1.56
-        & 0.002 & 0.006 & \(<0.001\)\(^{\dagger}\) & -0.12 \\
+        & 0.237 & 0.002 & \(<0.001\) & 1.56
+        & 0.002 & 0.006 & \(<0.001\) & -0.12 \\
         \bottomrule
     \end{tabular}
 \end{table}
