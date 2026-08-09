@@ -16,8 +16,30 @@ Two clearly separated workflows for a FROZEN FOFE-MAPPO policy's KPIs:
        • the precision plot (CI half-width vs sample size) + console recommendation,
        • the CV-stabilisation plot (c_v vs simulation runs) + its own recommendation
          — ONE figure per scenario/model,
+       • the FINAL 2x2 SAMPLE-SIZE DASHBOARD — one figure per model showing ONE
+         criterion per KPI, chosen by that KPI's normality verdict (see below),
        • the EXPECTED sampling distributions of the KPI means at the proposed
          N_eval (histograms) — labelled *expected*, not a final result.
+
+──────────────────────────────────────────────────────────────────────────────
+FINAL SAMPLE-SIZE DASHBOARD  (2x2 per model, MIXED criteria)
+──────────────────────────────────────────────────────────────────────────────
+The two criteria above are not interchangeable: the precision criterion is built
+on a confidence interval for the mean, so it leans on the mean being
+approximately normal, while CV stabilisation assumes nothing about the
+distribution. The dashboard therefore reports, per KPI, only the criterion whose
+assumption actually holds for that model:
+
+    Shapiro-Wilk did NOT reject normality  ->  precision (95 % CI half-width)
+    Shapiro-Wilk REJECTED normality        ->  CV stabilisation (c_v)
+
+The mapping lives in SAMPLE_SIZE_METHODS and covers the four KPIs in
+DASHBOARD_KEYS (target-destruction rate, survival rate, duration among completed
+missions, coalition fragmentation), so a single dashboard legitimately mixes both
+panel types. Both underlying analyses are still computed and saved in full — the
+dashboard only selects which one to display. Its N_eval is the largest
+requirement over the KPIs measured on ALL episodes, each taken from its own
+assigned criterion.
 
   ── FINAL  (--analysis_mode final --eval_episodes N) ── STATISTICAL INFERENCE ─
      Collect a NEW independent set of EXACTLY N evaluation episodes and report
@@ -119,6 +141,7 @@ import os
 import re
 import sys
 import types
+import warnings
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -200,7 +223,10 @@ SCENARIOS: List[CurriculumSection] = [
         n_known_radars=(4, 6), n_unknown_radars=0,
         radar_kill_probability=0.25,
         scenario="S2",
-        communicate=True,
+        # The MAPPO baseline is a NO-COMMUNICATION policy: 3.3.2 / 3.3.3 evaluate
+        # this same checkpoint with communication OFF, so the pilot pools that
+        # size those studies must be collected the same way.
+        communicate=False,
     ),
 ]
 
@@ -262,6 +288,39 @@ NORMALITY_ALPHA     = 0.05
 NORMALITY_N_SAMPLES = 600     # bootstrap sample means fed to the Shapiro-Wilk test
 
 WILSON_Z = 1.959963985   # z for a 95 % Wilson interval (completion, final mode)
+
+# ── FINAL sample-size dashboard (2x2, one per model) ─────────────────
+# A per-model summary figure that reports ONE sizing criterion per KPI, chosen by
+# whether that KPI's mean has an approximately NORMAL sampling distribution:
+#
+#     normality NOT rejected  ->  "precision"  (95 % CI half-width vs n)
+#     normality REJECTED      ->  "cv"         (distribution-free c_v stabilisation)
+#
+# The CI-based criterion leans on the CLT/normal approximation, so where the
+# Shapiro-Wilk test rejects normality of the mean we fall back on the criterion
+# that assumes nothing about the distribution. Both analyses are still computed
+# and saved in full (precision plot + CV plot + tables); this dashboard only
+# SELECTS which of the two to show per KPI.
+#
+# Keys are the model display names (the CurriculumSection `name`s in SCENARIOS);
+# any KPI not listed defaults to "precision".
+DASHBOARD_KEYS = ["targets", "survival", "duration_completed", "fragmentation"]
+
+SAMPLE_SIZE_METHODS: Dict[str, Dict[str, str]] = {
+    # Complete: Shapiro-Wilk rejected normality for the target-destruction rate
+    # only (p = 1.7e-06); every other KPI mean passed.
+    "Complete": {"targets": "cv"},
+    # Baseline: coalition fragmentation is rejected in every pilot run to date.
+    # Duration-among-completed is a DELIBERATE choice rather than a reading of a
+    # single run: its verdict is unstable across pilots (p = 0.0499 -> rejected,
+    # then p = 0.9721 -> not rejected), and when the normality evidence flips
+    # like that the distribution-free criterion is the defensible one.
+    "Baseline": {"fragmentation": "cv", "duration_completed": "cv"},
+}
+
+# Method label shown in each panel title / caption.
+METHOD_LABEL = {"precision": "precision (95% CI half-width)",
+                "cv": "CV stabilisation (distribution-free)"}
 
 
 # =====================================================================
@@ -329,6 +388,10 @@ class RunOpts:
     normality_alpha: float
     normality_n_samples: int
     run_normality: bool
+    cv_tol: float
+    cv_min_n: int
+    cv_replicates: int
+    run_cv: bool
     scenario_name_check: str
     out_dir: Path
     stamp: str
@@ -565,6 +628,123 @@ def _round_up(n: Optional[int], base: int) -> Optional[int]:
     if n is None:
         return None
     return int(math.ceil(n / base) * base)
+
+
+# ── coefficient-of-variation (CV) stabilisation planning ─────────────
+#  Distribution-free counterpart of the precision criterion: the model output may
+#  have ANY distribution, so we track c_v(n) = σ(o)/μ(o) over the first n runs and
+#  take the n from which it stops changing.
+
+def cumulative_cv(x: np.ndarray) -> np.ndarray:
+    """Running c_v = σ/μ after each of the first n observations, n = 2 … len(x).
+
+    Returns an array aligned with n = 2, 3, …, len(x) (n = 1 has no σ). σ uses
+    ddof=1; a non-interpretable point (μ = 0) comes back as NaN.
+    """
+    x = np.asarray(x, dtype=float)
+    n = np.arange(1, x.size + 1, dtype=float)
+    mean = np.cumsum(x) / n
+    var = (np.cumsum(x * x) - n * mean * mean) / np.maximum(n - 1.0, 1.0)
+    var = np.maximum(var, 0.0)                  # kill round-off negatives
+    with np.errstate(divide="ignore", invalid="ignore"):
+        cv = np.sqrt(var) / np.abs(mean)
+    cv[~np.isfinite(cv)] = np.nan
+    return cv[1:]
+
+
+def cv_curves(pool: np.ndarray, n_replicates: int,
+              rng: np.random.Generator) -> Tuple[np.ndarray, np.ndarray]:
+    """c_v curves of `pool` over `n_replicates` random episode ORDERINGS.
+
+    Returns (ns, curves) with ns = [2 … N] and curves of shape
+    [n_replicates, N-1]. Re-ordering matters: a single arrival order gives one
+    arbitrary realisation of the running c_v, so the plotted/evaluated curve is
+    the average over orderings of the same pilot pool.
+    """
+    pool = np.asarray(pool, dtype=float)
+    pool = pool[np.isfinite(pool)]
+    if pool.size < 3:
+        return np.empty(0, dtype=int), np.empty((0, 0), dtype=float)
+    ns = np.arange(2, pool.size + 1, dtype=int)
+    curves = np.empty((max(1, n_replicates), ns.size), dtype=float)
+    for r in range(curves.shape[0]):
+        curves[r] = cumulative_cv(rng.permutation(pool))
+    return ns, curves
+
+
+def cv_stabilisation_n(ns: np.ndarray, cv_mean: np.ndarray, tol: float,
+                       min_n: int) -> Tuple[Optional[int], float]:
+    """Smallest n ≥ min_n from which c_v stays inside ±tol (relative) of c_v(N).
+
+    The criterion is one-sided in n: the curve must remain inside the band for
+    EVERY larger n as well, so a curve that dips into the band and wanders out
+    again is not treated as stabilised. Returns (n*, reference c_v).
+    """
+    if ns.size == 0 or cv_mean.size == 0:
+        return None, float("nan")
+    finite = np.isfinite(cv_mean)
+    if not finite.any():
+        return None, float("nan")
+    cv_ref = float(cv_mean[finite][-1])          # c_v at the full pilot pool
+    if not np.isfinite(cv_ref) or abs(cv_ref) <= CV_MEAN_EPS:
+        return None, cv_ref
+    inside = finite & (np.abs(cv_mean - cv_ref) <= tol * abs(cv_ref))
+    stays_inside = np.minimum.accumulate(inside[::-1])[::-1]   # suffix AND
+    idx = np.where(stays_inside & (ns >= int(min_n)))[0]
+    return (int(ns[idx[0]]) if idx.size else None), cv_ref
+
+
+def cv_is_interpretable(pool: np.ndarray) -> Tuple[bool, str]:
+    """Is c_v meaningful for this KPI? (ratio scale: one sign, mean away from 0)"""
+    v = np.asarray(pool, dtype=float)
+    v = v[np.isfinite(v)]
+    if v.size < 3:
+        return False, "insufficient data"
+    if np.any(v < 0.0) and np.any(v > 0.0):
+        return False, "values change sign"
+    if abs(float(v.mean())) <= CV_MEAN_EPS:
+        return False, "mean is ~0"
+    return True, ""
+
+
+def analyse_cv_stabilisation(pools: Dict[str, np.ndarray], tol: float,
+                             min_n: int, n_replicates: int,
+                             rng: np.random.Generator) -> Dict[str, dict]:
+    """Run the CV-stabilisation analysis for every histogram KPI."""
+    results: Dict[str, dict] = {}
+    for spec in HISTOGRAM_SPECS:
+        pool = np.asarray(pools[spec.key], dtype=float)
+        pool = pool[np.isfinite(pool)]
+        ok, reason = cv_is_interpretable(pool)
+        ns, curves = cv_curves(pool, n_replicates, rng)
+        r = {
+            "key": spec.key, "label": spec.label, "conditional": spec.conditional,
+            "n_pool": int(pool.size), "interpretable": ok, "reason": reason,
+            "ns": ns, "cv_mean": np.empty(0, dtype=float),
+            "cv_lo": np.empty(0, dtype=float), "cv_hi": np.empty(0, dtype=float),
+            "cv_ref": float("nan"), "n_star": None,
+        }
+        if ns.size:
+            # An all-NaN column (μ=0 at that n in every ordering) is legitimate
+            # here — it just leaves a gap in the curve, so silence the warning.
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning)
+                r["cv_mean"] = np.nanmean(curves, axis=0)
+                r["cv_lo"] = np.nanpercentile(curves, CV_BAND_LO, axis=0)
+                r["cv_hi"] = np.nanpercentile(curves, CV_BAND_HI, axis=0)
+            n_star, cv_ref = cv_stabilisation_n(ns, r["cv_mean"], tol, min_n)
+            r["cv_ref"] = cv_ref
+            r["n_star"] = n_star if ok else None   # non-ratio KPIs never size N
+        results[spec.key] = r
+    return results
+
+
+def cv_recommended_n(results: Dict[str, dict], round_to: int) -> Tuple[Optional[int], Optional[int]]:
+    """(raw, rounded) CV-based N_eval from the KPIs measured on ALL episodes."""
+    ns = [results[s.key]["n_star"] for s in PRECISION_RECO_SPECS
+          if results.get(s.key, {}).get("n_star") is not None]
+    raw = max(ns) if ns else None
+    return raw, _round_up(raw, round_to)
 
 
 # =====================================================================
@@ -872,6 +1052,303 @@ def plot_precision_curves(candidate_ns: np.ndarray,
     plt.close(fig)
 
 
+def plot_cv_stabilisation(results: Dict[str, dict], tol: float,
+                          recommended: Optional[int],
+                          recommended_completed: Optional[int],
+                          display: str, out_png: Path) -> None:
+    """CV-stabilisation planning: c_v = σ/μ vs number of simulation runs.
+
+    One panel per KPI (same six KPIs and order as the precision plot and the
+    histogram dashboard). Each panel shows the mean running c_v over the random
+    episode orderings, their 5–95 % spread, the ±tol band around the full-pool
+    c_v, and the stabilisation point n*. The conditional duration is measured in
+    COMPLETED-mission units, so its recommended line is the expected completed
+    count. ONE such figure is produced per scenario/model.
+    """
+    specs = HISTOGRAM_SPECS
+    ncol = 3
+    nrow = int(np.ceil(len(specs) / ncol))
+    fig, axes = plt.subplots(nrow, ncol, figsize=(4.9 * ncol, 3.6 * nrow))
+    axes = np.atleast_1d(axes).ravel()
+    for idx, spec in enumerate(specs):
+        ax = axes[idx]
+        r = results.get(spec.key)
+        if r is None or r["ns"].size == 0 or not np.isfinite(r["cv_mean"]).any():
+            ax.set_visible(False)
+            continue
+        color = NLR_CYCLE[idx % len(NLR_CYCLE)]
+        ns, cv = r["ns"], r["cv_mean"]
+        ax.fill_between(ns, r["cv_lo"], r["cv_hi"], color=color, alpha=0.18,
+                        lw=0, label=f"{CV_BAND_LO:g}–{CV_BAND_HI:g}% over orderings")
+        ax.plot(ns, cv, color=color, lw=1.7, label="mean $c_v$ over orderings")
+        if np.isfinite(r["cv_ref"]):
+            lo = r["cv_ref"] * (1.0 - tol)
+            hi = r["cv_ref"] * (1.0 + tol)
+            ax.axhline(r["cv_ref"], color=NLR_REFERENCE, ls="--", lw=1.2,
+                       label=f"$c_v$(pool) = {r['cv_ref']:.3g}")
+            ax.axhspan(min(lo, hi), max(lo, hi), color=NLR_REFERENCE, alpha=0.12,
+                       lw=0, label=f"±{tol * 100:g}% band")
+        if r["n_star"] is not None:
+            ax.axvline(r["n_star"], color=NLR_ACCENT, ls=":", lw=1.4,
+                       label=f"n*={r['n_star']}")
+        rec_line = recommended_completed if spec.conditional else recommended
+        if rec_line is not None:
+            ax.axvline(rec_line, color=NLR_SECONDARY, ls="-", lw=1.1, alpha=0.8,
+                       label=f"N_eval={rec_line}")
+        if r["interpretable"]:
+            note = ("stabilised at n*=" + str(r["n_star"])) if r["n_star"] \
+                else "not stabilised within the pool"
+        else:
+            note = f"$c_v$ not on a ratio scale ({r['reason']}) — reference only"
+            # μ crossing 0 sends c_v to huge spikes; clip so the panel stays readable.
+            top = float(np.nanpercentile(cv, 95)) if np.isfinite(cv).any() else float("nan")
+            if np.isfinite(top) and top > 0:
+                ax.set_ylim(0.0, 1.5 * top)
+        ax.set_title(f"{spec.label}\n{note}", fontsize=9.0)
+        ax.set_xlabel("completed missions n" if spec.conditional
+                      else "simulation runs n")
+        ax.set_ylabel(r"$c_v = \sigma(o)\,/\,\mu(o)$")
+        ax.grid(True, alpha=0.3)
+        ax.legend(fontsize=6.8, framealpha=0.9)
+    for ax in axes[len(specs):]:
+        ax.set_visible(False)
+    fig.suptitle(f"CV-stabilisation sample size — {display}", fontsize=11.5)
+    fig.tight_layout(rect=(0, 0, 1, 0.97))
+    fig.savefig(out_png, dpi=150)
+    plt.close(fig)
+
+
+def method_for(display: str, key: str) -> str:
+    """Sizing criterion for one (model, KPI): "cv" or "precision".
+
+    Driven by SAMPLE_SIZE_METHODS, i.e. by whether the Shapiro-Wilk test rejected
+    normality of that KPI mean's sampling distribution for that model. Anything
+    not listed defaults to the precision (CI half-width) criterion."""
+    return SAMPLE_SIZE_METHODS.get(display, {}).get(key, "precision")
+
+
+def dashboard_recommended_n(display: str, prec_reqs: Dict[str, Optional[int]],
+                            cv_results: Dict[str, dict],
+                            round_to: int) -> Tuple[Optional[int], Optional[int]]:
+    """(raw, rounded) N_eval implied by the dashboard's MIXED criteria.
+
+    Each KPI contributes the n* of the method assigned to it, so a model whose
+    KPIs mix the two criteria is sized by whichever requirement is largest. Only
+    KPIs measured over ALL episodes count: duration-among-completed is in
+    completed-mission units and cannot size the total episode budget."""
+    ns: List[int] = []
+    for key in DASHBOARD_KEYS:
+        spec = KEY_TO_SPEC[key]
+        if spec.conditional:
+            continue
+        if method_for(display, key) == "cv":
+            n = cv_results.get(key, {}).get("n_star")
+        else:
+            n = prec_reqs.get(key)
+        if n is not None:
+            ns.append(int(n))
+    raw = max(ns) if ns else None
+    return raw, _round_up(raw, round_to)
+
+
+def plot_sample_size_dashboard(display: str, candidate_ns: np.ndarray,
+                               hw_by_kpi: Dict[str, np.ndarray],
+                               prec_reqs: Dict[str, Optional[int]],
+                               cv_results: Dict[str, dict], tol: float,
+                               recommended: Optional[int],
+                               recommended_completed: Optional[int],
+                               out_png: Path) -> None:
+    """2x2 sample-size dashboard for ONE model, with MIXED criteria per KPI.
+
+    Each panel shows the criterion assigned to that KPI by SAMPLE_SIZE_METHODS:
+    a precision panel plots the 95 % CI half-width against n with its target
+    line, a CV panel plots the running c_v with its +/-tol stabilisation band.
+    The two therefore carry DIFFERENT y-axes, which is the point of the figure —
+    the criterion follows the normality verdict for that KPI.
+
+    Annotations are kept deliberately sparse (especially on the CV panels): the
+    per-panel legend names only the curve and its reference band, while the
+    stabilisation point n* and the study-level N_eval are stated once in the
+    panel title and drawn as bare vertical lines, explained by a single shared
+    legend at the foot of the figure.
+    """
+    from matplotlib.lines import Line2D
+
+    specs = [KEY_TO_SPEC[k] for k in DASHBOARD_KEYS]
+    fig, axes = plt.subplots(2, 2, figsize=(11.4, 8.0))
+    axes = np.atleast_1d(axes).ravel()
+
+    for idx, spec in enumerate(specs):
+        ax = axes[idx]
+        color = NLR_CYCLE[idx % len(NLR_CYCLE)]
+        method = method_for(display, spec.key)
+        rec_line = recommended_completed if spec.conditional else recommended
+        unit = "completed missions n" if spec.conditional else "evaluation episodes n"
+
+        if method == "cv":
+            r = cv_results.get(spec.key)
+            if r is None or r["ns"].size == 0 or not np.isfinite(r["cv_mean"]).any():
+                ax.set_visible(False)
+                continue
+            ns, cv = r["ns"], r["cv_mean"]
+            ax.fill_between(ns, r["cv_lo"], r["cv_hi"], color=color, alpha=0.18, lw=0)
+            ax.plot(ns, cv, color=color, lw=1.7,
+                    label=f"mean $c_v$ ({CV_BAND_LO:g}–{CV_BAND_HI:g}% band)")
+            if np.isfinite(r["cv_ref"]):
+                lo, hi = r["cv_ref"] * (1.0 - tol), r["cv_ref"] * (1.0 + tol)
+                ax.axhline(r["cv_ref"], color=NLR_REFERENCE, ls="--", lw=1.2)
+                ax.axhspan(min(lo, hi), max(lo, hi), color=NLR_REFERENCE, alpha=0.12,
+                           lw=0, label=f"$c_v$(pool) ±{tol * 100:g}%")
+            n_star = r["n_star"]
+            if n_star is not None:
+                ax.axvline(n_star, color=NLR_ACCENT, ls=":", lw=1.4)
+            if not r["interpretable"]:
+                top = float(np.nanpercentile(cv, 95)) if np.isfinite(cv).any() else np.nan
+                if np.isfinite(top) and top > 0:
+                    ax.set_ylim(0.0, 1.5 * top)
+            ax.set_ylabel(r"$c_v = \sigma(o)\,/\,\mu(o)$")
+            req_txt = f"n*={n_star}" if n_star is not None else "not stabilised"
+        else:
+            hw = hw_by_kpi.get(spec.key)
+            if hw is None or not np.isfinite(hw).any():
+                ax.set_visible(False)
+                continue
+            thr = PRECISION_TARGETS.get(spec.key)
+            ax.plot(candidate_ns, hw, color=color, lw=1.9, label="95% CI half-width")
+            if thr is not None:
+                ax.axhline(thr, color=NLR_REFERENCE, ls="--", lw=1.3,
+                           label=f"target ±{thr:g}")
+            req = prec_reqs.get(spec.key)
+            if req is not None:
+                ax.axvline(req, color=NLR_ACCENT, ls=":", lw=1.4)
+            ax.set_ylabel("95% CI half-width")
+            req_txt = f"n*={req}" if req is not None else "target not reached"
+
+        if rec_line is not None:
+            ax.axvline(rec_line, color=NLR_SECONDARY, ls="-", lw=1.1, alpha=0.8)
+        ax.set_title(f"{spec.label}\n{METHOD_LABEL[method]} — {req_txt}", fontsize=9.5)
+        ax.set_xlabel(unit)
+        ax.grid(True, alpha=0.3)
+        ax.legend(fontsize=7.5, framealpha=0.9)
+
+    for ax in axes[len(specs):]:
+        ax.set_visible(False)
+
+    # ONE shared legend for the two vertical lines, so no panel repeats them.
+    shared = [Line2D([0], [0], color=NLR_ACCENT, ls=":", lw=1.4,
+                     label="$n^*$ (this KPI's requirement)")]
+    if recommended is not None:
+        shared.append(Line2D([0], [0], color=NLR_SECONDARY, ls="-", lw=1.1,
+                             label=f"$N_{{eval}}$={recommended} (study size)"))
+    fig.legend(handles=shared, loc="lower center", ncol=len(shared), fontsize=8.5,
+               frameon=True, bbox_to_anchor=(0.5, 0.005))
+    fig.suptitle(f"Sample-size analysis — {display}  "
+                 f"(criterion per KPI follows its normality verdict)", fontsize=12)
+    fig.tight_layout(rect=(0, 0.045, 1, 0.955))
+    fig.savefig(out_png, dpi=200)
+    plt.close(fig)
+
+
+def build_cv_latex(results: Dict[str, dict], display: str, tol: float,
+                   min_n: int, n_replicates: int, recommended_raw: Optional[int],
+                   recommended: Optional[int], round_to: int) -> str:
+    """Booktabs LaTeX table of the CV-stabilisation sample sizes."""
+    reco = (f"{recommended} runs (raw $n^*={recommended_raw}$, rounded up to a "
+            f"multiple of {round_to})") if recommended else "not reached within the pilot pool"
+    lines = [
+        r"\begin{table}[htbp]",
+        r"  \centering",
+        (f"  \\caption{{Sample size from the stabilisation of the coefficient of "
+         f"variation $c_v=\\sigma(o)/\\mu(o)$ (scenario {_latex_escape(display)}). "
+         f"The running $c_v$ is averaged over {n_replicates} random orderings of the "
+         f"pilot pool; $n^*$ is the smallest $n \\geq {min_n}$ from which the curve "
+         f"stays within $\\pm{tol * 100:g}\\%$ of its full-pool value. Recommended: "
+         f"{reco}.}}"),
+        f"  \\label{{tab:cv_stabilisation_{_safe_name(display)}}}",
+        r"  \begin{tabular}{lrrr}",
+        r"    \toprule",
+        r"    KPI & Pool $n$ & $c_v$ (pool) & $n^*$ \\",
+        r"    \midrule",
+    ]
+    for spec in HISTOGRAM_SPECS:
+        r = results.get(spec.key, {})
+        label = _latex_escape(spec.label)
+        n_pool = r.get("n_pool", 0)
+        cv_ref = r.get("cv_ref", float("nan"))
+        cv_txt = f"{cv_ref:.4f}" if np.isfinite(cv_ref) else "--"
+        if not r.get("interpretable", False):
+            n_txt = f"n/a ({_latex_escape(r.get('reason') or 'not applicable')})"
+        elif r.get("n_star") is None:
+            n_txt = "not stabilised"
+        else:
+            n_txt = str(r["n_star"])
+        lines.append(f"    {label} & {n_pool} & {cv_txt} & {n_txt} \\\\")
+    lines += [r"    \bottomrule", r"  \end{tabular}", r"\end{table}"]
+    return "\n".join(lines)
+
+
+def emit_cv_analysis(pools: Dict[str, np.ndarray], display: str, opts: "RunOpts",
+                     p_complete: float) -> Tuple[Optional[int], Dict[str, dict]]:
+    """Run + print + plot the CV-stabilisation analysis.
+
+    Returns (N_eval, per-KPI results) — the results are handed on to the mixed
+    sample-size dashboard so the CV panels reuse exactly these curves.
+
+    Uses its OWN RNG stream (CV_SEED_OFFSET) so switching this analysis on or off
+    leaves every other number in the run bit-identical.
+    """
+    rng = np.random.default_rng(opts.bootstrap_seed + CV_SEED_OFFSET
+                                + opts.scenario_index_hash())
+    results = analyse_cv_stabilisation(pools, opts.cv_tol, opts.cv_min_n,
+                                       opts.cv_replicates, rng)
+    raw, recommended = cv_recommended_n(results, opts.round_to)
+
+    print("\n  -- Sample size from the stabilisation of the coefficient of "
+          "variation (c_v = sigma/mu) --", flush=True)
+    print(f"     Running c_v averaged over {opts.cv_replicates} random episode "
+          f"orderings; stabilised = never leaves +/-{opts.cv_tol * 100:g}% of the "
+          f"full-pool c_v (n >= {opts.cv_min_n}).", flush=True)
+    for spec in HISTOGRAM_SPECS:
+        r = results[spec.key]
+        unit = "completed missions" if spec.conditional else "runs"
+        cv_txt = f"{r['cv_ref']:.4f}" if np.isfinite(r["cv_ref"]) else "n/a"
+        if not r["interpretable"]:
+            n_txt = f"not applicable ({r['reason']})"
+        elif r["n_star"] is None:
+            n_txt = "not stabilised within the pool"
+        else:
+            n_txt = f"n*={r['n_star']} {unit}"
+        print(f"       {spec.label:34s} c_v={cv_txt:>8s}   {n_txt}", flush=True)
+
+    if recommended is None:
+        print("     CV-based recommendation: NOT REACHED — no KPI stabilised "
+              "within the pilot pool (enlarge --max_episodes or relax --cv_tol).",
+              flush=True)
+    else:
+        print(f"     CV-based common count: {raw} runs  ->  recommended "
+              f"{recommended} episodes (round-up to nearest {opts.round_to})",
+              flush=True)
+    print("     (Reported ALONGSIDE the precision-based count; the two criteria "
+          "are independent.)", flush=True)
+
+    rec_completed = (max(2, int(round(p_complete * recommended)))
+                     if recommended else None)
+    tag = _safe_name(display)
+    cv_png = opts.out_dir / f"pilot_cv_stabilisation_{tag}_{opts.stamp}.png"
+    plot_cv_stabilisation(results, opts.cv_tol, recommended, rec_completed,
+                          display, cv_png)
+    print(f"\n      saved CV stabilisation   : {cv_png}", flush=True)
+
+    latex = build_cv_latex(results, display, opts.cv_tol, opts.cv_min_n,
+                           opts.cv_replicates, raw, recommended, opts.round_to)
+    print("\n  LaTeX table (also saved to file):\n", flush=True)
+    print(latex, flush=True)
+    tex_path = opts.out_dir / f"cv_stabilisation_{tag}_{opts.stamp}.tex"
+    tex_path.write_text(latex + "\n", encoding="utf-8")
+    print(f"\n      saved CV table           : {tex_path}", flush=True)
+    return recommended, results
+
+
 def plot_mean_sampling_distributions(summaries: Dict[str, dict], mode: str,
                                      out_png: Path) -> None:
     """Histograms of the bootstrap sample means for the six histogram KPIs."""
@@ -980,6 +1457,23 @@ def _run_pilot_scenario(section, display, ckpt, ckpt_path, env_cfg, policy,
         print(f"  (user override via --eval_episodes: using proposed N_eval="
               f"{proposed} for the expected distributions)", flush=True)
 
+    # ── CV-stabilisation planning (second, distribution-free criterion) ──
+    # Reported next to the precision result; it does NOT change `proposed`, so
+    # the expected distributions below are unaffected by this analysis.
+    cv_results: Dict[str, dict] = {}
+    if opts.run_cv:
+        cv_reco, cv_results = emit_cv_analysis(pooled, display, opts, p_complete)
+        print(f"\n  SAMPLE-SIZE SUMMARY for {display}:", flush=True)
+        print(f"      precision criterion (95% CI half-width) : {recommended} episodes",
+              flush=True)
+        print(f"      CV-stabilisation criterion              : "
+              f"{cv_reco if cv_reco else 'not reached'} episodes", flush=True)
+        print(f"      -> a study at N_eval = "
+              f"{max(recommended, cv_reco) if cv_reco else recommended} episodes "
+              f"satisfies both.", flush=True)
+        print(f"      (the expected distributions below use N_eval={proposed}, "
+              f"from the precision criterion)", flush=True)
+
     # ── EXPECTED sampling distributions of the KPI means at the proposed N_eval ──
     expected_completed = max(2, int(round(p_complete * proposed)))
     print(f"\n  Expected sampling distributions at N_eval={proposed}"
@@ -1019,6 +1513,38 @@ def _run_pilot_scenario(section, display, ckpt, ckpt_path, env_cfg, policy,
     mean_png = opts.out_dir / f"pilot_expected_means_{tag}_{opts.stamp}.png"
     plot_mean_sampling_distributions(summaries, "pilot", mean_png)
     print(f"      saved expected means     : {mean_png}", flush=True)
+
+    # ── FINAL 2x2 sample-size dashboard (one criterion per KPI) ──
+    # Needs the CV curves, so it is only produced when the CV analysis ran.
+    if opts.run_cv and cv_results:
+        dash_raw, dash_reco = dashboard_recommended_n(display, prec_reqs,
+                                                      cv_results, opts.round_to)
+        dash_completed = (max(2, int(round(p_complete * dash_reco)))
+                          if dash_reco else None)
+        print(f"\n  SAMPLE-SIZE DASHBOARD for {display} "
+              f"(criterion per KPI follows its normality verdict):", flush=True)
+        for key in DASHBOARD_KEYS:
+            spec = KEY_TO_SPEC[key]
+            method = method_for(display, key)
+            if method == "cv":
+                n = cv_results.get(key, {}).get("n_star")
+            else:
+                n = prec_reqs.get(key)
+            unit = "completed missions" if spec.conditional else "episodes"
+            note = "  (reference only; does not size N_eval)" if spec.conditional else ""
+            n_txt = f"n*={n} {unit}" if n is not None else "requirement not reached"
+            print(f"      {spec.label:34s} {METHOD_LABEL[method]:38s} {n_txt}{note}",
+                  flush=True)
+        print(f"      -> dashboard N_eval = "
+              f"{dash_reco if dash_reco else 'not reached'} episodes "
+              f"(raw {dash_raw if dash_raw else '?'}, round-up to nearest "
+              f"{opts.round_to})", flush=True)
+
+        dash_png = opts.out_dir / f"pilot_sample_size_dashboard_{tag}_{opts.stamp}.png"
+        plot_sample_size_dashboard(display, candidate_ns, hw_by_kpi, prec_reqs,
+                                   cv_results, opts.cv_tol, dash_reco,
+                                   dash_completed, dash_png)
+        print(f"      saved size dashboard     : {dash_png}", flush=True)
 
     if opts.run_normality:
         emit_normality_table(pooled, summaries, "pilot", display, opts, boot_rng)
@@ -1199,6 +1725,19 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Skip the Shapiro-Wilk normality test of the KPI-mean "
                         "sampling distributions (ON by default; prints + saves a "
                         "LaTeX table of the p-values).")
+    p.add_argument("--cv_tol", type=float, default=CV_TOL,
+                   help="RELATIVE stabilisation band for the coefficient of "
+                        f"variation, e.g. 0.02 = ±2%% (default: {CV_TOL}).")
+    p.add_argument("--cv_min_n", type=int, default=CV_MIN_N,
+                   help="Smallest run count the CV criterion may recommend "
+                        f"(default: {CV_MIN_N}).")
+    p.add_argument("--cv_replicates", type=int, default=CV_REPLICATES,
+                   help="Random episode orderings averaged into the running c_v "
+                        f"curve (default: {CV_REPLICATES}).")
+    p.add_argument("--skip_cv", action="store_true",
+                   help="Skip the CV-stabilisation sample-size analysis (PILOT "
+                        "mode only; ON by default — one figure + LaTeX table per "
+                        "scenario/model).")
     p.add_argument("--scenario_name_check", choices=["warn", "error", "ignore"],
                    default="warn",
                    help="How to handle a display-name vs section.scenario mismatch "
@@ -1221,6 +1760,13 @@ def main() -> None:
                          "(Shapiro-Wilk's supported range).")
     if args.n_bootstrap < 100:
         raise ValueError("--n_bootstrap should be at least 100.")
+    if not 0.0 < args.cv_tol < 1.0:
+        raise ValueError("--cv_tol must be a relative band strictly between "
+                         "0 and 1 (e.g. 0.02 for ±2%).")
+    if args.cv_min_n < 2:
+        raise ValueError("--cv_min_n must be >= 2 (sigma needs two observations).")
+    if args.cv_replicates < 1:
+        raise ValueError("--cv_replicates must be >= 1.")
     if args.analysis_mode == "final":
         if args.eval_episodes is None:
             raise ValueError("--analysis_mode final requires --eval_episodes N "
@@ -1247,6 +1793,9 @@ def main() -> None:
         normality_alpha=args.normality_alpha,
         normality_n_samples=args.normality_n_samples,
         run_normality=not args.skip_normality,
+        cv_tol=args.cv_tol, cv_min_n=args.cv_min_n,
+        cv_replicates=args.cv_replicates,
+        run_cv=(not args.skip_cv) and args.analysis_mode == "pilot",
         scenario_name_check=args.scenario_name_check,
         out_dir=out_dir, stamp=datetime.now().strftime("%Y%m%d_%H%M%S"),
     )
@@ -1266,6 +1815,12 @@ def main() -> None:
           + (f"OFF (--skip_normality)" if args.skip_normality
              else f"ON — Shapiro-Wilk on {args.normality_n_samples} bootstrap "
                   f"means/KPI, alpha={args.normality_alpha:g} (LaTeX table)"))
+    if args.analysis_mode == "pilot":
+        print(f"  CV sample size: "
+              + (f"OFF (--skip_cv)" if args.skip_cv
+                 else f"ON — c_v stabilisation within ±{args.cv_tol * 100:g}% "
+                      f"(n≥{args.cv_min_n}, {args.cv_replicates} orderings); "
+                      f"1 figure + LaTeX table per scenario"))
     print("─" * 70)
 
     analyse_scenarios(SCENARIOS, default_ckpt_path, opts, device)

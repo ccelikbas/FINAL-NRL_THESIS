@@ -1,0 +1,17 @@
+\begin{table}[htbp]
+  \centering
+  \caption{Sample size from the stabilisation of the coefficient of variation $c_v=\sigma(o)/\mu(o)$ (scenario Baseline). The running $c_v$ is averaged over 50 random orderings of the pilot pool; $n^*$ is the smallest $n \geq 30$ from which the curve stays within $\pm2\%$ of its full-pool value. Recommended: 900 runs (raw $n^*=876$, rounded up to a multiple of 25).}
+  \label{tab:cv_stabilisation_Baseline}
+  \begin{tabular}{lrrr}
+    \toprule
+    KPI & Pool $n$ & $c_v$ (pool) & $n^*$ \\
+    \midrule
+    Target-destruction rate & 1000 & 0.4864 & 158 \\
+    Survival rate & 1000 & 0.8150 & 67 \\
+    Failure-aware duration & 1000 & 0.5019 & 30 \\
+    Duration among completed missions & 619 & 0.2345 & 30 \\
+    Coalition fragmentation & 1000 & 8.1507 & 876 \\
+    Episode reward & 1000 & 0.8104 & n/a (values change sign) \\
+    \bottomrule
+  \end{tabular}
+\end{table}

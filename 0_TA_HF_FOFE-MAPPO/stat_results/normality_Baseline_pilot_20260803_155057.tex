@@ -1,0 +1,17 @@
+\begin{table}[htbp]
+  \centering
+  \caption{Shapiro--Wilk normality test of the bootstrap sampling distribution of each KPI mean (pilot (expected) mode, scenario Baseline). The test is applied to 600 bootstrap sample means; a KPI is flagged Normal when $p \geq \alpha$ ($\alpha=0.05$).}
+  \label{tab:normality_Baseline_pilot}
+  \begin{tabular}{lrrrc}
+    \toprule
+    KPI & Resample $n$ & $W$ & $p$-value & Normal ($\alpha=0.05$) \\
+    \midrule
+    Target-destruction rate & 975 & 0.9985 & 0.8838 & Yes \\
+    Survival rate & 975 & 0.9971 & 0.3830 & Yes \\
+    Failure-aware duration & 975 & 0.9972 & 0.3957 & Yes \\
+    Duration among completed missions & 604 & 0.9989 & 0.9731 & Yes \\
+    Coalition fragmentation & 975 & 0.9951 & 0.0554 & Yes \\
+    Episode reward & 975 & 0.9974 & 0.4672 & Yes \\
+    \bottomrule
+  \end{tabular}
+\end{table}
