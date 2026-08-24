@@ -8,6 +8,16 @@ with ALL policies on the same axes:
                          one curve per policy (colour = policy).
   2. Eval-rates plot   — the eval KPIs (survival / task completion / targets-destroyed /
                          coalition fragmentation), shown for every policy.
+  3. MODEL-AVERAGED reward curve — the SAME reward figure, but the per-checkpoint
+                         curves are replaced by ONE mean curve per model: all runs
+                         tagged model="complete" (Comm-FOFE-MAPPO) averaged into one
+                         line, all model="baseline" (MAPPO) into another. Runs are
+                         averaged RAW per iteration and the mean is smoothed after
+                         (window AVG_SMOOTH_WINDOW), so smoothing never leaks between
+                         runs; the window still resets at every curriculum boundary of
+                         every run in the group, keeping the transitions a hard step.
+                         Runs of different length are averaged over their union, so
+                         the mean spans the longest run.
 
 In the eval-rates plot the COLOUR encodes the metric and the LINE STYLE encodes the
 policy (solid = A, dashed = B, dash-dot = C, dotted = D), so the policies sit on one
@@ -82,6 +92,13 @@ from .nlr_style import (NLR_PRIMARY, NLR_SECONDARY, NLR_ACCENT, NLR_DARKGRAY,
 #           run: set start_iter=10_000 so the curve starts at the S2 beginning. It is
 #           applied AFTER stitching, and may differ per policy — each still starts at
 #           0 on the graph. Omit or 0 = keep the whole history.
+#   model : which MODEL this run belongs to — "complete" (Comm-FOFE-MAPPO) or
+#           "baseline" (MAPPO baseline). This is the grouping key: every run sharing
+#           a `model` is averaged into ONE mean curve on the *_avg_* reward figure,
+#           and the same key matches Complete-vs-Baseline in the convergence table.
+#           Set it EXPLICITLY on every entry — when omitted it is only guessed from
+#           the label ("complete"/"baseline" substring), which silently returns None
+#           for labels like "Comm-FOFE-MAPPO" and drops the run from both.
 #
 # ── S1 GROUP ──  (draws the *_S1 PNGs; leave as-is — these are the good S1 policies)
 POLICIES_S1: list[dict] = [
@@ -102,12 +119,23 @@ POLICIES_S1: list[dict] = [
     # S1 scenarios
     dict(path="runs/FINALV2/complete_stage7of8_DR_j2-4_k0_25.pt",
          label="Comm-FOFE-MAPPO",
+         model="complete",
          cont=[]),
     dict(path="runs/FINALV6/complete_S1_FINAL.pt",
              label="Comm-FOFE-MAPPO 2",
+             model="complete",
              cont=[]),
+    dict(path="runs/FINALV7/complete_S1_FINAL.pt",
+                 label="Comm-FOFE-MAPPO 3",
+                 model="complete",
+                 cont=[]),
+    dict(path="runs/FINALV7/baseline_S1_FINAL.pt",
+                     label="baseline 3",
+                     model="baseline",
+                     cont=[]),
     dict(path="runs/FINALV2/baseline_stage11of11_DR_j2-4_k0_25_FINAL.pt",
          label="MAPPO Baseline",
+         model="baseline",
          cont=["runs/FINALV2/FINAL_baseline_s1_cont.pt",
                "runs/FINALV2/Final_Baseline_Cont_2.pt",
                "runs/FINALV2/Final_Baseline_Cont_3.pt",
@@ -127,10 +155,20 @@ POLICIES_S1: list[dict] = [
 POLICIES_S2: list[dict] = [
     dict(path="runs/FINALV5/complete_S2_FINAL.pt",
          label="Comm-FOFE-MAPPO",
+         model="complete",
          cont=[]),
-    dict(path="runs/FINALV5/baseline_S2_FINAL.pt",
-             label="MAPPO Baseline",
+    dict(path="runs/FINALV7/complete_S2_FINAL.pt",
+             label="Comm-FOFE-MAPPO 2",
+             model="complete",
              cont=[]),
+    dict(path="runs/FINALV5/baseline_S2_FINAL.pt",
+             label="MAPPO Baseline v5",
+             model="baseline",
+             cont=[]),
+    dict(path="runs/FINALV6/baseline_S2_FINAL.pt",
+                 label="MAPPO Baseline v6",
+                 model="baseline",
+                 cont=[]),
     # dict(path="runs/FINALV2/S2_Baseline_stage9of9_S2_DR_j2-4_k0_25_FINAL.pt",
     #      label="Baseline S2",
     #      start_iter=10000,          # may differ per policy; each still starts at 0 on the graph
@@ -139,7 +177,7 @@ POLICIES_S2: list[dict] = [
 
 # Running-average window (datapoints); resets at each curriculum section so
 # transitions stay sharp. 1 = raw.                        [CLI: --smooth]
-SMOOTH_WINDOW = 1
+SMOOTH_WINDOW = 100
 
 # Output PNGs (relative paths resolved against the project dir 0_TA_...). One pair
 # per group; the S1 and S2 figures are written to distinct files so neither group
@@ -148,6 +186,28 @@ REWARD_OUT_S1 = "eval_results/compare_reward_curves_S1.png"
 RATES_OUT_S1 = "eval_results/compare_eval_rates_S1.png"
 REWARD_OUT_S2 = "eval_results/compare_reward_curves_S2.png"
 RATES_OUT_S2 = "eval_results/compare_eval_rates_S2.png"
+
+# MODEL-AVERAGED reward figures — one EXTRA figure per group, drawn IN ADDITION to
+# (and identically styled to) the per-policy reward figure above. Instead of one
+# curve per checkpoint, every run sharing a `model` key is averaged into a single
+# mean curve: one line for "complete" (Comm-FOFE-MAPPO), one for "baseline" (MAPPO).
+REWARD_AVG_OUT_S1 = "eval_results/compare_reward_curves_avg_S1.png"
+REWARD_AVG_OUT_S2 = "eval_results/compare_reward_curves_avg_S2.png"
+
+# Smoothing window for the AVERAGED figures only (the per-policy figures keep
+# SMOOTH_WINDOW). Averaging across runs already cancels some noise, but the mean of
+# a small number of runs is still jagged, so this is normally larger than
+# SMOOTH_WINDOW. Like everywhere else it RESETS at every curriculum section, so the
+# transitions stay a hard step.                       [CLI: --avg-smooth]
+AVG_SMOOTH_WINDOW = 50
+
+# Legend label + colour per model on the averaged figures. Keys are the `model`
+# values; a model present in the config but missing here falls back to its own key
+# and the next colour in NLR_CYCLE.
+MODEL_LABELS = {"complete": "Comm-FOFE-MAPPO", "baseline": "MAPPO Baseline"}
+MODEL_COLORS = {"complete": NLR_PRIMARY,       "baseline": NLR_ACCENT}
+# Draw order of the mean curves (models not listed follow, in config order).
+MODEL_ORDER = ["complete", "baseline"]
 
 # Convergence-comparison LaTeX table (Complete vs Baseline, rows S1 & S2), written
 # in ADDITION to the figures. For each (scenario, model), computed on the SAME
@@ -342,6 +402,25 @@ def _annotate_final_state_start(ax, n_iter, start_iter, label=None):
     ax.axvline(start, color="black", lw=2.6, ls=":", alpha=1.0, zorder=3)
 
 
+def _decorate_reward_ax(ax, n_iter, final_start_iter, final_start_label, legend_title):
+    """Axes/labels/limits/annotations/legend shared by BOTH reward figures, so the
+    averaged figure is styled EXACTLY like the per-policy one."""
+    ax.axhline(0.0, color=NLR_DARKGRAY, lw=0.8, alpha=0.5)
+    ax.set_xlabel("Global training iteration ('000)", fontsize=22)
+    ax.set_ylabel("Mean episode reward (train)", fontsize=22)
+    ax.xaxis.set_major_formatter(_THOUSANDS_FMT)
+    ax.tick_params(axis="both", labelsize=15)
+    # ax.set_title("Training reward — policy comparison", fontsize=12, fontweight="bold")
+    ax.set_ylim(-40, 0)
+    if n_iter:
+        ax.set_xlim(1, n_iter)
+    ax.grid(True, alpha=0.3)
+    _annotate_pkill(ax, n_iter)
+    _annotate_final_state_start(ax, n_iter, final_start_iter, final_start_label)
+    ax.legend(loc="lower right", fontsize=20, frameon=True, title=legend_title,
+              title_fontsize=20)
+
+
 def plot_reward(policies, out, smooth, dpi=DPI, final_start_iter=None, final_start_label=None):
     """One (train) reward curve per policy on a shared axis."""
     fig, ax = plt.subplots(figsize=(13, 6))
@@ -356,24 +435,122 @@ def plot_reward(policies, out, smooth, dpi=DPI, final_start_iter=None, final_sta
         ys = _smooth_sectioned(xs, ys, bounds, smooth)
         ax.plot(xs, ys, lw=1.9, color=color, label=label)
 
-    ax.axhline(0.0, color=NLR_DARKGRAY, lw=0.8, alpha=0.5)
-    ax.set_xlabel("Global training iteration ('000)", fontsize=22)
-    ax.set_ylabel("Mean episode reward (train)", fontsize=22)
-    ax.xaxis.set_major_formatter(_THOUSANDS_FMT)
-    ax.tick_params(axis="both", labelsize=15)
-    # ax.set_title("Training reward — policy comparison", fontsize=12, fontweight="bold")
-    ax.set_ylim(-40, 0)
-    if n_iter:
-        ax.set_xlim(1, n_iter)
-    ax.grid(True, alpha=0.3)
-    _annotate_pkill(ax, n_iter)
-    _annotate_final_state_start(ax, n_iter, final_start_iter, final_start_label)
-    ax.legend(loc="lower right", fontsize=20, frameon=True, title="policy", title_fontsize=20)
+    _decorate_reward_ax(ax, n_iter, final_start_iter, final_start_label, "policy")
     fig.tight_layout()
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
     print(f"saved reward comparison -> {out}")
+
+
+# ---------------------------------------------------------------------
+# Per-MODEL averaging (one mean reward curve per model, not per checkpoint)
+# ---------------------------------------------------------------------
+
+def _union_bounds(bounds_list, n_iter):
+    """Non-overlapping section partition of 0..n_iter cut at EVERY curriculum
+    boundary of EVERY run in the group.
+
+    A mean curve has no section bounds of its own: each run brings its own
+    curriculum stages (and a stitched run one join per continuation). Collecting all
+    boundary points and turning them into consecutive segments makes the smoothing
+    window reset at every transition ANY run in the group has, so no run's step is
+    averaged across — at the cost of a few extra (harmless) resets where the runs
+    disagree."""
+    pts = {0, int(n_iter)}
+    for bounds in bounds_list:
+        for _name, s, e in (bounds or []):
+            for p in (int(s), int(e)):
+                if 0 <= p <= n_iter:
+                    pts.add(p)
+    cuts = sorted(pts)
+    return [(f"seg{i}", cuts[i], cuts[i + 1]) for i in range(len(cuts) - 1)]
+
+
+def _mean_over_runs(runs, key):
+    """NaN-aware per-iteration mean of series `key` across `runs`.
+
+    Runs of DIFFERENT lengths are padded with NaN to the longest and averaged over
+    whatever runs exist at each iteration (union), so the mean spans the longest
+    run; `counts` reports how many runs actually contribute at each iteration —
+    past the shortest run's end the mean is backed by fewer runs.
+    Returns (mean, counts) or (None, None) when no run has usable data."""
+    series = []
+    for r in runs:
+        v = np.asarray(r["logs"].get(key, []), dtype=float)
+        if v.size and np.any(np.isfinite(v)):
+            series.append(v)
+    if not series:
+        return None, None
+    n = max(s.size for s in series)
+    stack = np.full((len(series), n), np.nan)
+    for i, s in enumerate(series):
+        stack[i, :s.size] = s
+    counts = np.sum(np.isfinite(stack), axis=0)
+    mean = np.full(n, np.nan)
+    present = counts > 0                        # masked so nanmean sees no all-NaN column
+    mean[present] = np.nanmean(stack[:, present], axis=0)
+    return mean, counts
+
+
+def _group_by_model(entries, tag):
+    """{model: [entry, …]} in MODEL_ORDER first, then any other model in config
+    order. Entries without a `model` cannot be averaged and are reported."""
+    by_model: dict[str, list] = {}
+    for e in entries:
+        m = e.get("model")
+        if not m:
+            print(f"  ! [{tag}] {e.get('label', 'policy')}: no `model` key and none "
+                  f"inferable from the label — excluded from the averaged figure "
+                  f"(add model=\"complete\" / model=\"baseline\").")
+            continue
+        by_model.setdefault(m, []).append(e)
+    ordered = [m for m in MODEL_ORDER if m in by_model]
+    ordered += [m for m in by_model if m not in ordered]
+    return {m: by_model[m] for m in ordered}
+
+
+def plot_reward_avg(entries, out, smooth, dpi=DPI, final_start_iter=None,
+                    final_start_label=None, tag=""):
+    """The reward figure with one MEAN curve per MODEL instead of one per policy.
+
+    Runs are averaged RAW (per iteration, across the runs sharing a `model`) and the
+    mean is smoothed afterwards, so smoothing never leaks between runs. Identical
+    axes/limits/annotations to plot_reward."""
+    by_model = _group_by_model(entries, tag)
+    if not by_model:
+        print(f"  ! [{tag}] no policy has a `model` key — averaged figure skipped.")
+        return
+
+    fig, ax = plt.subplots(figsize=(13, 6))
+    n_iter = 0
+    for i, (model, runs) in enumerate(by_model.items()):
+        mean, counts = _mean_over_runs(runs, TRAIN_REWARD_KEY)
+        if mean is None:
+            print(f"  ! [{tag}] {model}: no '{TRAIN_REWARD_KEY}' in any run — skipped.")
+            continue
+        n_iter = max(n_iter, mean.size)
+        bounds = _union_bounds([r["bounds"] for r in runs], mean.size)
+        xs, ys = _finite_xy(mean)
+        ys = _smooth_sectioned(xs, ys, bounds, smooth)
+
+        n_runs = len(runs)
+        label = MODEL_LABELS.get(model, model)      # the run count stays out of the legend
+        color = MODEL_COLORS.get(model, POLICY_COLORS[i % len(POLICY_COLORS)])
+        ax.plot(xs, ys, lw=2.4, color=color, label=label)
+
+        full = int(np.sum(counts == n_runs))
+        note = "" if full == mean.size else f", all {n_runs} runs only up to iter {full}"
+        print(f"  [{tag}] mean {model}: {n_runs} run(s) "
+              f"[{', '.join(r['label'] for r in runs)}] → {mean.size} iters"
+              f"{note}, {len(bounds)} section cut(s), smooth={smooth}")
+
+    _decorate_reward_ax(ax, n_iter, final_start_iter, final_start_label, "model")
+    fig.tight_layout()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+    print(f"saved model-averaged reward comparison -> {out}")
 
 
 def plot_eval_rates(policies, out, smooth, dpi=DPI, title_suffix="", final_start_iter=None, final_start_label=None):
@@ -447,7 +624,8 @@ def _policy_model(spec) -> "str | None":
     return None
 
 
-def _run_group(specs, reward_out, rates_out, smooth, dpi, tag, title_suffix="", final_start_iter=None) -> list[dict]:
+def _run_group(specs, reward_out, rates_out, smooth, dpi, tag, title_suffix="",
+               final_start_iter=None, reward_avg_out=None, avg_smooth=None) -> list[dict]:
     """Load + stitch + plot ONE policy group into its own pair of figures, and
     RETURN the per-policy data (label / model / stitched+rebased logs / bounds) so
     the convergence table can be built. An empty group is skipped. `tag` names the
@@ -495,6 +673,10 @@ def _run_group(specs, reward_out, rates_out, smooth, dpi, tag, title_suffix="", 
     plot_reward(policies, _resolve_out(reward_out), smooth, dpi, final_start_iter, final_label)
     plot_eval_rates(policies, _resolve_out(rates_out), smooth, dpi, title_suffix,
                     final_start_iter, final_label)
+    if reward_avg_out:
+        plot_reward_avg(entries, _resolve_out(reward_avg_out),
+                        AVG_SMOOTH_WINDOW if avg_smooth is None else avg_smooth,
+                        dpi, final_start_iter, final_label, tag=tag)
     return entries
 
 
@@ -633,6 +815,11 @@ def main():
     ap.add_argument("--rates-out-s1", default=RATES_OUT_S1)
     ap.add_argument("--reward-out-s2", default=REWARD_OUT_S2)
     ap.add_argument("--rates-out-s2", default=RATES_OUT_S2)
+    ap.add_argument("--reward-avg-out-s1", default=REWARD_AVG_OUT_S1)
+    ap.add_argument("--reward-avg-out-s2", default=REWARD_AVG_OUT_S2)
+    ap.add_argument("--avg-smooth", type=int, default=AVG_SMOOTH_WINDOW,
+                    help="running-average window for the MODEL-AVERAGED reward figures "
+                         "(1 = raw); resets at each curriculum section")
     ap.add_argument("--table-out", default=TABLE_OUT)
     ap.add_argument("--table-smooth", type=int, default=TABLE_SMOOTH_WINDOW,
                     help="window for the convergence-table peak (1 = raw max reward; "
@@ -653,11 +840,15 @@ def main():
     s1_entries = _run_group([dict(s) for s in POLICIES_S1], args.reward_out_s1,
                             args.rates_out_s1, args.smooth, args.dpi, tag="S1",
                             title_suffix=" (S1)",
-                            final_start_iter=FINAL_STATE_START_ITER["S1"])
+                            final_start_iter=FINAL_STATE_START_ITER["S1"],
+                            reward_avg_out=args.reward_avg_out_s1,
+                            avg_smooth=args.avg_smooth)
     s2_entries = _run_group([dict(s) for s in POLICIES_S2], args.reward_out_s2,
                             args.rates_out_s2, args.smooth, args.dpi, tag="S2",
                             title_suffix=" (S2)",
-                            final_start_iter=FINAL_STATE_START_ITER["S2"])
+                            final_start_iter=FINAL_STATE_START_ITER["S2"],
+                            reward_avg_out=args.reward_avg_out_s2,
+                            avg_smooth=args.avg_smooth)
 
     # Convergence-comparison table (Complete vs Baseline, rows S1 & S2).
     write_convergence_table(s1_entries, s2_entries, args.table_smooth,
