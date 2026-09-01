@@ -18,7 +18,11 @@ TWO MODES
       rows  = Targets destroyed · Survival rate · Duration
       cols  = complete · baseline · difference (complete − baseline)
   The complete & baseline columns share one colour scale per row for easy comparison;
-  the difference column uses a diverging map centred at 0. A separate table + CSV
+  the difference column uses a diverging map centred at 0. Every square prints the
+  cell mean with its 95% confidence interval underneath (mean ± CI_Z·SE over the
+  cell's per-episode samples; the Δ column uses the PAIRED per-episode difference,
+  so a Δ interval excluding 0 marks a cell where the two policies differ).
+  A separate table + CSV
   reports, per cell, the PAIRED one-sided Wilcoxon signed-rank p-value between the two
   policies (targets/survival: higher-is-better; duration: lower-is-better). Pairing is
   by shared per-episode seeds, so both policies see identical worlds (common random
@@ -96,7 +100,7 @@ POLICY_PATH = "runs/FINALV2/complete_stage7of8_DR_j2-4_k0_25.pt"    # "complete"
 BASELINE_PATH = "runs/FINALV2/Final_Baseline_Cont_4.pt"  # "baseline" model (--baseline); None → single-policy mode
 STRIKERS = [1, 2, 3]             # y-axis of the grid
 JAMMERS = [1, 2, 3, 4, 5, 6]  # x-axis of the grid
-N_RUNS = 3000                         # parallel episodes per cell (per seed)
+N_RUNS = 1000                         # parallel episodes per cell (per seed)
 N_SEEDS = 1                         # repeats per cell (concatenated); raise for stronger tests
 BASE_SEED = 42
 
@@ -125,6 +129,19 @@ OUT_PATH = "escort_analysis/team_size_generalisation.png"
 
 # Figure resolution (dots per inch). Higher = sharper output (larger files).
 DPI = 600
+
+# Per-cell CONFIDENCE INTERVAL printed under the mean in every heatmap square of the
+# COMPARISON dashboard (the single-policy dashboard keeps the bare mean). Normal/CLT
+# interval on the cell's per-episode samples: mean +- CI_Z * std(ddof=1)/sqrt(n),
+# with n = N_RUNS * N_SEEDS episodes. The complete/baseline columns use their own
+# samples; the difference column uses the PAIRED per-episode difference
+# (complete - baseline), which is valid because both policies are rolled out on the
+# same seeds (common random numbers) — so its CI answers "is Δ distinguishable from
+# 0?" and lines up with the Wilcoxon table.
+SHOW_CI = True
+CI_Z = 1.96            # 1.96 = 95%, 1.645 = 90%, 2.576 = 99%
+CI_LABEL = "95% CI"    # only used in the printed/CSV headers
+CI_FONTSIZE = 6.5      # the mean stays at fontsize 9
 
 # Per-episode KPI keys produced by run_cell (all length-B arrays).
 KPI_KEYS = ["survival", "completion", "targets_destroyed", "frag", "reward", "duration"]
@@ -310,6 +327,61 @@ def sweep_policy(ckpt, strikers, jammers, n_runs, n_seeds, base_seed, device, la
 # Plotting helpers
 # ===================================================================
 
+def _ci_half(x):
+    """Half-width of the normal/CLT confidence interval of the MEAN of `x`.
+
+    CI_Z * std(ddof=1) / sqrt(n) over the per-episode samples; NaN when fewer than
+    two finite samples exist (the interval is undefined), 0.0 for a constant cell."""
+    x = np.asarray(x, dtype=float)
+    x = x[np.isfinite(x)]
+    if x.size < 2:
+        return np.nan
+    return float(CI_Z * np.std(x, ddof=1) / np.sqrt(x.size))
+
+
+def _fmt_ci(h):
+    """"±<half-width>" with enough decimals to stay informative.
+
+    At n = N_RUNS * N_SEEDS episodes the CI of a rate is only ~0.005 wide, which
+    two decimals would flatten to "±0.00"; the step-count KPIs are ~1.0 wide and
+    want fewer. So the precision follows the magnitude."""
+    if h >= 10:
+        return f"±{h:.1f}"
+    if h >= 0.1:
+        return f"±{h:.2f}"
+    return f"±{h:.3f}"
+
+
+def _ci_grids(per_ep, strikers, jammers, keys=KPI_KEYS):
+    """{kpi: (nS, nJ) grid of CI half-widths} from one policy's per-episode samples."""
+    grids = {k: np.full((len(strikers), len(jammers)), np.nan) for k in keys}
+    for (si, ji), ep in per_ep.items():
+        if ep is None:
+            continue                                    # failed cell stays NaN
+        for k in keys:
+            grids[k][si, ji] = _ci_half(ep[k])
+    return grids
+
+
+def _paired_ci_grids(per_ep_c, per_ep_b, strikers, jammers, keys=KPI_KEYS):
+    """{kpi: grid of CI half-widths of the PAIRED difference complete - baseline}.
+
+    Episodes are paired by position, which pairs them by seed: both policies are
+    swept with the same BASE_SEED, so episode i of a cell is the same sampled world
+    for both. The paired CI is therefore much tighter than combining the two
+    independent column CIs, and is the one that says whether Δ differs from 0."""
+    grids = {k: np.full((len(strikers), len(jammers)), np.nan) for k in keys}
+    for key in per_ep_c:
+        c, b = per_ep_c.get(key), per_ep_b.get(key)
+        if c is None or b is None:
+            continue
+        si, ji = key
+        for k in keys:
+            n = min(len(c[k]), len(b[k]))
+            grids[k][si, ji] = _ci_half(np.asarray(c[k][:n]) - np.asarray(b[k][:n]))
+    return grids
+
+
 def _cell_text_color(cmap, norm, value):
     """Pick black or white text for legibility on the mapped cell colour."""
     r, g, b, _ = cmap(norm(value))
@@ -318,7 +390,9 @@ def _cell_text_color(cmap, norm, value):
 
 
 def _draw_heat(fig, ax, g, cmap, vmin, vmax, strikers, jammers, title,
-               cbar_label="", signed=False):
+               cbar_label="", signed=False, ci=None):
+    """Heatmap of `g`. When `ci` is given (same-shaped grid of CI half-widths) each
+    square prints the mean on top and "+-<half-width>" under it in a smaller font."""
     nS, nJ = len(strikers), len(jammers)
     if isinstance(cmap, str):
         cmap = plt.get_cmap(cmap).copy()
@@ -331,12 +405,23 @@ def _draw_heat(fig, ax, g, cmap, vmin, vmax, strikers, jammers, title,
     ax.set_xlabel("Jammers"); ax.set_ylabel("Strikers")
     ax.set_title(title, fontsize=11, pad=6)
     fmt = "{:+.2f}" if signed else "{:.2f}"
+    show_ci = SHOW_CI and ci is not None
     for si in range(nS):
         for ji in range(nJ):
             v = g[si, ji]
-            if not np.isnan(v):
+            if np.isnan(v):
+                continue
+            tcol = _cell_text_color(cmap, norm, v)
+            h = ci[si, ji] if show_ci else np.nan
+            if not np.isfinite(h):                      # no CI → mean centred as before
                 ax.text(ji, si, fmt.format(v), ha="center", va="center",
-                        fontsize=9, color=_cell_text_color(cmap, norm, v))
+                        fontsize=9, color=tcol)
+                continue
+            # mean above centre, CI half-width below it
+            ax.text(ji, si + 0.10, fmt.format(v), ha="center", va="center",
+                    fontsize=9, color=tcol)
+            ax.text(ji, si - 0.17, _fmt_ci(h), ha="center", va="center",
+                    fontsize=CI_FONTSIZE, color=tcol, alpha=0.85)
     for si, ns in enumerate(strikers):
         for ji, nj in enumerate(jammers):
             if ns in TRAIN_S and nj in TRAIN_J:
@@ -363,8 +448,13 @@ def plot_single_dashboard(grids, strikers, jammers, name, out, n_runs, n_seeds):
     print(f"\nsaved dashboard -> {out}")
 
 
-def plot_comparison(grids_c, grids_b, strikers, jammers, name_c, name_b, out, n_runs, n_seeds):
-    """3 rows (KPIs) × 3 cols (complete / baseline / difference)."""
+def plot_comparison(grids_c, grids_b, strikers, jammers, name_c, name_b, out, n_runs, n_seeds,
+                    ci_c=None, ci_b=None, ci_d=None):
+    """3 rows (KPIs) × 3 cols (complete / baseline / difference).
+
+    `ci_c` / `ci_b` / `ci_d` are optional {kpi: grid of CI half-widths} for the three
+    columns (the difference column's being the PAIRED-difference CI); when given, each
+    square prints mean ± half-width."""
     nrow = len(COMPARE_KPIS)
     fig, axes = plt.subplots(nrow, 3, figsize=(15, 4.6 * nrow),
                              constrained_layout=True)
@@ -379,16 +469,19 @@ def plot_comparison(grids_c, grids_b, strikers, jammers, name_c, name_b, out, n_
             vmin, vmax = (float(allv.min()), float(allv.max())) if allv.size else (0.0, 1.0)
         better = "higher = better" if direction == "higher" else "lower = better"
         _draw_heat(fig, axes[row, 0], gc, NLR_SEQ, vmin, vmax, strikers, jammers,
-                   f"{title}\nComm-FOFE-MAPPO", cbar_label=title)
+                   f"{title}\nComm-FOFE-MAPPO", cbar_label=title,
+                   ci=(ci_c or {}).get(key))
         _draw_heat(fig, axes[row, 1], gb, NLR_SEQ, vmin, vmax, strikers, jammers,
-                   f"{title}\nMAPPO Baseline", cbar_label=title)
+                   f"{title}\nMAPPO Baseline", cbar_label=title,
+                   ci=(ci_b or {}).get(key))
         # difference: Comm-FOFE-MAPPO − MAPPO Baseline, diverging, centred at 0
         diff = gc - gb
         vabs = float(np.nanmax(np.abs(diff))) if np.isfinite(diff).any() else 1.0
         vabs = vabs if vabs > 0 else 1.0
         _draw_heat(fig, axes[row, 2], diff, NLR_DIV, -vabs, vabs, strikers, jammers,
                    f"{title}\nΔ = Comm-FOFE-MAPPO − MAPPO Baseline",
-                   cbar_label=f"Δ  ({better})", signed=True)
+                   cbar_label=f"Δ  ({better})", signed=True,
+                   ci=(ci_d or {}).get(key))
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=DPI, bbox_inches="tight")
     plt.close(fig)
@@ -556,22 +649,34 @@ def main():
     grids_b, per_ep_b = sweep_policy(ckpt_b, strikers, jammers, args.n_runs, args.n_seeds,
                                      BASE_SEED, device, label="baseline")
 
+    # Per-cell CI half-widths: own samples for each policy column, PAIRED per-episode
+    # difference for the Δ column (both policies swept on the same seeds).
+    ci_c = _ci_grids(per_ep_c, strikers, jammers) if SHOW_CI else None
+    ci_b = _ci_grids(per_ep_b, strikers, jammers) if SHOW_CI else None
+    ci_d = _paired_ci_grids(per_ep_c, per_ep_b, strikers, jammers) if SHOW_CI else None
+
     plot_comparison(grids_c, grids_b, strikers, jammers, name_c, name_b, out,
-                    args.n_runs, args.n_seeds)
+                    args.n_runs, args.n_seeds, ci_c, ci_b, ci_d)
 
     rows = compute_stats(per_ep_c, per_ep_b, strikers, jammers)
     plot_pvalue_table(rows, out.with_name(out.stem + "_pvalues.png"))
     write_pvalue_csv(rows, out.with_name(out.stem + "_pvalues.csv"))
 
     # KPI-value CSV (complete, baseline, diff) for the three compared KPIs
+    # (the *_ci columns are the same half-widths printed in the heatmap squares)
     csv = out.with_name(out.stem + "_values.csv")
     with open(csv, "w") as f:
-        f.write("kpi,n_strikers,n_jammers,complete,baseline,difference\n")
+        f.write("kpi,n_strikers,n_jammers,complete,baseline,difference,"
+                "complete_ci,baseline_ci,difference_ci\n")
         for key, *_ in COMPARE_KPIS:
             for si, ns in enumerate(strikers):
                 for ji, nj in enumerate(jammers):
                     c, b = grids_c[key][si, ji], grids_b[key][si, ji]
-                    f.write(f"{key},{ns},{nj},{c:.4f},{b:.4f},{c - b:.4f}\n")
+                    hc = ci_c[key][si, ji] if ci_c else np.nan
+                    hb = ci_b[key][si, ji] if ci_b else np.nan
+                    hd = ci_d[key][si, ji] if ci_d else np.nan
+                    f.write(f"{key},{ns},{nj},{c:.4f},{b:.4f},{c - b:.4f},"
+                            f"{hc:.4f},{hb:.4f},{hd:.4f}\n")
     print(f"saved values CSV -> {csv}")
 
     # stdout summary of significant cells

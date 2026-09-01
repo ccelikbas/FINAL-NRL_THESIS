@@ -469,28 +469,6 @@ def hf_animate_rollout(
         Display the figure window. Defaults to True when ``save_path`` is None
         and False otherwise so headless runs don't block.
     """
-    # --- Pre-compute reward time-series (team-sum per component) ---
-    # Only components with any non-zero value across the rollout are kept,
-    # so deactivated rewards drop out automatically.
-    reward_ts: Dict[str, List[float]] = {}
-    total_ts: List[float] = []
-    for fr in frames:
-        rc = fr.get("reward_components")
-        if rc is None:
-            continue
-        step_total = 0.0
-        for comp_name, comp_tensor in rc.items():
-            val = float(comp_tensor.sum().item())
-            reward_ts.setdefault(comp_name, []).append(val)
-            step_total += val
-        total_ts.append(step_total)
-
-    active_components: Dict[str, List[float]] = {}
-    for name, vals in reward_ts.items():
-        arr = np.asarray(vals, dtype=float)
-        if np.nanmax(np.abs(arr)) > 1e-12:
-            active_components[name] = vals
-
     # --- Pre-compute per-agent margin time-series (kept commented; ---
     #     replaced by the reward subplot below) ---
     # n_agents_total = env.n_agents
@@ -513,17 +491,13 @@ def hf_animate_rollout(
     #             m_angle_ts[k].append(float("nan"))
     # n_margin_steps = len(m_range_ts[0]) if n_agents_total > 0 else 0
 
-    # --- Figure layout ---
-    fig, (ax, ax_marg) = plt.subplots(
-        1, 2, figsize=(22, 9), gridspec_kw={"width_ratios": [1.4, 1]}
-    )
+    # --- Figure layout — world panel only (no reward subplot, no title) ---
+    fig, ax = plt.subplots(figsize=(10, 9))
     ax.set_xlim(0, 1000)
     ax.set_ylim(0, 1000)
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlabel("X (km)")
     ax.set_ylabel("Y (km)")
-    ax.set_title(f"HF Radar | R_unc={env.radar_range_unconstrained:.3f} | "
-                 f"R_obs={env.R_obs:.2f}, R_comm={env.R_comm:.2f}")
 
     empty_xy = np.empty((0, 2), dtype=float)
 
@@ -607,36 +581,8 @@ def hf_animate_rollout(
         ax.plot([], [], color="black", lw=1.4, alpha=0.7)[0]
         for _ in range(max(env.n_agents - 1, 1))
     ]
-    ax.plot([], [], color="black", lw=1.4, alpha=0.7, label="Comm MST (<= R_comm)")
-    ax.plot([], [], color="black", lw=0.9, ls="-.", alpha=0.35, label="R_comm")
-    ax.plot([], [], color="C0", lw=1.0, ls=":", alpha=0.45, label="R_obs")
-    if env.n_jammers > 0:
-        ax.plot([], [], color=_CONE_BASE_RGB, lw=6, alpha=_CONE_ALPHA_NEAR,
-                label=f"Jammer cone ({math.degrees(2*jammer_lobe_half):.0f} deg)")
-    ax.plot([], [], color=NLR_DARKGRAY, lw=2.0, alpha=trail_max_alpha,
-            label=f"Agent trail (last {trail_len} steps)")
-    ax.legend(loc="lower right", fontsize=8, markerscale=0.6,
-              handlelength=1.5, borderpad=0.3, labelspacing=0.3)
-
-    # --- Reward subplot (team sum per component, non-zero only) ---
-    ax_rew = ax_marg  # right-hand axis from the subplot grid
-    ax_rew.set_xlabel("Timestep")
-    ax_rew.set_ylabel("Reward (team sum)")
-    ax_rew.set_ylim(-0.25, 0.25)
-    ax_rew.set_title("Per-Timestep Reward Components")
-
-    n_reward_steps = len(total_ts)
-    if n_reward_steps > 0:
-        timesteps = np.arange(1, n_reward_steps + 1)
-        for comp_name, values in sorted(active_components.items()):
-            ax_rew.plot(timesteps, values, lw=1.5, alpha=0.8, label=comp_name)
-        ax_rew.plot(timesteps, total_ts, lw=2.5, color="black", label="total", zorder=10)
-        ax_rew.axhline(0, color="gray", lw=0.5)
-        ax_rew.set_xlim(1, max(n_reward_steps, 2))
-        ax_rew.legend(loc="best", fontsize=7, ncol=2)
-    ax_rew.grid(True, alpha=0.3)
-
-    time_vline = ax_rew.axvline(x=1, color="red", lw=1.5, ls="--", alpha=0.8)
+    # Legend intentionally omitted — the rollout panel is shown bare.
+    fig.tight_layout()
 
     # --- Margin subplot (kept commented for easy toggling) ---
     # ax_marg.set_xlabel("Timestep")
@@ -691,7 +637,6 @@ def hf_animate_rollout(
             hist.clear()
         for lc in agent_trail_lcs:
             lc.set_segments([])
-        time_vline.set_xdata([1])
         return []
 
     def update(i: int):
@@ -936,14 +881,6 @@ def hf_animate_rollout(
                 line.set_data([x1, x2], [y1, y2])
             else:
                 line.set_data([], [])
-
-        ax.set_xlabel(
-            f"t={i} | Agents: {int(aa.sum().item())}/{env.n_agents} "
-            f"| Targets: {int(ta.sum().item())}/{env.n_targets}"
-        )
-
-        reward_step = min(i, n_reward_steps) if n_reward_steps > 0 else 1
-        time_vline.set_xdata([reward_step])
 
         return []
 

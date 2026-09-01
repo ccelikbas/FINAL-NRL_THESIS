@@ -17,7 +17,10 @@ with ALL policies on the same axes:
                          runs; the window still resets at every curriculum boundary of
                          every run in the group, keeping the transitions a hard step.
                          Runs of different length are averaged over their union, so
-                         the mean spans the longest run.
+                         the mean spans the longest run. Around each mean, the
+                         per-iteration MIN and MAX across that model's runs are drawn
+                         as thin lines with a very light fill between them, smoothed
+                         with their own (smaller) BAND_SMOOTH_WINDOW.
 
 In the eval-rates plot the COLOUR encodes the metric and the LINE STYLE encodes the
 policy (solid = A, dashed = B, dash-dot = C, dotted = D), so the policies sit on one
@@ -161,6 +164,10 @@ POLICIES_S2: list[dict] = [
              label="Comm-FOFE-MAPPO 2",
              model="complete",
              cont=[]),
+    dict(path="runs/FINALV7/baseline_S2_FINAL.pt",
+                 label="MAPPO Baseline v7",
+                 model="baseline",
+                 cont=[]),
     dict(path="runs/FINALV5/baseline_S2_FINAL.pt",
              label="MAPPO Baseline v5",
              model="baseline",
@@ -177,7 +184,7 @@ POLICIES_S2: list[dict] = [
 
 # Running-average window (datapoints); resets at each curriculum section so
 # transitions stay sharp. 1 = raw.                        [CLI: --smooth]
-SMOOTH_WINDOW = 100
+SMOOTH_WINDOW = 200
 
 # Output PNGs (relative paths resolved against the project dir 0_TA_...). One pair
 # per group; the S1 and S2 figures are written to distinct files so neither group
@@ -195,11 +202,26 @@ REWARD_AVG_OUT_S1 = "eval_results/compare_reward_curves_avg_S1.png"
 REWARD_AVG_OUT_S2 = "eval_results/compare_reward_curves_avg_S2.png"
 
 # Smoothing window for the AVERAGED figures only (the per-policy figures keep
-# SMOOTH_WINDOW). Averaging across runs already cancels some noise, but the mean of
-# a small number of runs is still jagged, so this is normally larger than
-# SMOOTH_WINDOW. Like everywhere else it RESETS at every curriculum section, so the
-# transitions stay a hard step.                       [CLI: --avg-smooth]
-AVG_SMOOTH_WINDOW = 50
+# SMOOTH_WINDOW). This is the MEAN curve's window only — the min/max envelope has its
+# own, smaller one (BAND_SMOOTH_WINDOW below). Averaging across runs already cancels
+# some noise, but the mean of a small number of runs is still jagged, so this is
+# normally larger than SMOOTH_WINDOW. Like everywhere else it RESETS at every
+# curriculum section, so the transitions stay a hard step.   [CLI: --avg-smooth]
+AVG_SMOOTH_WINDOW = 300
+
+# MIN/MAX ENVELOPE on the averaged figures: around each model's mean curve, the
+# per-iteration MINIMUM and MAXIMUM across the runs of that model are drawn as thin
+# lines in the same colour, with the area between them lightly shaded. A model with a
+# single run has min = max = mean (no visible band).
+SHOW_MINMAX_BAND = True
+# Smoothing window for the ENVELOPE only, independent of the mean's AVG_SMOOTH_WINDOW.
+# Keep it SMALL: a heavily smoothed envelope stops being a min/max (the extremes get
+# averaged away and the band collapses onto the mean), while a small window only takes
+# the flicker off. 1 = fully raw.                            [CLI: --band-smooth]
+BAND_SMOOTH_WINDOW = 20
+BAND_LINE_WIDTH = 0.9        # thin min/max lines (the mean stays lw=2.4)
+BAND_LINE_ALPHA = 0.55       # opacity of the min/max lines
+BAND_FILL_ALPHA = 0.12       # very light shading between min and max
 
 # Legend label + colour per model on the averaged figures. Keys are the `model`
 # values; a model present in the config but missing here falls back to its own key
@@ -232,6 +254,19 @@ TABLE_SMOOTH_WINDOW = 1
 # convergence table searches for the peak reward only from this point onward, and
 # the figures mark the same point with a subtle vertical guide.
 FINAL_STATE_START_ITER = {"S1": 5000, "S2": 5000}
+
+# Hard right edge of the x-axis per group: the figures of that group are CUT at this
+# iteration (everything beyond it is off-axis). None = show the full history, i.e.
+# up to the longest run. Plot-only — the convergence table still searches the whole
+# series.
+MAX_ITER = {"S1": 30000, "S2": None}
+
+# Per-MODEL data cut on the AVERAGED figures: {group: {model: last_iteration}}. The
+# model's mean AND its min/max envelope are truncated there, so its curve simply ends
+# at that iteration while the other models keep their full length (unlike MAX_ITER,
+# which moves the shared axis). Use it to drop a tail that is no longer backed by all
+# of the model's runs. Plot-only — the convergence table still uses the full series.
+MODEL_MAX_ITER = {"S1": {}, "S2": {"complete": 9000}}
 
 # Figure resolution (dots per inch). Higher = sharper output (larger files). [CLI: --dpi]
 DPI = 600
@@ -402,9 +437,18 @@ def _annotate_final_state_start(ax, n_iter, start_iter, label=None):
     ax.axvline(start, color="black", lw=2.6, ls=":", alpha=1.0, zorder=3)
 
 
-def _decorate_reward_ax(ax, n_iter, final_start_iter, final_start_label, legend_title):
+def _axis_end(n_iter, max_iter):
+    """Right edge of the x-axis: the longest run, cut at `max_iter` when set."""
+    if max_iter and n_iter:
+        return min(int(n_iter), int(max_iter))
+    return int(max_iter) if (max_iter and not n_iter) else n_iter
+
+
+def _decorate_reward_ax(ax, n_iter, final_start_iter, final_start_label, legend_title,
+                        max_iter=None):
     """Axes/labels/limits/annotations/legend shared by BOTH reward figures, so the
     averaged figure is styled EXACTLY like the per-policy one."""
+    n_iter = _axis_end(n_iter, max_iter)
     ax.axhline(0.0, color=NLR_DARKGRAY, lw=0.8, alpha=0.5)
     ax.set_xlabel("Global training iteration ('000)", fontsize=22)
     ax.set_ylabel("Mean episode reward (train)", fontsize=22)
@@ -421,7 +465,8 @@ def _decorate_reward_ax(ax, n_iter, final_start_iter, final_start_label, legend_
               title_fontsize=20)
 
 
-def plot_reward(policies, out, smooth, dpi=DPI, final_start_iter=None, final_start_label=None):
+def plot_reward(policies, out, smooth, dpi=DPI, final_start_iter=None,
+                final_start_label=None, max_iter=None):
     """One (train) reward curve per policy on a shared axis."""
     fig, ax = plt.subplots(figsize=(13, 6))
     n_iter = 0
@@ -435,7 +480,7 @@ def plot_reward(policies, out, smooth, dpi=DPI, final_start_iter=None, final_sta
         ys = _smooth_sectioned(xs, ys, bounds, smooth)
         ax.plot(xs, ys, lw=1.9, color=color, label=label)
 
-    _decorate_reward_ax(ax, n_iter, final_start_iter, final_start_label, "policy")
+    _decorate_reward_ax(ax, n_iter, final_start_iter, final_start_label, "policy", max_iter)
     fig.tight_layout()
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=dpi, bbox_inches="tight")
@@ -467,30 +512,35 @@ def _union_bounds(bounds_list, n_iter):
     return [(f"seg{i}", cuts[i], cuts[i + 1]) for i in range(len(cuts) - 1)]
 
 
-def _mean_over_runs(runs, key):
-    """NaN-aware per-iteration mean of series `key` across `runs`.
+def _stats_over_runs(runs, key):
+    """NaN-aware per-iteration mean / min / max of series `key` across `runs`.
 
-    Runs of DIFFERENT lengths are padded with NaN to the longest and averaged over
-    whatever runs exist at each iteration (union), so the mean spans the longest
+    Runs of DIFFERENT lengths are padded with NaN to the longest and aggregated over
+    whatever runs exist at each iteration (union), so the curves span the longest
     run; `counts` reports how many runs actually contribute at each iteration —
-    past the shortest run's end the mean is backed by fewer runs.
-    Returns (mean, counts) or (None, None) when no run has usable data."""
+    past the shortest run's end the mean (and the min/max envelope) is backed by
+    fewer runs. mean/lo/hi share the same finite mask.
+    Returns (mean, lo, hi, counts) or (None, None, None, None) with no usable data."""
     series = []
     for r in runs:
         v = np.asarray(r["logs"].get(key, []), dtype=float)
         if v.size and np.any(np.isfinite(v)):
             series.append(v)
     if not series:
-        return None, None
+        return None, None, None, None
     n = max(s.size for s in series)
     stack = np.full((len(series), n), np.nan)
     for i, s in enumerate(series):
         stack[i, :s.size] = s
     counts = np.sum(np.isfinite(stack), axis=0)
     mean = np.full(n, np.nan)
-    present = counts > 0                        # masked so nanmean sees no all-NaN column
+    lo = np.full(n, np.nan)
+    hi = np.full(n, np.nan)
+    present = counts > 0                        # masked so nan-reducers see no all-NaN column
     mean[present] = np.nanmean(stack[:, present], axis=0)
-    return mean, counts
+    lo[present] = np.nanmin(stack[:, present], axis=0)
+    hi[present] = np.nanmax(stack[:, present], axis=0)
+    return mean, lo, hi, counts
 
 
 def _group_by_model(entries, tag):
@@ -511,12 +561,17 @@ def _group_by_model(entries, tag):
 
 
 def plot_reward_avg(entries, out, smooth, dpi=DPI, final_start_iter=None,
-                    final_start_label=None, tag=""):
+                    final_start_label=None, tag="", max_iter=None, band_smooth=None,
+                    model_max_iter=None):
     """The reward figure with one MEAN curve per MODEL instead of one per policy.
 
     Runs are averaged RAW (per iteration, across the runs sharing a `model`) and the
-    mean is smoothed afterwards, so smoothing never leaks between runs. Identical
+    mean is smoothed afterwards, so smoothing never leaks between runs. The spread
+    across those runs is shown as a min/max envelope: thin min and max lines in the
+    model colour with a very light fill between them, smoothed with their OWN window
+    (`band_smooth`, normally much smaller than the mean's `smooth`). Identical
     axes/limits/annotations to plot_reward."""
+    band_smooth = BAND_SMOOTH_WINDOW if band_smooth is None else band_smooth
     by_model = _group_by_model(entries, tag)
     if not by_model:
         print(f"  ! [{tag}] no policy has a `model` key — averaged figure skipped.")
@@ -525,10 +580,15 @@ def plot_reward_avg(entries, out, smooth, dpi=DPI, final_start_iter=None,
     fig, ax = plt.subplots(figsize=(13, 6))
     n_iter = 0
     for i, (model, runs) in enumerate(by_model.items()):
-        mean, counts = _mean_over_runs(runs, TRAIN_REWARD_KEY)
+        mean, lo, hi, counts = _stats_over_runs(runs, TRAIN_REWARD_KEY)
         if mean is None:
             print(f"  ! [{tag}] {model}: no '{TRAIN_REWARD_KEY}' in any run — skipped.")
             continue
+        cap = int((model_max_iter or {}).get(model) or 0)
+        if 0 < cap < mean.size:                 # this model's curve ends at `cap`
+            print(f"  [{tag}] {model}: data cut at iteration {cap} "
+                  f"(dropped {mean.size - cap} of {mean.size} iters).")
+            mean, lo, hi, counts = mean[:cap], lo[:cap], hi[:cap], counts[:cap]
         n_iter = max(n_iter, mean.size)
         bounds = _union_bounds([r["bounds"] for r in runs], mean.size)
         xs, ys = _finite_xy(mean)
@@ -537,15 +597,31 @@ def plot_reward_avg(entries, out, smooth, dpi=DPI, final_start_iter=None,
         n_runs = len(runs)
         label = MODEL_LABELS.get(model, model)      # the run count stays out of the legend
         color = MODEL_COLORS.get(model, POLICY_COLORS[i % len(POLICY_COLORS)])
-        ax.plot(xs, ys, lw=2.4, color=color, label=label)
+
+        if SHOW_MINMAX_BAND and n_runs > 1:
+            # mean/lo/hi share a finite mask, so `xs` from the mean fits all three.
+            # The envelope gets its own (smaller) window, so the band keeps the real
+            # spread while the mean is smoothed harder.
+            finite = np.isfinite(mean)
+            ys_lo = _smooth_sectioned(xs, lo[finite], bounds, band_smooth)
+            ys_hi = _smooth_sectioned(xs, hi[finite], bounds, band_smooth)
+            ax.fill_between(xs, ys_lo, ys_hi, color=color, alpha=BAND_FILL_ALPHA,
+                            lw=0, zorder=1.5)
+            ax.plot(xs, ys_lo, lw=BAND_LINE_WIDTH, color=color,
+                    alpha=BAND_LINE_ALPHA, zorder=1.6)
+            ax.plot(xs, ys_hi, lw=BAND_LINE_WIDTH, color=color,
+                    alpha=BAND_LINE_ALPHA, zorder=1.6)
+
+        ax.plot(xs, ys, lw=2.4, color=color, label=label, zorder=2)
 
         full = int(np.sum(counts == n_runs))
         note = "" if full == mean.size else f", all {n_runs} runs only up to iter {full}"
         print(f"  [{tag}] mean {model}: {n_runs} run(s) "
               f"[{', '.join(r['label'] for r in runs)}] → {mean.size} iters"
-              f"{note}, {len(bounds)} section cut(s), smooth={smooth}")
+              f"{note}, {len(bounds)} section cut(s), smooth={smooth}"
+              f"{f', band smooth={band_smooth}' if (SHOW_MINMAX_BAND and n_runs > 1) else ''}")
 
-    _decorate_reward_ax(ax, n_iter, final_start_iter, final_start_label, "model")
+    _decorate_reward_ax(ax, n_iter, final_start_iter, final_start_label, "model", max_iter)
     fig.tight_layout()
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=dpi, bbox_inches="tight")
@@ -553,7 +629,8 @@ def plot_reward_avg(entries, out, smooth, dpi=DPI, final_start_iter=None,
     print(f"saved model-averaged reward comparison -> {out}")
 
 
-def plot_eval_rates(policies, out, smooth, dpi=DPI, title_suffix="", final_start_iter=None, final_start_label=None):
+def plot_eval_rates(policies, out, smooth, dpi=DPI, title_suffix="", final_start_iter=None,
+                    final_start_label=None, max_iter=None):
     """Every eval KPI for every policy: colour = metric, line style = policy."""
     fig, ax = plt.subplots(figsize=(13, 6.5))
     n_iter = 0
@@ -570,6 +647,7 @@ def plot_eval_rates(policies, out, smooth, dpi=DPI, title_suffix="", final_start
             ax.plot(xs, ys, lw=1.6, color=kcolor, ls=style)
             plotted_metrics.add(klabel)
 
+    n_iter = _axis_end(n_iter, max_iter)
     ax.set_xlabel("Global training iteration ('000)", fontsize=22)
     ax.set_ylabel("Rate", fontsize=22)
     ax.xaxis.set_major_formatter(_THOUSANDS_FMT)
@@ -625,7 +703,8 @@ def _policy_model(spec) -> "str | None":
 
 
 def _run_group(specs, reward_out, rates_out, smooth, dpi, tag, title_suffix="",
-               final_start_iter=None, reward_avg_out=None, avg_smooth=None) -> list[dict]:
+               final_start_iter=None, reward_avg_out=None, avg_smooth=None,
+               max_iter=None, band_smooth=None, model_max_iter=None) -> list[dict]:
     """Load + stitch + plot ONE policy group into its own pair of figures, and
     RETURN the per-policy data (label / model / stitched+rebased logs / bounds) so
     the convergence table can be built. An empty group is skipped. `tag` names the
@@ -670,13 +749,17 @@ def _run_group(specs, reward_out, rates_out, smooth, dpi, tag, title_suffix="",
     final_label = None
     if final_start_iter:
         final_label = f"final stage start ({int(final_start_iter / 1000)}k)"
-    plot_reward(policies, _resolve_out(reward_out), smooth, dpi, final_start_iter, final_label)
+    if max_iter:
+        print(f"  [{tag}] x-axis cut at iteration {int(max_iter)} (plot only).")
+    plot_reward(policies, _resolve_out(reward_out), smooth, dpi, final_start_iter,
+                final_label, max_iter)
     plot_eval_rates(policies, _resolve_out(rates_out), smooth, dpi, title_suffix,
-                    final_start_iter, final_label)
+                    final_start_iter, final_label, max_iter)
     if reward_avg_out:
         plot_reward_avg(entries, _resolve_out(reward_avg_out),
                         AVG_SMOOTH_WINDOW if avg_smooth is None else avg_smooth,
-                        dpi, final_start_iter, final_label, tag=tag)
+                        dpi, final_start_iter, final_label, tag=tag, max_iter=max_iter,
+                        band_smooth=band_smooth, model_max_iter=model_max_iter)
     return entries
 
 
@@ -818,8 +901,12 @@ def main():
     ap.add_argument("--reward-avg-out-s1", default=REWARD_AVG_OUT_S1)
     ap.add_argument("--reward-avg-out-s2", default=REWARD_AVG_OUT_S2)
     ap.add_argument("--avg-smooth", type=int, default=AVG_SMOOTH_WINDOW,
-                    help="running-average window for the MODEL-AVERAGED reward figures "
-                         "(1 = raw); resets at each curriculum section")
+                    help="running-average window for the MEAN curve of the MODEL-AVERAGED "
+                         "reward figures (1 = raw); resets at each curriculum section")
+    ap.add_argument("--band-smooth", type=int, default=BAND_SMOOTH_WINDOW,
+                    help="running-average window for the MIN/MAX envelope of those figures "
+                         "(1 = raw); keep it well below --avg-smooth or the band collapses "
+                         "onto the mean")
     ap.add_argument("--table-out", default=TABLE_OUT)
     ap.add_argument("--table-smooth", type=int, default=TABLE_SMOOTH_WINDOW,
                     help="window for the convergence-table peak (1 = raw max reward; "
@@ -842,13 +929,19 @@ def main():
                             title_suffix=" (S1)",
                             final_start_iter=FINAL_STATE_START_ITER["S1"],
                             reward_avg_out=args.reward_avg_out_s1,
-                            avg_smooth=args.avg_smooth)
+                            avg_smooth=args.avg_smooth,
+                            max_iter=MAX_ITER.get("S1"),
+                            band_smooth=args.band_smooth,
+                            model_max_iter=MODEL_MAX_ITER.get("S1"))
     s2_entries = _run_group([dict(s) for s in POLICIES_S2], args.reward_out_s2,
                             args.rates_out_s2, args.smooth, args.dpi, tag="S2",
                             title_suffix=" (S2)",
                             final_start_iter=FINAL_STATE_START_ITER["S2"],
                             reward_avg_out=args.reward_avg_out_s2,
-                            avg_smooth=args.avg_smooth)
+                            avg_smooth=args.avg_smooth,
+                            max_iter=MAX_ITER.get("S2"),
+                            band_smooth=args.band_smooth,
+                            model_max_iter=MODEL_MAX_ITER.get("S2"))
 
     # Convergence-comparison table (Complete vs Baseline, rows S1 & S2).
     write_convergence_table(s1_entries, s2_entries, args.table_smooth,
