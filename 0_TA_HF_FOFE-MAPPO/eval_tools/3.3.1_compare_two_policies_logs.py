@@ -76,6 +76,10 @@ from .evaluate_policy import _resolve_policy_path
 from .plot_reward_components import _finite_xy, _smooth_sectioned
 from .nlr_style import (NLR_PRIMARY, NLR_SECONDARY, NLR_ACCENT, NLR_DARKGRAY,
                         NLR_GRAY, NLR_CYCLE)
+# Shared data drop: this analysis' numbers are also written to
+# eval_results/analysis_data/, so the presentation figures can be (re)built from
+# them without re-reading a single checkpoint. See analysis_data.py.
+from .analysis_data import save_analysis, save_arrays
 
 # ===================================================================
 # CONFIG — edit these (CLI flags / positional args override)
@@ -245,6 +249,13 @@ MODEL_ORDER = ["complete", "baseline"]
 # "baseline" key on the policy dict, else inferred from a label containing
 # "complete"/"baseline".
 TABLE_OUT = "eval_results/convergence_comparison.tex"
+
+# Name of this analysis' data dump: <name>.json holds the convergence numbers and
+# the run metadata, <name>.npz the plotted curves themselves (per policy and per
+# model average). Together they are the input of the presentation figures, so the
+# training curves can be restyled without re-reading any checkpoint.
+#                                                           [CLI: --data-name]
+DATA_NAME = "3.3.1_training_curves"
 # Window for locating the reward PEAK: 1 = RAW reward (the literal "maximum
 # achieved reward"); set to SMOOTH_WINDOW to find the peak on the SMOOTHED curve
 # drawn in the plots (steadier, ignores single-iteration spikes). [CLI: --table-smooth]
@@ -737,7 +748,7 @@ def _run_group(specs, reward_out, rates_out, smooth, dpi, tag, title_suffix="",
     for i, (label, logs, bounds, name) in enumerate(loaded):
         policies.append((label, logs, bounds, POLICY_COLORS[i % len(POLICY_COLORS)]))
         entries.append({"label": label, "model": _policy_model(specs[i]),
-                        "logs": logs, "bounds": bounds,
+                        "logs": logs, "bounds": bounds, "ckpt": name,
                         "final_start_iter": final_start_iter})
         print(f"  {chr(65 + i)}: {label}  [{name}]")
 
@@ -879,6 +890,87 @@ def write_convergence_table(s1_entries: list, s2_entries: list,
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(tex, encoding="utf-8")
     print(f"saved convergence table -> {out_path}")
+    return rows
+
+
+# =====================================================================
+# Data dump (input of the presentation figures)
+# =====================================================================
+
+def export_data(groups, rows, args, data_name: str) -> None:
+    """Write this analysis' numbers AND its curves to eval_results/analysis_data/.
+
+    `groups` is {"S1": entries, "S2": entries} as returned by _run_group (each
+    entry = one policy, already stitched and start_iter-rebased), `rows` the
+    convergence-table rows. The JSON keeps the convergence numbers and all the
+    plotting parameters (smoothing windows, axis cuts, the final-stage start);
+    the companion .npz keeps the RAW (unsmoothed) series — per policy, and the
+    per-model mean / min / max across the runs of that model — under the keys
+    "<group>|<label>|<series>" and "<group>|<model>|<mean|min|max>|reward". Raw
+    is deliberate: smoothing is a plotting choice, so a figure script can rewindow
+    it without a rerun."""
+    arrays: dict = {}
+    groups_meta: dict = {}
+    for tag, entries in groups.items():
+        pol_meta = []
+        for e in entries:
+            label = e["label"]
+            for key in [TRAIN_REWARD_KEY, TRAIN_TIME_KEY] + [k for k, _l, _c in EVAL_RATES]:
+                v = np.asarray(e["logs"].get(key, []), dtype=float)
+                if v.size:
+                    arrays[f"{tag}|{label}|{key}"] = v
+            pol_meta.append({
+                "label": label, "model": e.get("model"), "ckpt": e.get("ckpt"),
+                "n_iters": _series_len(e["logs"]),
+                "bounds": [[str(n), int(s), int(en)] for n, s, en in (e["bounds"] or [])],
+            })
+        # Per-model aggregates: the same mean/min/max the averaged figure draws
+        # (raw, before its own smoothing), so that figure is reproducible offline.
+        for model, runs in _group_by_model(entries, tag).items():
+            mean, lo, hi, counts = _stats_over_runs(runs, TRAIN_REWARD_KEY)
+            if mean is None:
+                continue
+            arrays[f"{tag}|{model}|mean|{TRAIN_REWARD_KEY}"] = mean
+            arrays[f"{tag}|{model}|min|{TRAIN_REWARD_KEY}"] = lo
+            arrays[f"{tag}|{model}|max|{TRAIN_REWARD_KEY}"] = hi
+            arrays[f"{tag}|{model}|n_runs|{TRAIN_REWARD_KEY}"] = counts
+        groups_meta[tag] = {
+            "policies": pol_meta,
+            "models": {m: [r["label"] for r in runs]
+                       for m, runs in _group_by_model(entries, tag).items()},
+            "final_start_iter": FINAL_STATE_START_ITER.get(tag),
+            "max_iter": MAX_ITER.get(tag),
+            "model_max_iter": MODEL_MAX_ITER.get(tag, {}),
+        }
+
+    payload = {
+        "kind": "training_curves",
+        "reward_key": TRAIN_REWARD_KEY,
+        "time_key": TRAIN_TIME_KEY,
+        "eval_rate_keys": [{"key": k, "label": l} for k, l, _c in EVAL_RATES],
+        "model_labels": dict(MODEL_LABELS),
+        "model_colors": dict(MODEL_COLORS),
+        "model_order": list(MODEL_ORDER),
+        "groups": groups_meta,
+        # one row per scenario: the peak-reward iteration, the training hours to
+        # get there and the reward itself, for each model.
+        "convergence": [{"scenario": scen, "complete": comp, "baseline": base}
+                        for scen, comp, base in rows],
+        "arrays_file": f"{data_name}.npz",
+        "arrays_note": "keys: '<group>|<label>|<series>' and "
+                       "'<group>|<model>|<mean|min|max|n_runs>|<reward series>'; "
+                       "values are RAW (unsmoothed) per-iteration series.",
+    }
+    meta = {
+        "smooth_window": int(args.smooth),
+        "avg_smooth_window": int(args.avg_smooth),
+        "band_smooth_window": int(args.band_smooth),
+        "table_smooth_window": int(args.table_smooth),
+        "final_state_start_iter": dict(FINAL_STATE_START_ITER),
+    }
+    save_analysis(data_name, payload, meta=meta, source=Path(__file__).name)
+    if arrays:
+        save_arrays(data_name, arrays)
 
 
 def main():
@@ -911,6 +1003,12 @@ def main():
     ap.add_argument("--table-smooth", type=int, default=TABLE_SMOOTH_WINDOW,
                     help="window for the convergence-table peak (1 = raw max reward; "
                          "SMOOTH_WINDOW = locate the peak on the smoothed curve)")
+    ap.add_argument("--data-name", default=DATA_NAME,
+                    help="name of the analysis-data dump written to "
+                         "eval_results/analysis_data/<name>.json(+.npz) — the input "
+                         "of the presentation figures")
+    ap.add_argument("--no-data", action="store_true",
+                    help="skip writing the analysis-data dump")
     args = ap.parse_args()
 
     # CLI positional paths → an ad-hoc single group, drawn to the S1 outputs
@@ -944,8 +1042,13 @@ def main():
                             model_max_iter=MODEL_MAX_ITER.get("S2"))
 
     # Convergence-comparison table (Complete vs Baseline, rows S1 & S2).
-    write_convergence_table(s1_entries, s2_entries, args.table_smooth,
-                            _resolve_out(args.table_out))
+    rows = write_convergence_table(s1_entries, s2_entries, args.table_smooth,
+                                   _resolve_out(args.table_out))
+
+    # Data dump: the convergence numbers + the raw curves, so the presentation
+    # figures can be rebuilt without re-reading the checkpoints.
+    if not args.no_data:
+        export_data({"S1": s1_entries, "S2": s2_entries}, rows, args, args.data_name)
 
 
 if __name__ == "__main__":

@@ -27,7 +27,11 @@ from matplotlib.patches import Circle, Polygon
 
 from .config import EnvConfig, HFRadarConfig
 from .HF_environment import HFStrikeEA2DEnv
-from .nlr_style import apply_nlr_style, NLR_PRIMARY, NLR_ACCENT, NLR_DARKGRAY
+from .nlr_style import (
+    apply_nlr_style,
+    NLR_PRIMARY, NLR_SECONDARY, NLR_ACCENT,
+    NLR_TERRA_50, NLR_DARKGRAY,
+)
 
 # Re-export unchanged utilities from base visualization
 from .visualization import (
@@ -275,9 +279,13 @@ def _jammer_cone_ring_polygon_km(
 
 # Cone gradient configuration: alpha tapers linearly from `_CONE_ALPHA_NEAR`
 # at the jammer to 0 at the cone tip across `_CONE_N_RINGS` ring segments.
-_CONE_N_RINGS = 16
-_CONE_BASE_RGB = (1.0, 0.85, 0.2)
-_CONE_ALPHA_NEAR = 0.35
+# Coloured NLR light blue so the jamming cone reads as belonging to the
+# (light blue) jammers, against the terra-orange radar coverage.
+# Kept modest: every ring is a distinct blend, and the GIF writer only has a
+# 256-colour palette — a finer gradient starves the agent markers of entries.
+_CONE_N_RINGS = 8
+_CONE_BASE_RGB = mcolors.to_rgb(NLR_SECONDARY)
+_CONE_ALPHA_NEAR = 0.11
 
 
 def _make_cone_gradient_artists(ax) -> list:
@@ -502,10 +510,12 @@ def hf_animate_rollout(
     empty_xy = np.empty((0, 2), dtype=float)
 
     # --- Static artists ---
-    striker_color = NLR_PRIMARY
-    jammer_color = NLR_ACCENT
-    striker_sc = ax.scatter([], [], s=60, marker="^", color=striker_color, label="Strikers")
-    jammer_sc = ax.scatter([], [], s=60, marker="s", color=jammer_color, label="Jammers")
+    # NLR palette: strikers dark blue, jammers light blue (their trails and
+    # the jamming cone follow the same light blue), radars terra orange.
+    striker_color = NLR_PRIMARY      # #004d7d dark blue
+    jammer_color = NLR_SECONDARY     # #19aee9 light blue
+    striker_sc = ax.scatter([], [], s=150, marker="^", color=striker_color, label="Strikers", zorder=6)
+    jammer_sc = ax.scatter([], [], s=130, marker="s", color=jammer_color, label="Jammers", zorder=6)
 
     # Trailing path behind each agent: per-agent fading LineCollection.
     trail_len = 40
@@ -524,30 +534,37 @@ def hf_animate_rollout(
     # they render filled; unknown entities fill in as the team discovers them.
     # (Scatter var names kept for minimal churn; the mask driving them is the
     # belief-based "observed" flag, not the static known flag.)
-    target_known_sc = ax.scatter([], [], s=80, marker="*", label="Targets (observed)", color="#a65e00", zorder=6)
-    target_unknown_sc = ax.scatter(
-        [], [], s=80, marker="*", label="Targets (unobserved)",
-        facecolors="none", edgecolors="#a65e00", linewidths=1.8, zorder=6,
+    # Targets are the mission objective — drawn large, black filled once
+    # observed and red-outlined while still unobserved.
+    target_known_sc = ax.scatter(
+        [], [], s=260, marker="*", label="Targets (observed)",
+        c="black", edgecolors="red", linewidths=1.2, zorder=7,
     )
-    radar_known_sc = ax.scatter([], [], s=80, marker="X", label="Radars (observed)", color="#243c9b", zorder=4)
+    target_unknown_sc = ax.scatter(
+        [], [], s=260, marker="*", label="Targets (unobserved)",
+        facecolors="none", edgecolors="red", linewidths=2.0, zorder=7,
+    )
+    # Radar markers in dark gray so the dark blue reads as "striker" only.
+    radar_known_sc = ax.scatter([], [], s=80, marker="X", label="Radars (observed)", color=NLR_DARKGRAY, zorder=4)
     radar_unknown_sc = ax.scatter(
         [], [], s=80, marker="X", label="Radars (unobserved)",
-        facecolors="none", edgecolors="#243c9b", linewidths=1.8, zorder=4,
+        facecolors="none", edgecolors=NLR_DARKGRAY, linewidths=1.8, zorder=4,
     )
 
     # Dashed circles at R_unconstrained (always shown)
     R_unc_km = env.radar_range_unconstrained * 1000.0
     radar_unc_circles = [
-        ax.add_patch(Circle((0, 0), R_unc_km, fill=False, edgecolor="red",
+        ax.add_patch(Circle((0, 0), R_unc_km, fill=False, edgecolor=NLR_ACCENT,
                             alpha=0.4, lw=1.0, ls="--"))
         for _ in range(env.n_radars)
     ]
 
-    # Filled polygons for effective range (angular coverage)
+    # Filled polygons for effective range (angular coverage) — light terra
+    # orange fill with a terra edge.
     radar_coverage_polys = [
         ax.add_patch(Polygon(
             np.empty((0, 2)), closed=True,
-            fc=(1.0, 0.6, 0.6, 0.25), ec="red", lw=1.2, alpha=0.7,
+            fc=(*mcolors.to_rgb(NLR_TERRA_50), 0.18), ec=NLR_ACCENT, lw=1.2, alpha=0.7,
         ))
         for _ in range(env.n_radars)
     ]
@@ -565,7 +582,7 @@ def hf_animate_rollout(
     ]
     striker_arcs = [
         ax.add_patch(Polygon(np.empty((0, 2)), closed=True,
-                             fc="C2", alpha=0.18, ec="C2"))
+                             fc=striker_color, alpha=0.18, ec=striker_color))
         for _ in range(env.n_strikers)
     ]
     # Directional-jammer cone wedges (one per jammer), rendered as a

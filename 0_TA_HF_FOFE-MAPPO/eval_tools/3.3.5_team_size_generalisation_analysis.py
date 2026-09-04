@@ -82,6 +82,10 @@ from .nlr_style import (
     NLR_DARKBLUE, NLR_LIGHTBLUE, NLR_LIGHTBLUE_20, NLR_LIGHTBLUE_50,
     NLR_TERRA, NLR_TERRA_20, NLR_TERRA_50, NLR_DARKGRAY,
 )
+# Shared data drop: this sweep's grids are also written to
+# eval_results/analysis_data/, so the presentation figures can be (re)built from
+# them without re-running the sweep. See analysis_data.py.
+from .analysis_data import save_analysis
 
 # NLR house-style colormaps.
 #   sequential  — white → light blue → dark blue  (KPI magnitude)
@@ -126,6 +130,11 @@ TRAIN_S = [2]
 TRAIN_J = [2, 3, 4]
 
 OUT_PATH = "escort_analysis/team_size_generalisation.png"
+
+# Name of this analysis' data dump (eval_results/analysis_data/<name>.json), the
+# input of the presentation figures: every heatmap grid (per policy, per KPI),
+# its CI half-widths and the per-cell paired p-values.       [CLI: --data-name]
+DATA_NAME = "3.3.5_team_size_generalisation"
 
 # Figure resolution (dots per inch). Higher = sharper output (larger files).
 DPI = 600
@@ -583,6 +592,57 @@ def write_pvalue_csv(rows, out):
     print(f"saved p-value CSV   -> {out}")
 
 
+def _world_meta(strikers, jammers, n_runs, n_seeds):
+    """The swept world + axes, so a figure script can label and caption itself."""
+    return {"scenario": SCENARIO, "strikers": list(strikers), "jammers": list(jammers),
+            "n_runs": int(n_runs), "n_seeds": int(n_seeds),
+            "n_episodes_per_cell": int(n_runs) * int(n_seeds),
+            "base_seed": int(BASE_SEED),
+            "known_radars": KNOWN_RADARS, "unknown_radars": UNKNOWN_RADARS,
+            "known_targets": KNOWN_TARGETS, "unknown_targets": UNKNOWN_TARGETS,
+            "radar_kill_probability": KILL, "frag_radius": FRAG_RADIUS,
+            "use_fofe": USE_FOFE, "communicate": COMMUNICATE,
+            "train_strikers": list(TRAIN_S), "train_jammers": list(TRAIN_J),
+            "ci_z": CI_Z, "ci_label": CI_LABEL}
+
+
+def export_data(data_name, strikers, jammers, n_runs, n_seeds, name_c, grids_c,
+                ci_c=None, name_b=None, grids_b=None, ci_b=None, ci_d=None,
+                rows=None) -> None:
+    """Write the swept grids to eval_results/analysis_data/.
+
+    Every grid is a (len(strikers), len(jammers)) matrix — rows = striker counts,
+    columns = jammer counts, in the order given by "strikers"/"jammers" — holding
+    the cell MEAN of that KPI; "*_ci" holds the matching CI half-widths (paired
+    for the difference), and "pvalues" the per-cell one-sided Wilcoxon table. In
+    single-policy mode only the complete policy's block is written."""
+    def _grids(g):
+        return {k: np.asarray(v, dtype=float) for k, v in (g or {}).items()}
+
+    payload = {
+        "kind": "team_size_generalisation",
+        "axes": {"strikers": list(strikers), "jammers": list(jammers)},
+        "kpi_keys": list(KPI_KEYS),
+        "compare_kpis": [{"key": k, "title": t, "direction": d}
+                         for k, t, _c, d in COMPARE_KPIS],
+        "policies": {"complete": name_c, "baseline": name_b},
+        "grids": {"complete": _grids(grids_c),
+                  **({"baseline": _grids(grids_b)} if grids_b else {})},
+        "ci": {**({"complete": _grids(ci_c)} if ci_c else {}),
+               **({"baseline": _grids(ci_b)} if ci_b else {}),
+               **({"difference": _grids(ci_d)} if ci_d else {})},
+        # per composition: p-value, n pairs and the two medians, per compared KPI
+        "pvalues": [{"composition": r["composition"],
+                     "n_strikers": r["n_strikers"], "n_jammers": r["n_jammers"],
+                     **{k: {"pvalue": r[k][0], "n_pairs": r[k][1],
+                            "median_complete": r[k][2], "median_baseline": r[k][3]}
+                        for k, *_ in COMPARE_KPIS}}
+                    for r in (rows or [])],
+    }
+    save_analysis(data_name, payload, meta=_world_meta(strikers, jammers, n_runs, n_seeds),
+                  source=Path(__file__).name)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -603,6 +663,12 @@ def main():
     ap.add_argument("--unknown_targets", default=None,
                     help="count override: 'n' fixed, or 'lo,hi' to randomise UNKNOWN targets per episode")
     ap.add_argument("--out", default=OUT_PATH)
+    ap.add_argument("--data-name", default=DATA_NAME,
+                    help="name of the analysis-data dump written to "
+                         "eval_results/analysis_data/<name>.json — the input of the "
+                         "presentation figures")
+    ap.add_argument("--no-data", action="store_true",
+                    help="skip writing the analysis-data dump")
     args = ap.parse_args()
     strikers = [int(x) for x in args.strikers.split(",")] if args.strikers else STRIKERS
     jammers = [int(x) for x in args.jammers.split(",")] if args.jammers else JAMMERS
@@ -632,6 +698,10 @@ def main():
     # ---------- single-policy mode ----------
     if not args.baseline:
         plot_single_dashboard(grids_c, strikers, jammers, name_c, out, args.n_runs, args.n_seeds)
+        if not args.no_data:
+            export_data(args.data_name, strikers, jammers, args.n_runs, args.n_seeds,
+                        name_c, grids_c, ci_c=_ci_grids(per_ep_c, strikers, jammers)
+                        if SHOW_CI else None)
         csv = out.with_suffix(".csv")
         with open(csv, "w") as f:
             f.write("kpi,n_strikers,n_jammers,value\n")
@@ -661,6 +731,12 @@ def main():
     rows = compute_stats(per_ep_c, per_ep_b, strikers, jammers)
     plot_pvalue_table(rows, out.with_name(out.stem + "_pvalues.png"))
     write_pvalue_csv(rows, out.with_name(out.stem + "_pvalues.csv"))
+
+    # Data dump: every grid + CI + p-value, so the presentation figures can be
+    # rebuilt without re-running the sweep.
+    if not args.no_data:
+        export_data(args.data_name, strikers, jammers, args.n_runs, args.n_seeds,
+                    name_c, grids_c, ci_c, name_b, grids_b, ci_b, ci_d, rows)
 
     # KPI-value CSV (complete, baseline, diff) for the three compared KPIs
     # (the *_ci columns are the same half-widths printed in the heatmap squares)

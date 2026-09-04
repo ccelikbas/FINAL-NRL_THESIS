@@ -86,6 +86,10 @@ from .evaluate_policy import (
 from .run_curriculum import CurriculumSection
 # NLR house palette (auto-applied to matplotlib on import).
 from .nlr_style import NLR_PRIMARY, NLR_ACCENT, NLR_SECONDARY, NLR_GRAY, NLR_DARKGRAY
+# Shared data drop: this analysis' numbers are also written to
+# eval_results/analysis_data/, so the presentation figures can be (re)built from
+# them without re-running any rollouts. See analysis_data.py.
+from .analysis_data import save_analysis, policy_record, scenario_record
 
 # =====================================================================
 #  >>>  TEST CONFIG  (how many runs, seeding, significance)  <<<
@@ -210,6 +214,10 @@ OUT_PATH = "eval_results/ablation_study.tex"
 DASHBOARD_OUT = "eval_results/ablation_study_ci.png"
 CI_LEVEL = 0.95
 DPI = 200
+
+# Name of this analysis' data dump (eval_results/analysis_data/<name>.json), the
+# input of the presentation figures.                        [CLI: --data_name]
+DATA_NAME = "3.3.3_ablation_study"
 
 # =====================================================================
 
@@ -662,6 +670,61 @@ def plot_dashboard(scn, main, comparisons, samples, pmap, dzmap, ci_level, alpha
 #  Config banner
 # =====================================================================
 
+def export_data(scn, main, comparisons, summary, samples, pmap, dzmap, args,
+                data_name: str) -> None:
+    """Write everything this analysis computed to eval_results/analysis_data/.
+
+    Per policy and KPI: the DISPLAYED value (own-successes mean for the
+    success-conditioned KPIs, marginal mean otherwise) with its CI, and for every
+    comparison the paired p-value, d_z and the oriented difference CI vs the main
+    policy — i.e. exactly the ablation table plus the dashboard's intervals."""
+    policies = [main] + list(comparisons)
+    per_policy = {}
+    for pol in policies:
+        entry = {}
+        for key in TABLE_KPIS:
+            mu, lo, hi = _policy_mean_ci(scn, pol, key, samples, args.ci)
+            cell = {"value": _value(scn, pol, key, summary, samples),
+                    "mean": mu, "ci": [lo, hi]}
+            if pol is not main:
+                md, dlo, dhi = _pairwise_diff_ci(scn, key, main, pol, samples, args.ci)
+                cell.update({"pvalue": pmap[key][pol.name],
+                             "dz": dzmap[key][pol.name],
+                             "mean_diff_oriented": md,
+                             "ci_diff_oriented": [dlo, dhi]})
+            entry[key] = cell
+        entry["success_n"] = _own_success_n(scn, pol, samples)
+        per_policy[pol.name] = entry
+
+    payload = {
+        "kind": "ablation_study",
+        "main": main.name,
+        "comparison_order": [c.name for c in comparisons],
+        "kpi_order": list(TABLE_KPIS),
+        "kpis": {k: {"label": _KPI_BY_KEY[k].label,
+                     "row_label": ROW_LABELS.get(k, _KPI_BY_KEY[k].label),
+                     "unit": _KPI_BY_KEY[k].unit,
+                     "direction": _KPI_BY_KEY[k].direction,
+                     "fmt": _KPI_BY_KEY[k].fmt,
+                     "test": _test_for(k),
+                     "success_conditioned": k in SUCCESS_CONDITIONED_KPIS}
+                 for k in TABLE_KPIS},
+        "scenario": scenario_record(scn),
+        # results[policy][kpi] = {value, mean, ci, and vs-main pvalue/dz/diff CI}
+        "results": per_policy,
+    }
+    meta = {
+        "n_episodes": int(args.n_episodes),
+        "chunk": int(args.chunk),
+        "base_seed": int(args.seed),
+        "alpha": float(args.alpha),
+        "ci_level": float(args.ci),
+        "p_adjust": args.p_adjust,
+        "policies": {p.name: policy_record(p) for p in policies},
+    }
+    save_analysis(data_name, payload, meta=meta, source=Path(__file__).name)
+
+
 def _print_config(main, comparison, scn, n_episodes, base_seed, alpha, p_adjust) -> None:
     print("─" * 78)
     print("  ABLATION STUDY — PAIRED TESTS (common random numbers)")
@@ -712,6 +775,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--ci", type=float, default=CI_LEVEL,
                    help=f"Confidence level for the dashboard intervals (default: {CI_LEVEL}).")
     p.add_argument("--no_dashboard", action="store_true", help="Skip the CI dashboard.")
+    p.add_argument("--data_name", type=str, default=DATA_NAME,
+                   help="Name of the analysis-data dump written to "
+                        "eval_results/analysis_data/<name>.json (the input of the "
+                        "presentation figures).")
+    p.add_argument("--no_data", action="store_true",
+                   help="Skip writing the analysis-data dump.")
     return p
 
 
@@ -749,6 +818,11 @@ def main() -> None:
               f"over jointly-successful episodes. Successful episodes / {args.n_episodes}:")
         for pol in [MAIN_POLICY] + COMPARISON_POLICIES:
             print(f"         {pol.name:<10}: {_own_success_n(scn, pol, samples)}")
+
+    # ── data dump (rebuild any figure from this, without new rollouts) ──
+    if not args.no_data:
+        export_data(scn, MAIN_POLICY, COMPARISON_POLICIES, summary, samples,
+                    pmap, dzmap, args, args.data_name)
 
     print_console_table(scn, MAIN_POLICY, COMPARISON_POLICIES, summary, samples,
                         pmap, dzmap, args.alpha)

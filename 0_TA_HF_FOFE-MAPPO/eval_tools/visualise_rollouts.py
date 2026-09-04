@@ -72,7 +72,7 @@ COMMUNICATE: bool | None = False
 FINAL_CONFIG = CurriculumSection(
     name="final",
     n_iters=1,                       # unused here
-    n_strikers=2, n_jammers=4,  # (lo, hi) → DR
+    n_strikers=2, n_jammers=2,  # (lo, hi) → DR
     n_known_targets=2, n_unknown_targets=0,
     n_known_radars=6, n_unknown_radars=0,
     radar_kill_probability=0.25,

@@ -1,0 +1,417 @@
+{
+  "name": "3.3.2_mission_performance",
+  "source": "3.3.2_mission_performance_analysis.py",
+  "saved_at": "2026-09-04T11:19:54",
+  "meta": {
+    "n_episodes": 1000,
+    "chunk": 500,
+    "base_seed": 42,
+    "seed_stride": 1000000,
+    "alpha": 0.05,
+    "ci_level": 0.95,
+    "policies": {
+      "S1": {
+        "main": {
+          "name": "Complete",
+          "policy_file": "runs/FINALV2/complete_stage7of8_DR_j2-4_k0_25.pt",
+          "communicate": true
+        },
+        "base": {
+          "name": "Baseline",
+          "policy_file": "runs/FINALV2/Final_Baseline_Cont_4.pt",
+          "communicate": false
+        }
+      },
+      "S2": {
+        "main": {
+          "name": "Complete",
+          "policy_file": "runs/FINALV5/complete_S2_BEST.pt",
+          "communicate": true
+        },
+        "base": {
+          "name": "Baseline",
+          "policy_file": "runs/FINALV2/S2_Baseline_stage9of9_S2_DR_j2-4_k0_25_FINAL.pt",
+          "communicate": false
+        }
+      }
+    }
+  },
+  "data": {
+    "kind": "mission_performance",
+    "labels": {
+      "main": "Complete",
+      "base": "Baseline",
+      "main_display": "Comm-FOFE-MAPPO",
+      "base_display": "MAPPO Baseline"
+    },
+    "kpi_order": [
+      "reward",
+      "targets",
+      "survival",
+      "duration",
+      "fragmentation"
+    ],
+    "kpis": {
+      "reward": {
+        "label": "Episode reward",
+        "row_label": "Reward",
+        "unit": "reward",
+        "direction": "higher",
+        "fmt": "{:.2f}",
+        "test": "t",
+        "success_conditioned": false
+      },
+      "targets": {
+        "label": "Targets destroyed",
+        "row_label": "Targets destroyed",
+        "unit": "rate",
+        "direction": "higher",
+        "fmt": "{:.3f}",
+        "test": "wilcoxon",
+        "success_conditioned": false
+      },
+      "survival": {
+        "label": "Survival",
+        "row_label": "Survival",
+        "unit": "rate",
+        "direction": "higher",
+        "fmt": "{:.3f}",
+        "test": "t",
+        "success_conditioned": false
+      },
+      "duration": {
+        "label": "Duration",
+        "row_label": "Duration",
+        "unit": "steps",
+        "direction": "lower",
+        "fmt": "{:.1f}",
+        "test": "wilcoxon",
+        "success_conditioned": true
+      },
+      "fragmentation": {
+        "label": "Coalition frag.",
+        "row_label": "Fragmentation",
+        "unit": "index",
+        "direction": "two-sided",
+        "fmt": "{:.3f}",
+        "test": "wilcoxon",
+        "success_conditioned": false
+      }
+    },
+    "scenario_order": [
+      "S1",
+      "S2"
+    ],
+    "scenarios": {
+      "S1": {
+        "name": "S1",
+        "n_strikers": 2,
+        "n_jammers": 4,
+        "n_known_targets": [
+          2,
+          4
+        ],
+        "n_unknown_targets": 0,
+        "n_known_radars": [
+          4,
+          6
+        ],
+        "n_unknown_radars": 0,
+        "radar_kill_probability": 0.25,
+        "scenario": "S2"
+      },
+      "S2": {
+        "name": "S2",
+        "n_strikers": 2,
+        "n_jammers": [
+          2,
+          4
+        ],
+        "n_known_targets": [
+          1,
+          2
+        ],
+        "n_unknown_targets": [
+          1,
+          2
+        ],
+        "n_known_radars": [
+          3,
+          4
+        ],
+        "n_unknown_radars": [
+          1,
+          2
+        ],
+        "radar_kill_probability": 0.25,
+        "scenario": "S2"
+      }
+    },
+    "results": {
+      "reward": {
+        "S1": {
+          "n": 1000,
+          "alternative": "greater",
+          "test": "t",
+          "mean_main": 0.5932371282577514,
+          "mean_base": -15.38925221824646,
+          "mean_diff": 15.982489346504211,
+          "mean_diff_oriented": 15.982489346504211,
+          "ci_main": [
+            0.08661469061610749,
+            1.0998595658993953
+          ],
+          "ci_base": [
+            -16.129559471690012,
+            -14.648944964802908
+          ],
+          "ci_diff_oriented": [
+            15.158055617405871,
+            16.80692307560255
+          ],
+          "statistic": 38.04199220605614,
+          "pvalue": 8.841660021775412e-197,
+          "dz": 1.2029934210151096,
+          "reason": null
+        },
+        "S2": {
+          "n": 1000,
+          "alternative": "greater",
+          "test": "t",
+          "mean_main": -4.365208128452301,
+          "mean_base": -11.888801959037782,
+          "mean_diff": 7.5235938305854795,
+          "mean_diff_oriented": 7.5235938305854795,
+          "ci_main": [
+            -5.027017987593412,
+            -3.7033982693111898
+          ],
+          "ci_base": [
+            -12.67909460248418,
+            -11.098509315591382
+          ],
+          "ci_diff_oriented": [
+            6.652153048385461,
+            8.395034612785498
+          ],
+          "statistic": 16.941897157042874,
+          "pvalue": 4.3408960255847795e-57,
+          "dz": 0.5357498290058686,
+          "reason": null
+        }
+      },
+      "targets": {
+        "S1": {
+          "n": 1000,
+          "alternative": "greater",
+          "test": "wilcoxon",
+          "mean_main": 0.9725000002682209,
+          "mean_base": 0.7205000014305115,
+          "mean_diff": 0.2519999988377094,
+          "mean_diff_oriented": 0.2519999988377094,
+          "ci_main": [
+            0.9656106668871985,
+            0.9793893336492433
+          ],
+          "ci_base": [
+            0.6975813112344457,
+            0.7434186916265774
+          ],
+          "ci_diff_oriented": [
+            0.22941737969144285,
+            0.27458261798397593
+          ],
+          "statistic": 88071.0,
+          "pvalue": 4.72570899886191e-66,
+          "dz": 0.6924697533215151,
+          "reason": null
+        },
+        "S2": {
+          "n": 1000,
+          "alternative": "greater",
+          "test": "wilcoxon",
+          "mean_main": 0.8674166675806045,
+          "mean_base": 0.6680000035464764,
+          "mean_diff": 0.1994166640341282,
+          "mean_diff_oriented": 0.1994166640341282,
+          "ci_main": [
+            0.8492097623106963,
+            0.8856235728505127
+          ],
+          "ci_base": [
+            0.6455968962086421,
+            0.6904031108843106
+          ],
+          "ci_diff_oriented": [
+            0.17363957957538284,
+            0.22519374849287355
+          ],
+          "statistic": 114648.5,
+          "pvalue": 3.1857287036585046e-39,
+          "dz": 0.48006741872411285,
+          "reason": null
+        }
+      },
+      "survival": {
+        "S1": {
+          "n": 1000,
+          "alternative": "greater",
+          "test": "t",
+          "mean_main": 0.8735,
+          "mean_base": 0.5151666655689477,
+          "mean_diff": 0.3583333344310522,
+          "mean_diff_oriented": 0.3583333344310522,
+          "ci_main": [
+            0.8562690518153778,
+            0.8907309481846223
+          ],
+          "ci_base": [
+            0.4867894182550974,
+            0.5435439128827981
+          ],
+          "ci_diff_oriented": [
+            0.3292834088815665,
+            0.3873832599805379
+          ],
+          "statistic": 24.205650987380924,
+          "pvalue": 1.572332583777267e-102,
+          "dz": 0.7654498936722738,
+          "reason": null
+        },
+        "S2": {
+          "n": 1000,
+          "alternative": "greater",
+          "test": "t",
+          "mean_main": 0.7660333327203989,
+          "mean_base": 0.40963333401083946,
+          "mean_diff": 0.35639999870955946,
+          "mean_diff_oriented": 0.35639999870955946,
+          "ci_main": [
+            0.7424079956080102,
+            0.7896586698327875
+          ],
+          "ci_base": [
+            0.3809771455273093,
+            0.4382895224943696
+          ],
+          "ci_diff_oriented": [
+            0.32369557566657253,
+            0.3891044217525464
+          ],
+          "statistic": 21.38482899687323,
+          "pvalue": 3.882701027827476e-84,
+          "dz": 0.676247670033332,
+          "reason": null
+        }
+      },
+      "duration": {
+        "S1": {
+          "n": 563,
+          "alternative": "less",
+          "test": "wilcoxon",
+          "mean_main": 42.12788632326821,
+          "mean_base": 56.33392539964476,
+          "mean_diff": -14.206039076376554,
+          "mean_diff_oriented": 14.206039076376554,
+          "ci_main": [
+            41.4285568534662,
+            42.827215793070216
+          ],
+          "ci_base": [
+            55.21635735586946,
+            57.45149344342006
+          ],
+          "ci_diff_oriented": [
+            13.242248211746057,
+            15.16982994100705
+          ],
+          "statistic": 2076.0,
+          "pvalue": 8.223676717332494e-84,
+          "dz": 1.22017014648779,
+          "reason": null
+        },
+        "S2": {
+          "n": 417,
+          "alternative": "less",
+          "test": "wilcoxon",
+          "mean_main": 46.6810551558753,
+          "mean_base": 48.592326139088726,
+          "mean_diff": -1.9112709832134294,
+          "mean_diff_oriented": 1.9112709832134294,
+          "ci_main": [
+            45.34488139132152,
+            48.017228920429076
+          ],
+          "ci_base": [
+            47.22315232057034,
+            49.96149995760711
+          ],
+          "ci_diff_oriented": [
+            1.1542942830917788,
+            2.66824768333508
+          ],
+          "statistic": 13917.5,
+          "pvalue": 5.097887705531306e-13,
+          "dz": 0.24304415862667966,
+          "reason": null
+        }
+      },
+      "fragmentation": {
+        "S1": {
+          "n": 1000,
+          "alternative": "two-sided",
+          "test": "wilcoxon",
+          "mean_main": 0.23677291262801736,
+          "mean_base": 0.001604541417211294,
+          "mean_diff": 0.23516837121080608,
+          "mean_diff_oriented": 0.23516837121080608,
+          "ci_main": [
+            0.2274411864009753,
+            0.24610463885505943
+          ],
+          "ci_base": [
+            0.0006760479581131272,
+            0.0025330348763094607
+          ],
+          "ci_diff_oriented": [
+            0.2258260735919121,
+            0.24451066882970007
+          ],
+          "statistic": 4.0,
+          "pvalue": 3.1303728784542053e-133,
+          "dz": 1.5620674852865448,
+          "reason": null
+        },
+        "S2": {
+          "n": 1000,
+          "alternative": "two-sided",
+          "test": "wilcoxon",
+          "mean_main": 0.002247881469782442,
+          "mean_base": 0.006207829142455012,
+          "mean_diff": -0.00395994767267257,
+          "mean_diff_oriented": -0.00395994767267257,
+          "ci_main": [
+            0.0012091330267121705,
+            0.0032866299128527132
+          ],
+          "ci_base": [
+            0.004303236587065456,
+            0.008112421697844568
+          ],
+          "ci_diff_oriented": [
+            -0.00593218679602248,
+            -0.0019877085493226593
+          ],
+          "statistic": 1494.5,
+          "pvalue": 2.371493376287764e-05,
+          "dz": -0.12459610250894608,
+          "reason": null
+        }
+      }
+    },
+    "joint_success_n": {
+      "S1": 563,
+      "S2": 417
+    }
+  }
+}

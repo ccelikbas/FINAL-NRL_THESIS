@@ -1,0 +1,331 @@
+{
+  "name": "3.3.3_ablation_study",
+  "source": "3.3.3_ablation_study_analysis.py",
+  "saved_at": "2026-09-04T11:22:52",
+  "meta": {
+    "n_episodes": 1000,
+    "chunk": 500,
+    "base_seed": 42,
+    "alpha": 0.05,
+    "ci_level": 0.95,
+    "p_adjust": "none",
+    "policies": {
+      "Comm-FOFE-MAPPO": {
+        "name": "Comm-FOFE-MAPPO",
+        "policy_file": "runs/FINALV2/complete_stage7of8_DR_j2-4_k0_25.pt",
+        "communicate": true
+      },
+      "MAPPO Baseline": {
+        "name": "MAPPO Baseline",
+        "policy_file": "runs/FINALV2/Final_Baseline_Cont_4.pt",
+        "communicate": false
+      },
+      "No-Com": {
+        "name": "No-Com",
+        "policy_file": "runs/FINALV6/NO_COMM.pt",
+        "communicate": false
+      },
+      "No-FOFE": {
+        "name": "No-FOFE",
+        "policy_file": "runs/FINALV6/NO_FOFE.pt",
+        "communicate": true
+      }
+    }
+  },
+  "data": {
+    "kind": "ablation_study",
+    "main": "Comm-FOFE-MAPPO",
+    "comparison_order": [
+      "MAPPO Baseline",
+      "No-Com",
+      "No-FOFE"
+    ],
+    "kpi_order": [
+      "targets",
+      "survival",
+      "duration",
+      "fragmentation"
+    ],
+    "kpis": {
+      "targets": {
+        "label": "Targets destroyed",
+        "row_label": "Targets destroyed",
+        "unit": "rate",
+        "direction": "higher",
+        "fmt": "{:.3f}",
+        "test": "wilcoxon",
+        "success_conditioned": false
+      },
+      "survival": {
+        "label": "Survival",
+        "row_label": "Survival",
+        "unit": "rate",
+        "direction": "higher",
+        "fmt": "{:.3f}",
+        "test": "t",
+        "success_conditioned": false
+      },
+      "duration": {
+        "label": "Duration",
+        "row_label": "Duration",
+        "unit": "steps",
+        "direction": "lower",
+        "fmt": "{:.1f}",
+        "test": "wilcoxon",
+        "success_conditioned": true
+      },
+      "fragmentation": {
+        "label": "Coalition frag.",
+        "row_label": "Fragmentation",
+        "unit": "index",
+        "direction": "two-sided",
+        "fmt": "{:.3f}",
+        "test": "wilcoxon",
+        "success_conditioned": false
+      }
+    },
+    "scenario": {
+      "name": "S1",
+      "n_strikers": 2,
+      "n_jammers": 4,
+      "n_known_targets": [
+        2,
+        4
+      ],
+      "n_unknown_targets": 0,
+      "n_known_radars": [
+        4,
+        6
+      ],
+      "n_unknown_radars": 0,
+      "radar_kill_probability": 0.25,
+      "scenario": "S2"
+    },
+    "results": {
+      "Comm-FOFE-MAPPO": {
+        "targets": {
+          "value": 0.9725000002682209,
+          "mean": 0.9725000002682209,
+          "ci": [
+            0.9656106668871985,
+            0.9793893336492433
+          ]
+        },
+        "survival": {
+          "value": 0.8735,
+          "mean": 0.8735,
+          "ci": [
+            0.8562690518153778,
+            0.8907309481846223
+          ]
+        },
+        "duration": {
+          "value": 44.31330472103004,
+          "mean": 44.31330472103004,
+          "ci": [
+            43.66860494273054,
+            44.95800449932955
+          ]
+        },
+        "fragmentation": {
+          "value": 0.23677291262801736,
+          "mean": 0.23677291262801736,
+          "ci": [
+            0.2274411864009753,
+            0.24610463885505943
+          ]
+        },
+        "success_n": 932
+      },
+      "MAPPO Baseline": {
+        "targets": {
+          "value": 0.7205000014305115,
+          "mean": 0.7205000014305115,
+          "ci": [
+            0.6975813112344457,
+            0.7434186916265774
+          ],
+          "pvalue": 4.72570899886191e-66,
+          "dz": 0.6924697533215151,
+          "mean_diff_oriented": 0.2519999988377094,
+          "ci_diff_oriented": [
+            0.22941737969144285,
+            0.27458261798397593
+          ]
+        },
+        "survival": {
+          "value": 0.5151666655689477,
+          "mean": 0.5151666655689477,
+          "ci": [
+            0.4867894182550974,
+            0.5435439128827981
+          ],
+          "pvalue": 1.572332583777267e-102,
+          "dz": 0.7654498936722738,
+          "mean_diff_oriented": 0.3583333344310522,
+          "ci_diff_oriented": [
+            0.3292834088815665,
+            0.3873832599805379
+          ]
+        },
+        "duration": {
+          "value": 56.588235294117645,
+          "mean": 56.588235294117645,
+          "ci": [
+            55.484754855280094,
+            57.691715732955196
+          ],
+          "pvalue": 8.223676717332494e-84,
+          "dz": 1.22017014648779,
+          "mean_diff_oriented": 14.206039076376554,
+          "ci_diff_oriented": [
+            13.242248211746057,
+            15.16982994100705
+          ]
+        },
+        "fragmentation": {
+          "value": 0.001604541417211294,
+          "mean": 0.001604541417211294,
+          "ci": [
+            0.0006760479581131272,
+            0.0025330348763094607
+          ],
+          "pvalue": 3.1303728784542053e-133,
+          "dz": 1.5620674852865448,
+          "mean_diff_oriented": 0.23516837121080608,
+          "ci_diff_oriented": [
+            0.2258260735919121,
+            0.24451066882970007
+          ]
+        },
+        "success_n": 578
+      },
+      "No-Com": {
+        "targets": {
+          "value": 0.9683333336114883,
+          "mean": 0.9683333336114883,
+          "ci": [
+            0.9606391264075084,
+            0.9760275408154683
+          ],
+          "pvalue": 0.2502980658272389,
+          "dz": 0.02935898445704814,
+          "mean_diff_oriented": 0.004166666656732559,
+          "ci_diff_oriented": [
+            -0.004640217993359281,
+            0.012973551306824399
+          ]
+        },
+        "survival": {
+          "value": 0.8516666666716337,
+          "mean": 0.8516666666716337,
+          "ci": [
+            0.8336668587669355,
+            0.869666474576332
+          ],
+          "pvalue": 0.011718401054883634,
+          "dz": 0.07177494811420766,
+          "mean_diff_oriented": 0.02183333332836628,
+          "ci_diff_oriented": [
+            0.002956821790591646,
+            0.04070984486614091
+          ]
+        },
+        "duration": {
+          "value": 44.095032397408204,
+          "mean": 44.095032397408204,
+          "ci": [
+            43.45951709240934,
+            44.730547702407065
+          ],
+          "pvalue": 0.9715115088491723,
+          "dz": -0.022221499163401683,
+          "mean_diff_oriented": -0.1823329558323896,
+          "ci_diff_oriented": [
+            -0.7242788521870577,
+            0.35961294052227843
+          ]
+        },
+        "fragmentation": {
+          "value": 0.2321111048250459,
+          "mean": 0.2321111048250459,
+          "ci": [
+            0.22274975706356956,
+            0.24147245258652225
+          ],
+          "pvalue": 0.05719027062022946,
+          "dz": 0.04100152640023306,
+          "mean_diff_oriented": 0.004661807802971453,
+          "ci_diff_oriented": [
+            -0.0023937104455763894,
+            0.011717326051519296
+          ]
+        },
+        "success_n": 926
+      },
+      "No-FOFE": {
+        "targets": {
+          "value": 0.44483333522081375,
+          "mean": 0.44483333522081375,
+          "ci": [
+            0.41868753389551683,
+            0.4709791365461107
+          ],
+          "pvalue": 5.0182885544929556e-118,
+          "dz": 1.2664817422470929,
+          "mean_diff_oriented": 0.5276666650474071,
+          "ci_diff_oriented": [
+            0.5018122149350869,
+            0.5535211151597274
+          ]
+        },
+        "survival": {
+          "value": 0.25999999916553496,
+          "mean": 0.25999999916553496,
+          "ci": [
+            0.23453895917983023,
+            0.2854610391512397
+          ],
+          "pvalue": 1.1823249709052676e-237,
+          "dz": 1.3978754502810173,
+          "mean_diff_oriented": 0.613500000834465,
+          "ci_diff_oriented": [
+            0.5862654216126336,
+            0.6407345800562964
+          ]
+        },
+        "duration": {
+          "value": 47.79801324503311,
+          "mean": 47.79801324503311,
+          "ci": [
+            46.53470147749344,
+            49.06132501257278
+          ],
+          "pvalue": 1.8443160244851406e-39,
+          "dz": 0.8668491336133602,
+          "mean_diff_oriented": 8.890365448504983,
+          "ci_diff_oriented": [
+            7.727052568585174,
+            10.053678328424793
+          ]
+        },
+        "fragmentation": {
+          "value": 0.01410905833914876,
+          "mean": 0.01410905833914876,
+          "ci": [
+            0.011150541795899527,
+            0.017067574882397994
+          ],
+          "pvalue": 4.1913672174025175e-132,
+          "dz": 1.4529723568685415,
+          "mean_diff_oriented": 0.22266385428886862,
+          "ci_diff_oriented": [
+            0.21315415135726434,
+            0.2321735572204729
+          ]
+        },
+        "success_n": 302
+      }
+    }
+  }
+}

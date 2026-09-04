@@ -69,6 +69,10 @@ from .evaluate_policy import (
 from .run_curriculum import CurriculumSection
 # NLR house palette (auto-applied to matplotlib on import).
 from .nlr_style import NLR_PRIMARY, NLR_ACCENT
+# Shared data drop: this analysis' numbers are also written to
+# eval_results/analysis_data/, so the presentation figures can be (re)built from
+# them without re-running any rollouts. See analysis_data.py.
+from .analysis_data import save_analysis, policy_record, scenario_record
 
 # =====================================================================
 #  >>>  TEST CONFIG  (how many runs, seeding, significance)  <<<
@@ -161,6 +165,10 @@ DPI = 200
 # Shared figure size (inches) so the two sensitivity plots come out identically
 # sized when placed side by side in the paper.
 FIG_SIZE = (8.0, 5.4)
+
+# Name of this analysis' data dump (eval_results/analysis_data/<name>.json), the
+# input of the presentation figures.                        [CLI: --data_name]
+DATA_NAME = "3.3.4_emergent_team_behaviour"
 
 # =====================================================================
 
@@ -592,6 +600,52 @@ def plot_duration_sensitivity(scenarios, main, base, results, ci_level, out_png)
 #  Config banner
 # =====================================================================
 
+def export_data(scenarios, main, base, results, samples, args, data_name: str) -> None:
+    """Write everything this analysis computed to eval_results/analysis_data/.
+
+    One entry per (KPI, composition): both policies' mean and CI, the paired
+    p-value, d_z and the effective n, plus the composition's jammer count (the
+    x-axis of the sensitivity plots downstream) and the KPI units/directions."""
+    joint_n = {}
+    if base is not None:
+        for scn in scenarios:
+            if scn.name in samples:
+                joint_n[scn.name] = int(_joint_success_mask(scn, main, base, samples).sum())
+
+    payload = {
+        "kind": "team_composition_sensitivity",
+        "labels": {"main": main.name, "base": (base.name if base else None),
+                   "main_display": _disp(main.name),
+                   "base_display": (_disp(base.name) if base else None)},
+        "kpi_order": list(TABLE_KPIS),
+        "kpis": {k: {"label": _KPI_BY_KEY[k].label,
+                     "unit": _KPI_BY_KEY[k].unit,
+                     "direction": _KPI_BY_KEY[k].direction,
+                     "fmt": _KPI_BY_KEY[k].fmt,
+                     "success_conditioned": k in SUCCESS_CONDITIONED_KPIS}
+                 for k in TABLE_KPIS},
+        "scenario_order": [s.name for s in scenarios],
+        "scenarios": {s.name: {**scenario_record(s),
+                               "jammer_count": float(_jammer_count(s))}
+                      for s in scenarios},
+        # results[kpi][composition] = {mean_main, ci_main, mean_base, ci_base,
+        #                              mean_diff_oriented, ci_diff_oriented,
+        #                              pvalue, dz, n, ...}
+        "results": results,
+        "joint_success_n": joint_n,
+        "test": "paired t",
+    }
+    meta = {
+        "n_episodes": int(args.n_episodes),
+        "chunk": int(args.chunk),
+        "base_seed": int(args.seed),
+        "alpha": float(args.alpha),
+        "ci_level": float(args.ci),
+        "policies": {"main": policy_record(main), "base": policy_record(base)},
+    }
+    save_analysis(data_name, payload, meta=meta, source=Path(__file__).name)
+
+
 def _print_config(main, comparison, scenarios, n_episodes, base_seed, alpha,
                   ci_level) -> None:
     print("─" * 78)
@@ -644,6 +698,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--rates_out", type=str, default=RATES_PLOT_OUT)
     p.add_argument("--duration_out", type=str, default=DURATION_PLOT_OUT)
     p.add_argument("--no_plots", action="store_true", help="Skip the sensitivity plots.")
+    p.add_argument("--data_name", type=str, default=DATA_NAME,
+                   help="Name of the analysis-data dump written to "
+                        "eval_results/analysis_data/<name>.json (the input of the "
+                        "presentation figures).")
+    p.add_argument("--no_data", action="store_true",
+                   help="Skip writing the analysis-data dump.")
     return p
 
 
@@ -682,6 +742,11 @@ def main() -> None:
         for scn in EVAL_SCENARIOS:
             n_ok = int(_joint_success_mask(scn, MAIN_POLICY, base, samples).sum())
             print(f"         {scn.name}: {n_ok}/{args.n_episodes} pairs")
+
+    # ── data dump (rebuild any figure from this, without new rollouts) ──
+    if not args.no_data:
+        export_data(EVAL_SCENARIOS, MAIN_POLICY, base, results, samples, args,
+                    args.data_name)
 
     print_console_tables(EVAL_SCENARIOS, MAIN_POLICY, base, results, args.ci, args.alpha)
 

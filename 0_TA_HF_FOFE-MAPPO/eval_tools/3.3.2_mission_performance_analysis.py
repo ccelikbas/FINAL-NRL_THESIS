@@ -109,6 +109,10 @@ from .evaluate_policy import (
 from .run_curriculum import CurriculumSection
 # NLR house palette (auto-applied to matplotlib on import).
 from .nlr_style import NLR_PRIMARY, NLR_ACCENT, NLR_SECONDARY, NLR_GRAY, NLR_DARKGRAY
+# Shared data drop: this analysis' numbers are also written to
+# eval_results/analysis_data/, so the presentation figures can be (re)built from
+# them without re-running any rollouts. See analysis_data.py.
+from .analysis_data import save_analysis, policy_record, scenario_record
 
 # =====================================================================
 #  >>>  TEST CONFIG  (how many runs, seeding, significance)  <<<
@@ -146,6 +150,11 @@ CI_LEVEL = 0.95
 # Generic column headers, shared by every scenario row.
 MAIN_LABEL = "Complete"
 BASE_LABEL = "Baseline"
+
+# Presentation-facing names of the same two roles (used by the compact figure and
+# stored in the data dump, so downstream charts label the series identically).
+MAIN_DISPLAY = "Comm-FOFE-MAPPO"
+BASE_DISPLAY = "MAPPO Baseline"
 
 
 @dataclass
@@ -260,6 +269,10 @@ OUT_PATH = "eval_results/mission_performance.tex"
 DASHBOARD_OUT = "eval_results/mission_performance_ci.png"
 COMPACT_TOP_OUT = "eval_results/mission_performance_ci_top.png"
 DPI = 500
+
+# Name of this analysis' data dump (eval_results/analysis_data/<name>.json), the
+# input of the presentation figures.                        [CLI: --data_name]
+DATA_NAME = "3.3.2_mission_performance"
 
 # =====================================================================
 
@@ -837,6 +850,60 @@ def plot_top_compact(scenarios, scen_main, scen_base, results, ci_level, alpha,
 
 
 # =====================================================================
+#  Data dump (input of the presentation figures)
+# =====================================================================
+
+def export_data(scenarios, scen_main, scen_base, results, samples, args,
+                data_name: str) -> None:
+    """Write everything this analysis computed to eval_results/analysis_data/.
+
+    One entry per (KPI, scenario): both policies' mean and CI (the bar heights
+    and the error bars downstream), the paired p-value, d_z and the effective n,
+    plus enough context (KPI units/directions, scenario definitions, which test,
+    which KPIs are success-conditioned) that a figure script never has to import
+    this module or re-derive anything."""
+    joint_n = {}
+    for scn in scenarios:
+        m, b = scen_main.get(scn.name), scen_base.get(scn.name)
+        if m is not None and b is not None and scn.name in samples:
+            joint_n[scn.name] = int(_joint_success_mask(scn, m, b, samples).sum())
+
+    payload = {
+        "kind": "mission_performance",
+        "labels": {"main": MAIN_LABEL, "base": BASE_LABEL,
+                   "main_display": MAIN_DISPLAY, "base_display": BASE_DISPLAY},
+        "kpi_order": list(TABLE_KPIS),
+        "kpis": {k: {"label": _KPI_BY_KEY[k].label,
+                     "row_label": ROW_LABELS.get(k, _KPI_BY_KEY[k].label),
+                     "unit": _KPI_BY_KEY[k].unit,
+                     "direction": _KPI_BY_KEY[k].direction,
+                     "fmt": _KPI_BY_KEY[k].fmt,
+                     "test": _test_for(k),
+                     "success_conditioned": k in SUCCESS_CONDITIONED_KPIS}
+                 for k in TABLE_KPIS},
+        "scenario_order": [s.name for s in scenarios],
+        "scenarios": {s.name: scenario_record(s) for s in scenarios},
+        # results[kpi][scenario] = {mean_main, ci_main, mean_base, ci_base,
+        #                           mean_diff_oriented, ci_diff_oriented,
+        #                           pvalue, dz, n, test, ...}
+        "results": results,
+        "joint_success_n": joint_n,
+    }
+    meta = {
+        "n_episodes": int(args.n_episodes),
+        "chunk": int(args.chunk),
+        "base_seed": int(args.seed),
+        "seed_stride": int(SEED_STRIDE),
+        "alpha": float(args.alpha),
+        "ci_level": float(args.ci),
+        "policies": {s.name: {"main": policy_record(scen_main.get(s.name)),
+                              "base": policy_record(scen_base.get(s.name))}
+                     for s in scenarios},
+    }
+    save_analysis(data_name, payload, meta=meta, source=Path(__file__).name)
+
+
+# =====================================================================
 #  Config banner
 # =====================================================================
 
@@ -915,6 +982,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no_dashboard", action="store_true", help="Skip the CI dashboard.")
     p.add_argument("--no_compact_top", action="store_true",
                    help="Skip the compact top-row-only CI figure.")
+    p.add_argument("--data_name", type=str, default=DATA_NAME,
+                   help="Name of the analysis-data dump written to "
+                        "eval_results/analysis_data/<name>.json (the input of the "
+                        "presentation figures).")
+    p.add_argument("--no_data", action="store_true",
+                   help="Skip writing the analysis-data dump.")
     return p
 
 
@@ -991,6 +1064,11 @@ def main() -> None:
                                            scen_base[scn.name], samples).sum())
             print(f"         {scn.name}: {n_ok}/{args.n_episodes} pairs")
 
+    # ── data dump (rebuild any figure from this, without new rollouts) ──
+    if not args.no_data:
+        export_data(EVAL_SCENARIOS, scen_main, scen_base, results, samples, args,
+                    args.data_name)
+
     # ── console table ──
     print_console_tables(EVAL_SCENARIOS, scen_main, scen_base, results,
                          args.ci, args.alpha, MAIN_LABEL, BASE_LABEL)
@@ -1013,7 +1091,7 @@ def main() -> None:
     if not args.no_compact_top:
         plot_top_compact(EVAL_SCENARIOS, scen_main, scen_base, results, args.ci,
                          args.alpha, _resolve_out(args.compact_top_out),
-                         "Comm-FOFE-MAPPO", "MAPPO Baseline")
+                         MAIN_DISPLAY, BASE_DISPLAY)
 
 
 if __name__ == "__main__":
